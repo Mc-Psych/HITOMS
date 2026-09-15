@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Network,
   Plus,
@@ -11,21 +11,35 @@ import {
   AlertTriangle,
   CheckCircle2,
   X,
-  ExternalLink,
   Edit2,
   Trash2,
   RefreshCw,
   Terminal,
   Cpu,
-  Sliders,
+  ArrowUp,
+  ArrowDown,
+  ArrowRight,
+  Link2,
+  Unlink2,
+  GitBranch,
+  Cable,
+  Zap,
+  Check,
+  Search,
+  Filter,
+  Info,
+  Copy,
+  Move,
+  Sparkles,
 } from 'lucide-react';
 import {
   type NetworkDevice,
   type NetworkIncident,
+  type NetworkConnectionType,
   type User as UserType,
 } from '../types';
 import { networkService } from '../services/networkService';
-import { authService } from '../services/authService';
+import { NetworkCanvas } from './NetworkCanvas';
 
 interface NetworkViewProps {
   devices: NetworkDevice[];
@@ -33,14 +47,32 @@ interface NetworkViewProps {
   onRefresh: () => void;
 }
 
+const CONNECTION_TYPES: { label: string; value: NetworkConnectionType; color: string; bg: string }[] = [
+  { label: 'Fiber OM3/OM4', value: 'Fiber', color: 'text-cyan-400', bg: 'bg-cyan-950/60 border-cyan-800' },
+  { label: 'Ethernet Cat6', value: 'Ethernet Cat6', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-800' },
+  { label: '10G SFP+ Trunk', value: 'SFP+ 10G', color: 'text-indigo-400', bg: 'bg-indigo-950/60 border-indigo-800' },
+  { label: 'Wireless 5GHz/6GHz', value: 'Wireless 5GHz/6GHz', color: 'text-purple-400', bg: 'bg-purple-950/60 border-purple-800' },
+  { label: 'Satellite RF Uplink', value: 'Satellite RF', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-800' },
+];
+
 export const NetworkView: React.FC<NetworkViewProps> = ({
   devices,
   currentUser,
   onRefresh,
 }) => {
   const [activeTab, setActiveTab] = useState<'TOPOLOGY' | 'DEVICES' | 'INCIDENTS'>('TOPOLOGY');
+  const [topologySubView, setTopologySubView] = useState<'CANVAS' | 'MAP' | 'MATRIX' | 'CONNECT_TOOL'>('CANVAS');
   const [incidents, setIncidents] = useState<NetworkIncident[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<NetworkDevice | null>(null);
+  const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Quick Connect Tool states
+  const [connectPredecessorId, setConnectPredecessorId] = useState('');
+  const [connectSuccessorId, setConnectSuccessorId] = useState('');
+  const [connectCableType, setConnectCableType] = useState<NetworkConnectionType>('Ethernet Cat6');
+  const [connectSpeed, setConnectSpeed] = useState('1 Gbps');
+  const [connectMessage, setConnectMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Add device modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -50,6 +82,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   const [location, setLocation] = useState('Server Room Rack 1');
   const [macAddress, setMacAddress] = useState('');
   const [portsCount, setPortsCount] = useState(24);
+  const [predecessorId, setPredecessorId] = useState<string>('');
+  const [selectedSuccessors, setSelectedSuccessors] = useState<string[]>([]);
+  const [connectionType, setConnectionType] = useState<NetworkConnectionType>('Ethernet Cat6');
+  const [portSpeed, setPortSpeed] = useState('1 Gbps');
 
   // Edit device modal state
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -62,6 +98,19 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   const [editPorts, setEditPorts] = useState(24);
   const [editStatus, setEditStatus] = useState<'Online' | 'Offline' | 'Warning'>('Online');
   const [editFirmware, setEditFirmware] = useState('v4.2.1-LTS');
+  const [editPredecessorId, setEditPredecessorId] = useState<string>('');
+  const [editSuccessors, setEditSuccessors] = useState<string[]>([]);
+  const [editConnectionType, setEditConnectionType] = useState<NetworkConnectionType>('Ethernet Cat6');
+  const [editPortSpeed, setEditPortSpeed] = useState('1 Gbps');
+
+  // Clone device modal state
+  const [cloneModalOpen, setCloneModalOpen] = useState(false);
+  const [cloningSource, setCloningSource] = useState<NetworkDevice | null>(null);
+  const [cloneName, setCloneName] = useState('');
+  const [cloneIp, setCloneIp] = useState('');
+  const [cloneLocation, setCloneLocation] = useState('');
+  const [clonePredecessorId, setClonePredecessorId] = useState('');
+  const [cloneConnectionType, setCloneConnectionType] = useState<NetworkConnectionType>('Ethernet Cat6');
 
   // Delete device confirmation state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -72,6 +121,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
 
   const canManageNetwork = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
 
+  // Map of device by ID for instant O(1) lookups
+  const deviceMap = useMemo(() => {
+    const map = new Map<string, NetworkDevice>();
+    devices.forEach((d) => map.set(d.id, d));
+    return map;
+  }, [devices]);
+
   React.useEffect(() => {
     const loadIncidents = async () => {
       const data = await networkService.getNetworkIncidents();
@@ -79,6 +135,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     };
     loadIncidents();
   }, [activeTab]);
+
+  // Keep selectedDevice in sync when devices update
+  React.useEffect(() => {
+    if (selectedDevice) {
+      const updated = devices.find((d) => d.id === selectedDevice.id);
+      if (updated) setSelectedDevice(updated);
+    }
+  }, [devices]);
 
   const handlePing = async (device: NetworkDevice) => {
     setPingingId(device.id);
@@ -103,7 +167,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
           deviceName: deviceName.trim(),
           deviceType,
           manufacturer: 'Cisco / Ubiquiti Edge',
-          model: 'Enterprise Switch / AP',
+          model: 'Enterprise Hardware Node',
           serialNumber: 'SN-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
           department: 'IT Infrastructure',
           ipAddress: ipAddress.trim(),
@@ -115,17 +179,32 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
           installationDate: new Date().toISOString().split('T')[0],
           lastMaintenance: new Date().toISOString().split('T')[0],
           status: 'Online',
+          predecessorId: predecessorId || undefined,
+          successorIds: selectedSuccessors,
+          connectionType,
+          portSpeed,
         },
         currentUser
       );
 
       setAddModalOpen(false);
-      setDeviceName('');
-      setIpAddress('192.168.1.');
+      resetAddForm();
       onRefresh();
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const resetAddForm = () => {
+    setDeviceName('');
+    setIpAddress('192.168.1.');
+    setLocation('Server Room Rack 1');
+    setMacAddress('');
+    setPortsCount(24);
+    setPredecessorId('');
+    setSelectedSuccessors([]);
+    setConnectionType('Ethernet Cat6');
+    setPortSpeed('1 Gbps');
   };
 
   const openEditModal = (device: NetworkDevice) => {
@@ -138,6 +217,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     setEditPorts(device.portsCount || 24);
     setEditStatus(device.status);
     setEditFirmware(device.firmware || 'v4.2.1-LTS');
+    setEditPredecessorId(device.predecessorId || device.uplinkDeviceId || '');
+    setEditSuccessors(device.successorIds || []);
+    setEditConnectionType(device.connectionType || 'Ethernet Cat6');
+    setEditPortSpeed(device.portSpeed || '1 Gbps');
     setEditModalOpen(true);
   };
 
@@ -157,6 +240,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
           portsCount: editPorts,
           status: editStatus,
           firmware: editFirmware.trim(),
+          predecessorId: editPredecessorId || undefined,
+          successorIds: editSuccessors,
+          connectionType: editConnectionType,
+          portSpeed: editPortSpeed,
         },
         currentUser
       );
@@ -166,6 +253,91 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
       if (selectedDevice?.id === updated.id) {
         setSelectedDevice(updated);
       }
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const openCloneModal = (device: NetworkDevice) => {
+    setCloningSource(device);
+    setCloneName(`${device.deviceName} (Copy)`);
+
+    // Propose an incremented IP
+    let nextIp = '192.168.1.120';
+    if (device.ipAddress) {
+      const parts = device.ipAddress.split('.');
+      if (parts.length === 4) {
+        const last = parseInt(parts[3], 10);
+        if (!isNaN(last)) {
+          parts[3] = String((last + Math.floor(Math.random() * 10) + 1) % 254 || 125);
+          nextIp = parts.join('.');
+        }
+      }
+    }
+    setCloneIp(nextIp);
+    setCloneLocation(device.location);
+    setClonePredecessorId(device.predecessorId || device.uplinkDeviceId || '');
+    setCloneConnectionType(device.connectionType || 'Ethernet Cat6');
+    setCloneModalOpen(true);
+  };
+
+  const handleConfirmClone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cloningSource || !currentUser) return;
+
+    try {
+      const cloned = await networkService.cloneDevice(cloningSource.id, currentUser, {
+        deviceName: cloneName.trim(),
+        ipAddress: cloneIp.trim(),
+        location: cloneLocation.trim(),
+        predecessorId: clonePredecessorId || undefined,
+        uplinkDeviceId: clonePredecessorId || undefined,
+        connectionType: cloneConnectionType,
+      });
+
+      setCloneModalOpen(false);
+      setCloningSource(null);
+      onRefresh();
+      setSelectedDevice(cloned);
+    } catch (err: any) {
+      console.error('Clone failed:', err);
+    }
+  };
+
+  const handleQuickConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!connectPredecessorId || !connectSuccessorId || !currentUser) return;
+    if (connectPredecessorId === connectSuccessorId) {
+      setConnectMessage({ text: 'A device cannot be connected to itself.', type: 'error' });
+      return;
+    }
+
+    try {
+      await networkService.connectNodes(
+        connectPredecessorId,
+        connectSuccessorId,
+        currentUser,
+        connectCableType,
+        connectSpeed
+      );
+      setConnectMessage({
+        text: `Successfully linked ${deviceMap.get(connectPredecessorId)?.deviceName} → ${deviceMap.get(connectSuccessorId)?.deviceName}`,
+        type: 'success',
+      });
+      setConnectPredecessorId('');
+      setConnectSuccessorId('');
+      onRefresh();
+      setTimeout(() => setConnectMessage(null), 4000);
+    } catch (err: any) {
+      setConnectMessage({ text: err.message || 'Failed to connect devices', type: 'error' });
+    }
+  };
+
+  const handleDisconnect = async (parentDeviceId: string, childDeviceId: string) => {
+    if (!currentUser) return;
+    try {
+      await networkService.disconnectNodes(parentDeviceId, childDeviceId, currentUser);
       onRefresh();
     } catch (err) {
       console.error(err);
@@ -186,12 +358,72 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     }
   };
 
-  // Organize topology nodes
-  const routers = devices.filter((d) => d.deviceType === 'Router');
-  const firewalls = devices.filter((d) => d.deviceType === 'Firewall');
-  const switches = devices.filter((d) => d.deviceType === 'Switch');
-  const aps = devices.filter((d) => d.deviceType === 'Access Point');
-  const servers = devices.filter((d) => d.deviceType === 'Server');
+  // Helper to get device icon
+  const getDeviceIcon = (type: NetworkDevice['deviceType'], className = 'w-5 h-5') => {
+    switch (type) {
+      case 'Starlink Terminal':
+        return <Radio className={className} />;
+      case 'Router':
+        return <Network className={className} />;
+      case 'Core Switch':
+      case 'Distribution Switch':
+      case 'Switch':
+        return <Layers className={className} />;
+      case 'Server':
+        return <Server className={className} />;
+      case 'Access Point':
+        return <Wifi className={className} />;
+      case 'Firewall':
+        return <Shield className={className} />;
+      default:
+        return <Cpu className={className} />;
+    }
+  };
+
+  // Layer Categorization for Structured Hierarchical View
+  const layer1Gateways = useMemo(() => {
+    return devices.filter((d) => !d.predecessorId && !d.uplinkDeviceId || d.deviceType === 'Starlink Terminal');
+  }, [devices]);
+
+  const layer2Routers = useMemo(() => {
+    return devices.filter((d) => d.deviceType === 'Router' || (d.predecessorId && layer1Gateways.some(p => p.id === d.predecessorId) && d.deviceType !== 'Starlink Terminal'));
+  }, [devices, layer1Gateways]);
+
+  const layer3Switches = useMemo(() => {
+    return devices.filter((d) => ['Core Switch', 'Distribution Switch', 'Switch', 'Firewall'].includes(d.deviceType));
+  }, [devices]);
+
+  const layer4Endpoints = useMemo(() => {
+    return devices.filter((d) => ['Access Point', 'Server', 'Workstation'].includes(d.deviceType));
+  }, [devices]);
+
+  // Highlight check helper
+  const isHighlighted = (deviceId: string) => {
+    if (!hoveredDeviceId && !selectedDevice) return false;
+    const targetId = hoveredDeviceId || selectedDevice?.id;
+    if (!targetId) return false;
+    if (deviceId === targetId) return true;
+    const target = deviceMap.get(targetId);
+    if (!target) return false;
+    // Check if target's predecessor
+    if (target.predecessorId === deviceId || target.uplinkDeviceId === deviceId) return true;
+    // Check if target's successor
+    if (target.successorIds?.includes(deviceId)) return true;
+    return false;
+  };
+
+  // Filtered devices for table/matrix view
+  const filteredDevices = useMemo(() => {
+    if (!searchQuery.trim()) return devices;
+    const q = searchQuery.toLowerCase();
+    return devices.filter(
+      (d) =>
+        d.deviceName.toLowerCase().includes(q) ||
+        d.ipAddress.toLowerCase().includes(q) ||
+        d.location.toLowerCase().includes(q) ||
+        d.deviceType.toLowerCase().includes(q)
+    );
+  }, [devices, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -200,10 +432,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
             <Network className="w-5 h-5 text-sky-600" />
-            <span>Hospital Network Topology & Infrastructure</span>
+            <span>Hospital Network Topology & Connections</span>
           </h1>
           <p className="text-xs text-slate-500">
-            Real-time topology diagram, core switches, VLAN segmentation, and hardware node administration.
+            End-to-end device interconnectivity map, predecessor/successor routing paths, VLAN backbones, and hardware administration.
           </p>
         </div>
 
@@ -214,17 +446,17 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
                 activeTab === 'TOPOLOGY'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-700'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
-              Interactive Topology
+              Connected Topology
             </button>
             <button
               onClick={() => setActiveTab('DEVICES')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
                 activeTab === 'DEVICES'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-700'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               All Devices ({devices.length})
@@ -234,16 +466,19 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
                 activeTab === 'INCIDENTS'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-700'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
-              Network Incidents
+              Outage Logs
             </button>
           </div>
 
           {canManageNetwork && (
             <button
-              onClick={() => setAddModalOpen(true)}
+              onClick={() => {
+                resetAddForm();
+                setAddModalOpen(true);
+              }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -255,228 +490,773 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
 
       {/* TOPOLOGY TAB */}
       {activeTab === 'TOPOLOGY' && (
-        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-white shadow-xl space-y-8">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-800 pb-4 gap-2">
-            <div>
-              <h2 className="text-sm font-bold tracking-wider uppercase text-slate-300">
-                Hospital Network Hierarchy & Interconnect Map
-              </h2>
-              <p className="text-xs text-slate-400">
-                Hierarchical tree routing traffic through core security and distribution switches to clinical wards
-              </p>
-            </div>
-            <div className="flex items-center gap-3 text-xs font-mono">
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> LAN 1 Gbps Backbone
-              </span>
+        <div className="space-y-4">
+          {/* Sub-navigation bar inside Topology */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-2xl shadow-2xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => setTopologySubView('CANVAS')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  topologySubView === 'CANVAS'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Move className="w-3.5 h-3.5" />
+                <span>Interactive Draggable Canvas</span>
+              </button>
+              <button
+                onClick={() => setTopologySubView('MAP')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  topologySubView === 'MAP'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                <span>Tiered Overview Map</span>
+              </button>
+              <button
+                onClick={() => setTopologySubView('MATRIX')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  topologySubView === 'MATRIX'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Cable className="w-3.5 h-3.5" />
+                <span>Predecessor / Successor Matrix</span>
+              </button>
               {canManageNetwork && (
-                <span className="text-[11px] bg-rose-950 text-rose-300 border border-rose-800 px-2 py-0.5 rounded-md font-sans font-semibold">
-                  Admin Edit/Delete Enabled
-                </span>
+                <button
+                  onClick={() => setTopologySubView('CONNECT_TOOL')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    topologySubView === 'CONNECT_TOOL'
+                      ? 'bg-sky-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Quick Cable Patcher</span>
+                </button>
               )}
+            </div>
+
+            {/* Topology stats summary badges */}
+            <div className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1 text-slate-500">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <strong>{devices.filter((d) => d.status === 'Online').length}</strong> / {devices.length} Online
+              </span>
+              <span className="hidden md:flex items-center gap-1 text-slate-500 font-mono text-[11px]">
+                Backbone: 10G SFP+ / 1G LACP
+              </span>
             </div>
           </div>
 
-          {/* Level 1: Internet & Gateway */}
-          <div className="flex flex-col items-center">
-            <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-2">
-              Layer 1: External Uplink & Core Gateway
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-4">
-              <div className="bg-slate-900 border border-slate-700 p-3.5 rounded-xl flex items-center gap-3 w-64 shadow-md">
-                <Radio className="w-6 h-6 text-sky-400" />
-                <div className="flex-1">
-                  <div className="text-xs font-bold text-white">Starlink Terminal</div>
-                  <div className="text-[10px] font-mono text-emerald-400">102.164.21.1 (WAN Uplink)</div>
-                  <div className="text-[10px] text-slate-400">Auto Failover to Local Node</div>
+          {/* SUBVIEW 0: INTERACTIVE DRAGGABLE 2D CABLE CANVAS */}
+          {topologySubView === 'CANVAS' && (
+            <NetworkCanvas
+              devices={devices}
+              currentUser={currentUser}
+              onSelectDevice={(device) => setSelectedDevice(device)}
+              onEditDevice={(device) => openEditModal(device)}
+              onCloneDevice={(device) => openCloneModal(device)}
+              onDeleteDevice={(device) => setDeleteConfirmId(device.id)}
+              onRefresh={onRefresh}
+            />
+          )}
+
+          {/* SUBVIEW 1: INTERCONNECT VISUAL MAP */}
+          {topologySubView === 'MAP' && (
+            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-white shadow-xl space-y-8 relative overflow-hidden">
+              {/* Grid Background Pattern */}
+              <div
+                className="absolute inset-0 opacity-[0.03] pointer-events-none"
+                style={{
+                  backgroundImage: `radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)`,
+                  backgroundSize: '24px 24px',
+                }}
+              />
+
+              {/* Topology Top Legend */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-800 pb-4 gap-3 relative z-10">
+                <div>
+                  <h2 className="text-sm font-bold tracking-wider uppercase text-slate-300 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-sky-400" />
+                    <span>Active Predecessor-to-Successor Network Topology</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Click any node to inspect upstream feeds (Predecessor) and downstream connected branches (Successors).
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <span className="flex items-center gap-1 text-cyan-400 bg-cyan-950/80 border border-cyan-800 px-2 py-0.5 rounded-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" /> Fiber / 10G SFP+
+                  </span>
+                  <span className="flex items-center gap-1 text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Cat6 Gigabit
+                  </span>
+                  <span className="flex items-center gap-1 text-amber-400 bg-amber-950/80 border border-amber-800 px-2 py-0.5 rounded-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Satellite WAN
+                  </span>
                 </div>
               </div>
 
-              {routers.map((r) => (
-                <div
-                  key={r.id}
-                  onClick={() => setSelectedDevice(r)}
-                  className="group relative bg-slate-900 border border-sky-800 p-3.5 rounded-xl flex items-center gap-3 w-64 shadow-md cursor-pointer hover:border-sky-500 transition"
-                >
-                  <Network className="w-6 h-6 text-sky-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{r.deviceName}</div>
-                    <div className="text-[10px] font-mono text-sky-300">{r.ipAddress}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{r.location}</div>
+              {/* HIERARCHICAL CONNECTED GRAPH TIERS */}
+              <div className="space-y-8 relative z-10">
+                {/* TIER 1: WAN & SATELLITE GATEWAYS */}
+                <div className="flex flex-col items-center">
+                  <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Tier 1: External Satellite WAN & Primary Gateways</span>
                   </div>
 
-                  {canManageNetwork && (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                      <button
-                        title="Edit Device"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(r);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        title="Delete Device"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmId(r.id);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                  <div className="flex flex-wrap items-center justify-center gap-4">
+                    {layer1Gateways.map((dev) => {
+                      const isSel = selectedDevice?.id === dev.id;
+                      const isHov = hoveredDeviceId === dev.id;
+                      const hasSuccessors = (dev.successorIds?.length || 0) > 0;
 
-            {/* Vertical connector line */}
-            <div className="w-0.5 h-6 bg-slate-700 my-1" />
-          </div>
+                      return (
+                        <div
+                          key={dev.id}
+                          onClick={() => setSelectedDevice(dev)}
+                          onMouseEnter={() => setHoveredDeviceId(dev.id)}
+                          onMouseLeave={() => setHoveredDeviceId(null)}
+                          className={`group relative p-4 rounded-xl flex items-center gap-3 w-72 shadow-lg cursor-pointer transition-all duration-200 ${
+                            isSel
+                              ? 'bg-slate-900 border-2 border-sky-400 ring-4 ring-sky-950'
+                              : isHov
+                              ? 'bg-slate-900 border border-sky-400 scale-[1.02]'
+                              : 'bg-slate-900/90 border border-slate-700 hover:border-slate-500'
+                          }`}
+                        >
+                          <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                            {getDeviceIcon(dev.deviceType, 'w-6 h-6')}
+                          </div>
 
-          {/* Level 2: Core Distribution Switches */}
-          <div className="flex flex-col items-center">
-            <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-2">
-              Layer 2: Core & Distribution Switching
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-4">
-              {switches.map((sw) => (
-                <div
-                  key={sw.id}
-                  onClick={() => setSelectedDevice(sw)}
-                  className="group relative bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center gap-3 w-64 shadow-md cursor-pointer hover:border-emerald-500 transition"
-                >
-                  <Layers className="w-6 h-6 text-emerald-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{sw.deviceName}</div>
-                    <div className="text-[10px] font-mono text-emerald-300">{sw.ipAddress}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{sw.location}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{dev.deviceName}</div>
+                            <div className="text-[10px] font-mono text-amber-400 font-semibold">{dev.ipAddress}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{dev.location}</div>
+                            {dev.portSpeed && (
+                              <div className="text-[9px] text-slate-500 font-mono truncate mt-0.5">
+                                {dev.portSpeed}
+                              </div>
+                            )}
+                          </div>
+
+                          {hasSuccessors && (
+                            <div className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-[10px] font-mono text-emerald-300" title={`${dev.successorIds?.length} downstream connected devices`}>
+                              <ArrowDown className="w-3 h-3" />
+                              <span>{dev.successorIds?.length}</span>
+                            </div>
+                          )}
+
+                          {canManageNetwork && (
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-2 -right-2 flex items-center gap-1 transition bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-md">
+                              <button
+                                title="Edit Device"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(dev);
+                                }}
+                                className="p-1 rounded hover:bg-sky-600 text-slate-300 hover:text-white"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                title="Delete Device"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmId(dev.id);
+                                }}
+                                className="p-1 rounded hover:bg-rose-600 text-slate-300 hover:text-white"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  {canManageNetwork && (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                      <button
-                        title="Edit Switch"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(sw);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        title="Delete Switch"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmId(sw.id);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                  {/* Connecting Line to Tier 2 */}
+                  <div className="flex flex-col items-center my-2">
+                    <div className="w-0.5 h-6 bg-gradient-to-b from-amber-500 to-sky-500 animate-pulse" />
+                    <div className="text-[9px] font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      WAN Routing Link
                     </div>
-                  )}
+                    <div className="w-0.5 h-4 bg-sky-500" />
+                  </div>
                 </div>
-              ))}
-            </div>
 
-            {/* Vertical connector line */}
-            <div className="w-0.5 h-6 bg-slate-700 my-1" />
-          </div>
-
-          {/* Level 3: Access Points & Department Local Workstations */}
-          <div className="flex flex-col items-center">
-            <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-2">
-              Layer 3: Clinical Edge, Wi-Fi & Local Server Nodes
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
-              {/* Local Server Node */}
-              {servers.map((srv) => (
-                <div
-                  key={srv.id}
-                  onClick={() => setSelectedDevice(srv)}
-                  className="group relative bg-sky-950/40 border border-sky-700 p-3 rounded-xl flex items-center gap-3 cursor-pointer hover:border-sky-400 transition"
-                >
-                  <Server className="w-5 h-5 text-sky-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{srv.deviceName}</div>
-                    <div className="text-[10px] font-mono text-sky-300">{srv.ipAddress}</div>
-                    <div className="text-[10px] text-slate-400 truncate">HITOMS Local Server</div>
+                {/* TIER 2: CORE EDGE ROUTERS */}
+                <div className="flex flex-col items-center">
+                  <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                    <Network className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Tier 2: Core Edge Routers & Gateway Routing</span>
                   </div>
 
-                  {canManageNetwork && (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                      <button
-                        title="Edit Server"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(srv);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        title="Delete Server"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmId(srv.id);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                  <div className="flex flex-wrap items-center justify-center gap-4">
+                    {layer2Routers.map((dev) => {
+                      const isSel = selectedDevice?.id === dev.id;
+                      const isHov = hoveredDeviceId === dev.id;
+                      const pred = dev.predecessorId ? deviceMap.get(dev.predecessorId) : null;
 
-              {/* Wi-Fi APs */}
-              {aps.map((ap) => (
-                <div
-                  key={ap.id}
-                  onClick={() => setSelectedDevice(ap)}
-                  className="group relative bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-center gap-3 cursor-pointer hover:border-sky-500 transition"
-                >
-                  <Wifi className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{ap.deviceName}</div>
-                    <div className="text-[10px] font-mono text-slate-300">{ap.ipAddress}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{ap.location}</div>
+                      return (
+                        <div
+                          key={dev.id}
+                          onClick={() => setSelectedDevice(dev)}
+                          onMouseEnter={() => setHoveredDeviceId(dev.id)}
+                          onMouseLeave={() => setHoveredDeviceId(null)}
+                          className={`group relative p-4 rounded-xl flex items-center gap-3 w-72 shadow-lg cursor-pointer transition-all duration-200 ${
+                            isSel
+                              ? 'bg-slate-900 border-2 border-sky-400 ring-4 ring-sky-950'
+                              : isHov
+                              ? 'bg-slate-900 border border-sky-400 scale-[1.02]'
+                              : 'bg-slate-900/90 border border-sky-900/60 hover:border-sky-500'
+                          }`}
+                        >
+                          <div className="p-2.5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0">
+                            {getDeviceIcon(dev.deviceType, 'w-6 h-6')}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{dev.deviceName}</div>
+                            <div className="text-[10px] font-mono text-sky-300 font-semibold">{dev.ipAddress}</div>
+                            {pred && (
+                              <div className="text-[9px] text-amber-300/80 font-mono truncate flex items-center gap-1 mt-0.5">
+                                <ArrowUp className="w-2.5 h-2.5 text-amber-400" />
+                                <span>Feed: {pred.deviceName}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {dev.successorIds && dev.successorIds.length > 0 && (
+                            <div className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-[10px] font-mono text-emerald-300" title={`${dev.successorIds.length} downstream devices`}>
+                              <ArrowDown className="w-3 h-3" />
+                              <span>{dev.successorIds.length}</span>
+                            </div>
+                          )}
+
+                          {canManageNetwork && (
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-2 -right-2 flex items-center gap-1 transition bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-md">
+                              <button
+                                title="Edit Device"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(dev);
+                                }}
+                                className="p-1 rounded hover:bg-sky-600 text-slate-300 hover:text-white"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                title="Delete Device"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmId(dev.id);
+                                }}
+                                className="p-1 rounded hover:bg-rose-600 text-slate-300 hover:text-white"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  {canManageNetwork && (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                      <button
-                        title="Edit AP"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(ap);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        title="Delete AP"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmId(ap.id);
-                        }}
-                        className="p-1 rounded bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                  {/* Connecting Line to Tier 3 */}
+                  <div className="flex flex-col items-center my-2">
+                    <div className="w-0.5 h-6 bg-gradient-to-b from-sky-500 to-indigo-500 animate-pulse" />
+                    <div className="text-[9px] font-mono text-indigo-300 bg-slate-900 px-2.5 py-0.5 rounded border border-indigo-900/60">
+                      10G SFP+ Core Trunk
                     </div>
-                  )}
+                    <div className="w-0.5 h-4 bg-indigo-500" />
+                  </div>
                 </div>
-              ))}
+
+                {/* TIER 3: CORE & DISTRIBUTION SWITCHES */}
+                <div className="flex flex-col items-center">
+                  <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Tier 3: Core & Distribution Switching Infrastructure</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-5xl">
+                    {layer3Switches.map((dev) => {
+                      const isSel = selectedDevice?.id === dev.id;
+                      const isHov = hoveredDeviceId === dev.id;
+                      const pred = dev.predecessorId ? deviceMap.get(dev.predecessorId) : null;
+                      const isHighlightedNode = isHighlighted(dev.id);
+
+                      return (
+                        <div
+                          key={dev.id}
+                          onClick={() => setSelectedDevice(dev)}
+                          onMouseEnter={() => setHoveredDeviceId(dev.id)}
+                          onMouseLeave={() => setHoveredDeviceId(null)}
+                          className={`group relative p-3.5 rounded-xl flex items-center gap-3 shadow-lg cursor-pointer transition-all duration-200 ${
+                            isSel
+                              ? 'bg-slate-900 border-2 border-indigo-400 ring-4 ring-indigo-950'
+                              : isHighlightedNode
+                              ? 'bg-slate-900 border border-indigo-400'
+                              : 'bg-slate-900/85 border border-slate-800 hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                            {getDeviceIcon(dev.deviceType, 'w-5 h-5')}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{dev.deviceName}</div>
+                            <div className="text-[10px] font-mono text-emerald-400 font-semibold">{dev.ipAddress}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{dev.location}</div>
+
+                            {/* Predecessor Tag */}
+                            {pred && (
+                              <div className="text-[9px] text-sky-400 font-mono truncate flex items-center gap-1 mt-1">
+                                <ArrowUp className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                                <span className="truncate">Predecessor: {pred.deviceName}</span>
+                              </div>
+                            )}
+
+                            {/* Successor Badges */}
+                            {dev.successorIds && dev.successorIds.length > 0 && (
+                              <div className="text-[9px] text-emerald-400 font-mono truncate flex items-center gap-1 mt-0.5">
+                                <ArrowDown className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                                <span>{dev.successorIds.length} Successor{dev.successorIds.length > 1 ? 's' : ''}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {canManageNetwork && (
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-2 -right-2 flex items-center gap-1 transition bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-md">
+                              <button
+                                title="Edit Switch"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(dev);
+                                }}
+                                className="p-1 rounded hover:bg-sky-600 text-slate-300 hover:text-white"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                title="Delete Switch"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmId(dev.id);
+                                }}
+                                className="p-1 rounded hover:bg-rose-600 text-slate-300 hover:text-white"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Connecting Line to Tier 4 */}
+                  <div className="flex flex-col items-center my-2">
+                    <div className="w-0.5 h-6 bg-gradient-to-b from-indigo-500 to-emerald-500 animate-pulse" />
+                    <div className="text-[9px] font-mono text-emerald-300 bg-slate-900 px-2.5 py-0.5 rounded border border-emerald-900/60">
+                      Ward Fiber & Gigabit PoE Drops
+                    </div>
+                    <div className="w-0.5 h-4 bg-emerald-500" />
+                  </div>
+                </div>
+
+                {/* TIER 4: CLINICAL ENDPOINTS, SERVERS & ACCESS POINTS */}
+                <div className="flex flex-col items-center">
+                  <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                    <Server className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Tier 4: Clinical Servers, Wi-Fi 6 Access Points & Wards</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 w-full">
+                    {layer4Endpoints.map((dev) => {
+                      const isSel = selectedDevice?.id === dev.id;
+                      const isHov = hoveredDeviceId === dev.id;
+                      const pred = dev.predecessorId ? deviceMap.get(dev.predecessorId) : null;
+                      const isHighlightedNode = isHighlighted(dev.id);
+
+                      return (
+                        <div
+                          key={dev.id}
+                          onClick={() => setSelectedDevice(dev)}
+                          onMouseEnter={() => setHoveredDeviceId(dev.id)}
+                          onMouseLeave={() => setHoveredDeviceId(null)}
+                          className={`group relative p-3 rounded-xl flex items-center gap-3 shadow-md cursor-pointer transition-all duration-200 ${
+                            isSel
+                              ? 'bg-slate-900 border-2 border-emerald-400 ring-4 ring-emerald-950'
+                              : isHighlightedNode
+                              ? 'bg-slate-900 border border-emerald-400'
+                              : 'bg-slate-900/80 border border-slate-800 hover:border-slate-600'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg shrink-0 ${
+                            dev.deviceType === 'Server'
+                              ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          }`}>
+                            {getDeviceIcon(dev.deviceType, 'w-4 h-4')}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{dev.deviceName}</div>
+                            <div className="text-[10px] font-mono text-emerald-300 font-semibold">{dev.ipAddress}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{dev.location}</div>
+
+                            {/* Upstream Predecessor Link */}
+                            {pred ? (
+                              <div className="text-[9px] text-indigo-400 font-mono truncate flex items-center gap-1 mt-1" title={`Upstream connection from ${pred.deviceName}`}>
+                                <ArrowUp className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
+                                <span className="truncate">Feed: {pred.deviceName}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[9px] text-slate-500 font-mono mt-1">Direct Node</div>
+                            )}
+                          </div>
+
+                          {canManageNetwork && (
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-2 -right-2 flex items-center gap-1 transition bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-md">
+                              <button
+                                title="Edit Endpoint"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(dev);
+                                }}
+                                className="p-1 rounded hover:bg-sky-600 text-slate-300 hover:text-white"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                title="Delete Endpoint"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmId(dev.id);
+                                }}
+                                className="p-1 rounded hover:bg-rose-600 text-slate-300 hover:text-white"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* SUBVIEW 2: PREDECESSOR / SUCCESSOR MATRIX */}
+          {topologySubView === 'MATRIX' && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/40">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Cable className="w-4 h-4 text-sky-600" />
+                    <span>Hardware Hop-by-Hop Routing & Connection Matrix</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Comprehensive overview of every hardware node's upstream feed (Predecessor) and downstream feeds (Successors).
+                  </p>
+                </div>
+
+                <div className="w-full sm:w-64">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search node by name / IP..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold">
+                    <tr>
+                      <th className="px-4 py-3">Hardware Node</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Upstream (Predecessor)</th>
+                      <th className="px-4 py-3">Downstream (Successors)</th>
+                      <th className="px-4 py-3">Link Medium & Speed</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredDevices.map((dev) => {
+                      const pred = dev.predecessorId ? deviceMap.get(dev.predecessorId) : null;
+                      const successors = (dev.successorIds || [])
+                        .map((id) => deviceMap.get(id))
+                        .filter(Boolean) as NetworkDevice[];
+
+                      return (
+                        <tr key={dev.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                          <td className="px-4 py-3">
+                            <div
+                              onClick={() => setSelectedDevice(dev)}
+                              className="font-bold text-slate-900 dark:text-white cursor-pointer hover:text-sky-600 flex items-center gap-2"
+                            >
+                              {getDeviceIcon(dev.deviceType, 'w-4 h-4 text-sky-600 shrink-0')}
+                              <div>
+                                <div>{dev.deviceName}</div>
+                                <div className="text-[10px] font-mono text-slate-400 font-normal">{dev.ipAddress}</div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 font-medium">
+                            {dev.deviceType}
+                          </td>
+
+                          {/* Predecessor Column */}
+                          <td className="px-4 py-3">
+                            {pred ? (
+                              <button
+                                onClick={() => setSelectedDevice(pred)}
+                                className="group flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:border-sky-400 transition cursor-pointer text-left"
+                              >
+                                <ArrowUp className="w-3 h-3 text-sky-600 shrink-0" />
+                                <div className="truncate max-w-[140px]">
+                                  <div className="font-bold truncate text-[11px]">{pred.deviceName}</div>
+                                  <div className="text-[9px] font-mono opacity-80">{pred.ipAddress}</div>
+                                </div>
+                              </button>
+                            ) : (
+                              <span className="text-[11px] font-mono text-slate-400 italic">
+                                Primary WAN Feed (None)
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Successors Column */}
+                          <td className="px-4 py-3">
+                            {successors.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 max-w-xs">
+                                {successors.map((succ) => (
+                                  <button
+                                    key={succ.id}
+                                    onClick={() => setSelectedDevice(succ)}
+                                    className="group flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:border-emerald-400 transition cursor-pointer text-[10px]"
+                                  >
+                                    <ArrowDown className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span className="font-semibold truncate max-w-[110px]">{succ.deviceName}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] font-mono text-slate-400">Endpoint / Leaf Node</span>
+                            )}
+                          </td>
+
+                          {/* Link Medium & Speed */}
+                          <td className="px-4 py-3">
+                            <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                              {dev.connectionType || 'Ethernet Cat6'}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-400">
+                              {dev.portSpeed || '1 Gbps'}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              dev.status === 'Online'
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : dev.status === 'Warning'
+                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                                : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                dev.status === 'Online' ? 'bg-emerald-500' : dev.status === 'Warning' ? 'bg-amber-500' : 'bg-rose-500'
+                              }`} />
+                              {dev.status}
+                            </span>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handlePing(dev)}
+                                disabled={pingingId === dev.id}
+                                className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold text-[10px] cursor-pointer"
+                              >
+                                {pingingId === dev.id ? 'Ping...' : 'Ping'}
+                              </button>
+
+                              {canManageNetwork && (
+                                <>
+                                  <button
+                                    onClick={() => openEditModal(dev)}
+                                    className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-sky-100 text-slate-600 hover:text-sky-600 cursor-pointer"
+                                    title="Edit Device & Connections"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirmId(dev.id)}
+                                    className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 text-slate-600 hover:text-rose-600 cursor-pointer"
+                                    title="Delete Device"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* SUBVIEW 3: QUICK CABLE PATCHER / CONNECT TOOL */}
+          {topologySubView === 'CONNECT_TOOL' && canManageNetwork && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xs space-y-6">
+              <div className="border-b border-slate-200 dark:border-slate-800 pb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Link2 className="w-5 h-5 text-sky-600" />
+                    <span>Quick Network Cable Patching & Interconnect Tool</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Instantly establish a predecessor-to-successor hardware connection between any two nodes.
+                  </p>
+                </div>
+              </div>
+
+              {connectMessage && (
+                <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                  connectMessage.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+                }`}>
+                  {connectMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                  <span>{connectMessage.text}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleQuickConnect} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Upstream Predecessor Selection */}
+                  <div className="p-4 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/20 space-y-2">
+                    <label className="text-xs font-bold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
+                      <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Step 1: Select Upstream Source (Predecessor Node) *</span>
+                    </label>
+                    <select
+                      required
+                      value={connectPredecessorId}
+                      onChange={(e) => setConnectPredecessorId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none"
+                    >
+                      <option value="">-- Choose Upstream Predecessor --</option>
+                      {devices.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-500">
+                      This device will supply network connectivity and traffic routing.
+                    </p>
+                  </div>
+
+                  {/* Downstream Successor Selection */}
+                  <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-2">
+                    <label className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                      <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Step 2: Select Downstream Target (Successor Node) *</span>
+                    </label>
+                    <select
+                      required
+                      value={connectSuccessorId}
+                      onChange={(e) => setConnectSuccessorId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none"
+                    >
+                      <option value="">-- Choose Downstream Successor --</option>
+                      {devices
+                        .filter((d) => d.id !== connectPredecessorId)
+                        .map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="text-[11px] text-slate-500">
+                      This device will receive uplink traffic from the selected predecessor.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Connection Medium / Cable Type
+                    </label>
+                    <select
+                      value={connectCableType}
+                      onChange={(e) => setConnectCableType(e.target.value as NetworkConnectionType)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none"
+                    >
+                      {CONNECTION_TYPES.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Link Speed & Duplex
+                    </label>
+                    <input
+                      type="text"
+                      value={connectSpeed}
+                      onChange={(e) => setConnectSpeed(e.target.value)}
+                      placeholder="e.g. 10 Gbps SFP+ or 1 Gbps"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="submit"
+                    disabled={!connectPredecessorId || !connectSuccessorId}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs shadow-md transition cursor-pointer"
+                  >
+                    <Link2 className="w-4 h-4" />
+                    <span>Establish Interconnect Link</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </div>
       )}
 
@@ -492,77 +1272,100 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                   <th className="px-4 py-3">IP Address</th>
                   <th className="px-4 py-3">Location</th>
                   <th className="px-4 py-3">Ports</th>
+                  <th className="px-4 py-3">Predecessor (Upstream)</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Actions & Diagnostics</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {devices.map((device) => (
-                  <tr key={device.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                    <td
-                      onClick={() => setSelectedDevice(device)}
-                      className="px-4 py-3 font-semibold text-slate-900 dark:text-white cursor-pointer hover:text-sky-600"
-                    >
-                      {device.deviceName}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {device.deviceType}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-sky-600 font-semibold">
-                      {device.ipAddress}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {device.location}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {device.portsCount ? `${device.portsCount} Ports` : 'N/A'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        device.status === 'Online'
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : device.status === 'Warning'
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                          : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          device.status === 'Online' ? 'bg-emerald-500' : device.status === 'Warning' ? 'bg-amber-500' : 'bg-rose-500'
-                        }`} />
-                        {device.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handlePing(device)}
-                          disabled={pingingId === device.id}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold text-[11px] cursor-pointer"
-                        >
-                          {pingingId === device.id ? 'Pinging ICMP...' : 'Ping'}
-                        </button>
+                {devices.map((device) => {
+                  const pred = device.predecessorId ? deviceMap.get(device.predecessorId) : null;
 
-                        {canManageNetwork && (
-                          <>
-                            <button
-                              onClick={() => openEditModal(device)}
-                              className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-sky-100 text-slate-600 hover:text-sky-600 cursor-pointer"
-                              title="Edit Node"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(device.id)}
-                              className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 text-slate-600 hover:text-rose-600 cursor-pointer"
-                              title="Delete Node"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                  return (
+                    <tr key={device.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                      <td
+                        onClick={() => setSelectedDevice(device)}
+                        className="px-4 py-3 font-semibold text-slate-900 dark:text-white cursor-pointer hover:text-sky-600 flex items-center gap-2"
+                      >
+                        {getDeviceIcon(device.deviceType, 'w-4 h-4 text-sky-600 shrink-0')}
+                        <span>{device.deviceName}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {device.deviceType}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-sky-600 font-semibold">
+                        {device.ipAddress}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {device.location}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {device.portsCount ? `${device.portsCount} Ports` : 'N/A'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {pred ? (
+                          <span className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-semibold flex items-center gap-1">
+                            <ArrowUp className="w-2.5 h-2.5" />
+                            {pred.deviceName}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Root Node</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          device.status === 'Online'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : device.status === 'Warning'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            device.status === 'Online' ? 'bg-emerald-500' : device.status === 'Warning' ? 'bg-amber-500' : 'bg-rose-500'
+                          }`} />
+                          {device.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handlePing(device)}
+                            disabled={pingingId === device.id}
+                            className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold text-[11px] cursor-pointer"
+                          >
+                            {pingingId === device.id ? 'Pinging ICMP...' : 'Ping'}
+                          </button>
+
+                          {canManageNetwork && (
+                            <>
+                              <button
+                                onClick={() => openCloneModal(device)}
+                                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-sky-100 text-slate-600 hover:text-sky-600 cursor-pointer"
+                                title="Clone / Duplicate Node"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => openEditModal(device)}
+                                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-sky-100 text-slate-600 hover:text-sky-600 cursor-pointer"
+                                title="Edit Node"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(device.id)}
+                                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 text-slate-600 hover:text-rose-600 cursor-pointer"
+                                title="Delete Node"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -602,22 +1405,146 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
       {/* Device Inspector Drawer / Modal */}
       {selectedDevice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600">
-                  <Network className="w-5 h-5" />
+                <div className="p-2.5 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600">
+                  {getDeviceIcon(selectedDevice.deviceType, 'w-6 h-6')}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    {selectedDevice.deviceName}
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>{selectedDevice.deviceName}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      selectedDevice.status === 'Online'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : selectedDevice.status === 'Warning'
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                        : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                    }`}>
+                      {selectedDevice.status}
+                    </span>
                   </h3>
                   <span className="text-[11px] text-slate-500 font-mono">{selectedDevice.ipAddress}</span>
                 </div>
               </div>
-              <button onClick={() => setSelectedDevice(null)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setSelectedDevice(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* TOPOLOGY RELATIONSHIPS SECTION */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Network Interconnection Architecture
+              </h4>
+
+              {/* UPSTREAM PREDECESSOR CARD */}
+              <div className="p-3.5 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-bold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
+                    <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Upstream Feed (Predecessor Node)</span>
+                  </div>
+                  {selectedDevice.predecessorId && canManageNetwork && (
+                    <button
+                      onClick={() => handleDisconnect(selectedDevice.predecessorId!, selectedDevice.id)}
+                      className="text-[10px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer"
+                      title="Disconnect from predecessor"
+                    >
+                      <Unlink2 className="w-3 h-3" />
+                      <span>Unlink</span>
+                    </button>
+                  )}
+                </div>
+
+                {selectedDevice.predecessorId && deviceMap.get(selectedDevice.predecessorId) ? (
+                  (() => {
+                    const parent = deviceMap.get(selectedDevice.predecessorId)!;
+                    return (
+                      <div
+                        onClick={() => setSelectedDevice(parent)}
+                        className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 flex items-center justify-between cursor-pointer hover:border-sky-400 transition"
+                      >
+                        <div className="flex items-center gap-2">
+                          {getDeviceIcon(parent.deviceType, 'w-4 h-4 text-sky-600')}
+                          <div>
+                            <div className="font-bold text-slate-900 dark:text-white">{parent.deviceName}</div>
+                            <div className="text-[10px] font-mono text-slate-400">{parent.ipAddress} • {parent.deviceType}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-mono text-sky-600 font-semibold block">
+                            {selectedDevice.connectionType || 'Cat6'} ({selectedDevice.portSpeed || '1G'})
+                          </span>
+                          <span className="text-[9px] text-slate-400">Click to inspect</span>
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <p className="text-[11px] text-slate-500 italic">
+                    This is a root gateway device with no upstream predecessor.
+                  </p>
+                )}
+              </div>
+
+              {/* DOWNSTREAM SUCCESSORS CARD */}
+              <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Downstream Connected Branches (Successor Nodes)</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-600 font-bold">
+                    {selectedDevice.successorIds?.length || 0} Connected
+                  </span>
+                </div>
+
+                {selectedDevice.successorIds && selectedDevice.successorIds.length > 0 ? (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                    {selectedDevice.successorIds.map((succId) => {
+                      const child = deviceMap.get(succId);
+                      if (!child) return null;
+                      return (
+                        <div
+                          key={succId}
+                          onClick={() => setSelectedDevice(child)}
+                          className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between cursor-pointer hover:border-emerald-400 transition"
+                        >
+                          <div className="flex items-center gap-2">
+                            {getDeviceIcon(child.deviceType, 'w-4 h-4 text-emerald-600')}
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-white">{child.deviceName}</div>
+                              <div className="text-[10px] font-mono text-slate-400">{child.ipAddress} • {child.location}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-emerald-600 font-semibold">
+                              {child.connectionType || 'Cat6'}
+                            </span>
+                            {canManageNetwork && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDisconnect(selectedDevice.id, child.id);
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                                title="Disconnect successor"
+                              >
+                                <Unlink2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 italic">
+                    No downstream successor devices attached to this node.
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Grid Information */}
@@ -636,15 +1563,19 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-semibold">Port Capacity</span>
-                <div className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{selectedDevice.portsCount || 24} Total / {selectedDevice.activePorts || 8} Active</div>
+                <div className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">
+                  {selectedDevice.portsCount || 24} Total / {selectedDevice.activePorts || 8} Active
+                </div>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-semibold">Firmware</span>
                 <div className="font-mono text-slate-800 dark:text-slate-200 mt-0.5">{selectedDevice.firmware || 'v4.2.1-LTS'}</div>
               </div>
               <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">Operational Status</span>
-                <div className="font-bold text-emerald-600 mt-0.5">{selectedDevice.status}</div>
+                <span className="text-[10px] text-slate-400 uppercase font-semibold">Connection Medium</span>
+                <div className="font-bold text-sky-600 mt-0.5">
+                  {selectedDevice.connectionType || 'Ethernet Cat6'} ({selectedDevice.portSpeed || '1 Gbps'})
+                </div>
               </div>
             </div>
 
@@ -670,6 +1601,17 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               <div className="flex items-center gap-2">
                 {canManageNetwork && (
                   <>
+                    <button
+                      onClick={() => {
+                        const dev = selectedDevice;
+                        openCloneModal(dev);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-950/80 border border-sky-800 text-sky-300 hover:bg-sky-900 font-bold cursor-pointer"
+                      title="Clone / Duplicate this device"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Clone Node</span>
+                    </button>
                     <button
                       onClick={() => {
                         const dev = selectedDevice;
@@ -699,10 +1641,122 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
         </div>
       )}
 
+      {/* Clone Device Modal */}
+      {cloneModalOpen && cloningSource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Copy className="w-5 h-5 text-sky-600" />
+                <span>Clone & Duplicate Network Device</span>
+              </h3>
+              <button
+                onClick={() => setCloneModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-slate-500">
+              Create an exact duplicate of <strong>{cloningSource.deviceName}</strong> ({cloningSource.deviceType}) with customizable IP, name, and connection routing.
+            </p>
+
+            <form onSubmit={handleConfirmClone} className="space-y-3">
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Cloned Device Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={cloneName}
+                  onChange={(e) => setCloneName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Target LAN IP Address *</label>
+                  <input
+                    type="text"
+                    required
+                    value={cloneIp}
+                    onChange={(e) => setCloneIp(e.target.value)}
+                    className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Physical Location *</label>
+                  <input
+                    type="text"
+                    required
+                    value={cloneLocation}
+                    onChange={(e) => setCloneLocation(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Predecessor Feed */}
+              <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+                <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
+                  <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Upstream Feed (Predecessor Node)</span>
+                </label>
+                <select
+                  value={clonePredecessorId}
+                  onChange={(e) => setClonePredecessorId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
+                >
+                  <option value="">None (Standalone Gateway)</option>
+                  {devices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Connection Medium</label>
+                <select
+                  value={cloneConnectionType}
+                  onChange={(e) => setCloneConnectionType(e.target.value as NetworkConnectionType)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                >
+                  {CONNECTION_TYPES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setCloneModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Confirm Clone</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Edit Device Modal */}
       {editModalOpen && editingDevice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Edit2 className="w-5 h-5 text-sky-600" />
@@ -734,15 +1788,18 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
                   >
                     <option value="Switch">Managed Switch</option>
+                    <option value="Core Switch">Core Switch</option>
+                    <option value="Distribution Switch">Distribution Switch</option>
                     <option value="Router">Core Router</option>
                     <option value="Access Point">Access Point</option>
                     <option value="Server">Local Server</option>
                     <option value="Firewall">Hardware Firewall</option>
+                    <option value="Starlink Terminal">Starlink Terminal</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Status *</label>
+                  <label className="block text-slate-500 font-semibold mb-1">Operational Status *</label>
                   <select
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value as any)}
@@ -752,6 +1809,100 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     <option value="Warning">Warning</option>
                     <option value="Offline">Offline</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Predecessor Configuration */}
+              <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+                <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
+                  <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Upstream Feed (Predecessor Device)</span>
+                </label>
+                <select
+                  value={editPredecessorId}
+                  onChange={(e) => setEditPredecessorId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
+                >
+                  <option value="">None (Top-Level Root Gateway)</option>
+                  {devices
+                    .filter((d) => d.id !== editingDevice.id)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Select which hardware node supplies network access to this device.
+                </p>
+              </div>
+
+              {/* Successors Multi-Selection */}
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                <label className="block text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Downstream Connections (Successor Devices)</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-600">
+                    {editSuccessors.length} selected
+                  </span>
+                </label>
+                <div className="max-h-28 overflow-y-auto space-y-1 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                  {devices
+                    .filter((d) => d.id !== editingDevice.id && d.id !== editPredecessorId)
+                    .map((d) => {
+                      const isChecked = editSuccessors.includes(d.id);
+                      return (
+                        <label
+                          key={d.id}
+                          className="flex items-center gap-2 p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditSuccessors([...editSuccessors, d.id]);
+                              } else {
+                                setEditSuccessors(editSuccessors.filter((id) => id !== d.id));
+                              }
+                            }}
+                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                          />
+                          <span className="font-semibold">{d.deviceName}</span>
+                          <span className="text-[10px] font-mono text-slate-400">({d.ipAddress})</span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Connection Medium</label>
+                  <select
+                    value={editConnectionType}
+                    onChange={(e) => setEditConnectionType(e.target.value as NetworkConnectionType)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  >
+                    {CONNECTION_TYPES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Port Link Speed</label>
+                  <input
+                    type="text"
+                    value={editPortSpeed}
+                    onChange={(e) => setEditPortSpeed(e.target.value)}
+                    placeholder="e.g. 1 Gbps or 10 Gbps SFP+"
+                    className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
                 </div>
               </div>
 
@@ -778,7 +1929,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-500 font-semibold mb-1">Physical Location / Rack Position *</label>
+                <label className="block text-slate-500 font-semibold mb-1">Physical Location *</label>
                 <input
                   type="text"
                   required
@@ -838,7 +1989,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               <span>Confirm Topology Deletion</span>
             </div>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              Are you sure you want to permanently delete this hardware device from the hospital network topology? This will remove all associated port mappings and ping monitoring.
+              Are you sure you want to permanently delete this hardware device from the hospital network topology? Any predecessor or successor links connected to it will be automatically safely unlinked.
             </p>
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
@@ -861,7 +2012,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
       {/* Add Device Modal */}
       {addModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Network className="w-5 h-5 text-sky-600" />
@@ -894,10 +2045,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
                   >
                     <option value="Switch">Managed Switch</option>
+                    <option value="Core Switch">Core Switch</option>
+                    <option value="Distribution Switch">Distribution Switch</option>
                     <option value="Router">Core Router</option>
                     <option value="Access Point">Access Point</option>
                     <option value="Server">Local Server</option>
                     <option value="Firewall">Hardware Firewall</option>
+                    <option value="Starlink Terminal">Starlink Terminal</option>
                   </select>
                 </div>
 
@@ -912,26 +2066,117 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-500 font-semibold mb-1">LAN IP Address *</label>
-                <input
-                  type="text"
-                  required
-                  value={ipAddress}
-                  onChange={(e) => setIpAddress(e.target.value)}
-                  className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
-                />
+              {/* Predecessor Selection in Add Modal */}
+              <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+                <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
+                  <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Upstream Feed (Predecessor Device)</span>
+                </label>
+                <select
+                  value={predecessorId}
+                  onChange={(e) => setPredecessorId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
+                >
+                  <option value="">None (Top-Level Root Gateway)</option>
+                  {devices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Choose which switch, router, or gateway supplies connectivity to this node.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-slate-500 font-semibold mb-1">Physical Location *</label>
-                <input
-                  type="text"
-                  required
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
-                />
+              {/* Successors Multi-Selection in Add Modal */}
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                <label className="block text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Downstream Connected Branches (Successor Devices)</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-600">
+                    {selectedSuccessors.length} selected
+                  </span>
+                </label>
+                <div className="max-h-28 overflow-y-auto space-y-1 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                  {devices.map((d) => {
+                    const isChecked = selectedSuccessors.includes(d.id);
+                    return (
+                      <label
+                        key={d.id}
+                        className="flex items-center gap-2 p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-xs"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSuccessors([...selectedSuccessors, d.id]);
+                            } else {
+                              setSelectedSuccessors(selectedSuccessors.filter((id) => id !== d.id));
+                            }
+                          }}
+                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                        />
+                        <span className="font-semibold">{d.deviceName}</span>
+                        <span className="text-[10px] font-mono text-slate-400">({d.ipAddress})</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Connection Medium</label>
+                  <select
+                    value={connectionType}
+                    onChange={(e) => setConnectionType(e.target.value as NetworkConnectionType)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  >
+                    {CONNECTION_TYPES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Port Link Speed</label>
+                  <input
+                    type="text"
+                    value={portSpeed}
+                    onChange={(e) => setPortSpeed(e.target.value)}
+                    placeholder="e.g. 1 Gbps Full-Duplex"
+                    className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">LAN IP Address *</label>
+                  <input
+                    type="text"
+                    required
+                    value={ipAddress}
+                    onChange={(e) => setIpAddress(e.target.value)}
+                    className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Physical Location *</label>
+                  <input
+                    type="text"
+                    required
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">

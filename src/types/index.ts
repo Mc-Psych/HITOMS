@@ -312,10 +312,12 @@ export interface HospitalSystem extends SyncMetadata {
   updatedAt: string;
 }
 
+export type NetworkConnectionType = 'Fiber' | 'Ethernet Cat6' | 'Wireless 5GHz/6GHz' | 'Satellite RF' | 'SFP+ 10G';
+
 export interface NetworkDevice extends SyncMetadata {
   id: string;
   deviceName: string;
-  deviceType: 'Router' | 'Core Switch' | 'Distribution Switch' | 'Access Point' | 'Server' | 'Firewall' | 'Starlink Terminal';
+  deviceType: 'Router' | 'Core Switch' | 'Distribution Switch' | 'Access Point' | 'Server' | 'Firewall' | 'Starlink Terminal' | 'Switch' | 'Workstation';
   manufacturer: string;
   model: string;
   serialNumber: string;
@@ -327,7 +329,13 @@ export interface NetworkDevice extends SyncMetadata {
   firmware: string;
   installationDate: string;
   lastMaintenance: string;
-  uplinkDeviceId?: string; // for topology hierarchy
+  predecessorId?: string; // Upstream / Predecessor device ID
+  successorIds?: string[]; // Downstream / Successor device IDs
+  uplinkDeviceId?: string; // backward compatibility alias for predecessorId
+  connectionType?: NetworkConnectionType;
+  portSpeed?: string; // e.g. 1 Gbps, 10 Gbps, 100 Mbps
+  canvasX?: number; // X coordinate on draggable topology canvas
+  canvasY?: number; // Y coordinate on draggable topology canvas
   notes?: string;
   portsCount?: number;
   activePorts?: number;

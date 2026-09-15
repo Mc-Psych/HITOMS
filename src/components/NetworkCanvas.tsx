@@ -1,0 +1,1807 @@
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import {
+  Radio,
+  Network,
+  Layers,
+  Server,
+  Wifi,
+  Shield,
+  Cpu,
+  Copy,
+  Edit2,
+  Trash2,
+  Link2,
+  Unlink2,
+  Move,
+  Cable,
+  Zap,
+  RotateCcw,
+  Sparkles,
+  Grid,
+  Check,
+  X,
+  ArrowRight,
+  Activity,
+  Plus,
+  ZoomIn,
+  ZoomOut,
+  BoxSelect,
+  MousePointer,
+  CheckSquare,
+  Square,
+  AlignJustify,
+  Maximize2,
+  Minimize2,
+  Info,
+  Hand,
+  Compass,
+} from 'lucide-react';
+import {
+  type NetworkDevice,
+  type NetworkConnectionType,
+  type User as UserType,
+} from '../types';
+import { networkService } from '../services/networkService';
+
+interface NetworkCanvasProps {
+  devices: NetworkDevice[];
+  currentUser: UserType | null;
+  onSelectDevice: (device: NetworkDevice) => void;
+  onEditDevice: (device: NetworkDevice) => void;
+  onCloneDevice: (device: NetworkDevice) => void;
+  onDeleteDevice: (device: NetworkDevice) => void;
+  onRefresh: () => void;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+const CABLE_CONFIGS: Record<
+  NetworkConnectionType,
+  { stroke: string; glow: string; label: string; dash?: string; speedDefault: string }
+> = {
+  Fiber: {
+    stroke: '#22d3ee', // cyan-400
+    glow: 'rgba(34, 211, 238, 0.4)',
+    label: 'Fiber OM3/OM4',
+    speedDefault: '1 Gbps OM3 Fiber',
+  },
+  'Ethernet Cat6': {
+    stroke: '#34d399', // emerald-400
+    glow: 'rgba(52, 211, 153, 0.4)',
+    label: 'Ethernet Cat6',
+    speedDefault: '1 Gbps Full-Duplex',
+  },
+  'SFP+ 10G': {
+    stroke: '#818cf8', // indigo-400
+    glow: 'rgba(129, 140, 248, 0.5)',
+    label: '10G SFP+ Trunk',
+    speedDefault: '10 Gbps SFP+ Trunk',
+  },
+  'Wireless 5GHz/6GHz': {
+    stroke: '#c084fc', // purple-400
+    glow: 'rgba(192, 132, 252, 0.4)',
+    dash: '6 4',
+    label: 'Wi-Fi 6 Wireless',
+    speedDefault: '1.2 Gbps Wi-Fi 6',
+  },
+  'Satellite RF': {
+    stroke: '#fbbf24', // amber-400
+    glow: 'rgba(251, 191, 36, 0.5)',
+    dash: '8 4',
+    label: 'Satellite RF Microwave',
+    speedDefault: '220 Mbps Low-Earth Orbit',
+  },
+};
+
+const NODE_WIDTH = 250;
+const NODE_HEIGHT = 110;
+
+/**
+ * Computes strict hierarchical DAG positions based on predecessor-successor tree structure
+ */
+function computeHierarchicalOrder(devs: NetworkDevice[]): Record<string, Point> {
+  if (!devs || devs.length === 0) return {};
+
+  const devMap = new Map<string, NetworkDevice>();
+  devs.forEach((d) => devMap.set(d.id, d));
+
+  // Build adjacency graph: parentId -> childrenIds
+  const childrenMap = new Map<string, Set<string>>();
+  const parentMap = new Map<string, string>();
+
+  devs.forEach((d) => {
+    childrenMap.set(d.id, new Set());
+  });
+
+  devs.forEach((d) => {
+    const parentId = d.predecessorId || d.uplinkDeviceId;
+    if (parentId && devMap.has(parentId)) {
+      parentMap.set(d.id, parentId);
+      childrenMap.get(parentId)?.add(d.id);
+    }
+    // Also check successorIds
+    if (d.successorIds && Array.isArray(d.successorIds)) {
+      d.successorIds.forEach((childId) => {
+        if (devMap.has(childId)) {
+          childrenMap.get(d.id)?.add(childId);
+          if (!parentMap.has(childId)) {
+            parentMap.set(childId, d.id);
+          }
+        }
+      });
+    }
+  });
+
+  // Identify root devices (in-degree = 0 or specific WAN gateways)
+  const roots: NetworkDevice[] = [];
+  devs.forEach((d) => {
+    if (!parentMap.has(d.id) || d.deviceType === 'Starlink Terminal') {
+      roots.push(d);
+    }
+  });
+
+  // If no roots found (e.g. cycle), pick devices with deviceType Gateway or Router, or first device
+  if (roots.length === 0) {
+    const fallbackRoot =
+      devs.find((d) => d.deviceType === 'Starlink Terminal') ||
+      devs.find((d) => d.deviceType === 'Router') ||
+      devs[0];
+    if (fallbackRoot) roots.push(fallbackRoot);
+  }
+
+  // Calculate depths via BFS
+  const depthMap = new Map<string, number>();
+  const visited = new Set<string>();
+  const queue: { id: string; depth: number }[] = roots.map((r) => ({ id: r.id, depth: 0 }));
+  roots.forEach((r) => {
+    depthMap.set(r.id, 0);
+    visited.add(r.id);
+  });
+
+  while (queue.length > 0) {
+    const { id, depth } = queue.shift()!;
+    const children = childrenMap.get(id);
+    if (children) {
+      children.forEach((childId) => {
+        const nextDepth = Math.max(depth + 1, depthMap.get(childId) || 0);
+        depthMap.set(childId, nextDepth);
+        if (!visited.has(childId)) {
+          visited.add(childId);
+          queue.push({ id: childId, depth: nextDepth });
+        }
+      });
+    }
+  }
+
+  // Any remaining unvisited devices get assigned depth based on deviceType
+  devs.forEach((d) => {
+    if (!depthMap.has(d.id)) {
+      if (d.deviceType === 'Starlink Terminal') depthMap.set(d.id, 0);
+      else if (d.deviceType === 'Router' || d.deviceType === 'Firewall') depthMap.set(d.id, 1);
+      else if (['Core Switch', 'Switch', 'Server'].includes(d.deviceType)) depthMap.set(d.id, 2);
+      else if (d.deviceType === 'Distribution Switch') depthMap.set(d.id, 3);
+      else depthMap.set(d.id, 4);
+    }
+  });
+
+  // Group devices by depth level
+  const levels = new Map<number, NetworkDevice[]>();
+  devs.forEach((d) => {
+    const lvl = depthMap.get(d.id) ?? 0;
+    if (!levels.has(lvl)) levels.set(lvl, []);
+    levels.get(lvl)!.push(d);
+  });
+
+  const sortedLevels = Array.from(levels.keys()).sort((a, b) => a - b);
+  const posMap: Record<string, Point> = {};
+  const CANVAS_CENTER_X = 800;
+  const LEVEL_Y_SPACING = 175;
+  const NODE_X_SPACING = 300;
+
+  sortedLevels.forEach((lvl) => {
+    const levelDevs = levels.get(lvl)!;
+
+    // Sort nodes in this level to align nicely below their parent
+    levelDevs.sort((a, b) => {
+      const parentA = parentMap.get(a.id);
+      const parentB = parentMap.get(b.id);
+      const parentAPosX = parentA && posMap[parentA] ? posMap[parentA].x : 0;
+      const parentBPosX = parentB && posMap[parentB] ? posMap[parentB].x : 0;
+      if (parentAPosX !== parentBPosX) return parentAPosX - parentBPosX;
+      return a.deviceName.localeCompare(b.deviceName);
+    });
+
+    const count = levelDevs.length;
+    const totalWidth = (count - 1) * NODE_X_SPACING;
+    const startX = Math.max(60, Math.round((CANVAS_CENTER_X - totalWidth / 2) / 20) * 20);
+    const y = 45 + lvl * LEVEL_Y_SPACING;
+
+    levelDevs.forEach((d, idx) => {
+      posMap[d.id] = {
+        x: startX + idx * NODE_X_SPACING,
+        y,
+      };
+    });
+  });
+
+  return posMap;
+}
+
+interface AnchorPoint extends Point {
+  side: 'top' | 'bottom' | 'left' | 'right';
+  normal: Point;
+}
+
+/**
+ * Returns all 4 port anchor points (Top, Bottom, Left, Right) for a device node
+ */
+function getNodeAnchors(
+  pos: Point,
+  width = NODE_WIDTH,
+  height = NODE_HEIGHT
+): Record<'top' | 'bottom' | 'left' | 'right', AnchorPoint> {
+  return {
+    top: {
+      x: pos.x + width / 2,
+      y: pos.y,
+      side: 'top',
+      normal: { x: 0, y: -1 },
+    },
+    bottom: {
+      x: pos.x + width / 2,
+      y: pos.y + height,
+      side: 'bottom',
+      normal: { x: 0, y: 1 },
+    },
+    left: {
+      x: pos.x,
+      y: pos.y + height / 2,
+      side: 'left',
+      normal: { x: -1, y: 0 },
+    },
+    right: {
+      x: pos.x + width,
+      y: pos.y + height / 2,
+      side: 'right',
+      normal: { x: 1, y: 0 },
+    },
+  };
+}
+
+/**
+ * Dynamically determines the closest, most natural pair of connection ports between two devices
+ */
+function getBestCableEndpoints(
+  p1: Point,
+  p2: Point,
+  width = NODE_WIDTH,
+  height = NODE_HEIGHT
+): {
+  source: AnchorPoint;
+  target: AnchorPoint;
+  path: string;
+} {
+  const anchors1 = getNodeAnchors(p1, width, height);
+  const anchors2 = getNodeAnchors(p2, width, height);
+
+  let bestScore = Infinity;
+  let bestSource = anchors1.bottom;
+  let bestTarget = anchors2.top;
+
+  const a1List = Object.values(anchors1);
+  const a2List = Object.values(anchors2);
+
+  a1List.forEach((a1) => {
+    a2List.forEach((a2) => {
+      const dist = Math.hypot(a2.x - a1.x, a2.y - a1.y);
+      const dot1 = a1.normal.x * (a2.x - a1.x) + a1.normal.y * (a2.y - a1.y);
+      const dot2 = a2.normal.x * (a1.x - a2.x) + a2.normal.y * (a1.y - a2.y);
+      // Prefer anchor normals pointing toward each other
+      const score = dist - (dot1 > 0 ? 40 : -40) - (dot2 > 0 ? 40 : -40);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestSource = a1;
+        bestTarget = a2;
+      }
+    });
+  });
+
+  const dist = Math.hypot(bestTarget.x - bestSource.x, bestTarget.y - bestSource.y);
+  const curvature = Math.max(30, Math.min(130, dist * 0.42));
+
+  const c1x = bestSource.x + bestSource.normal.x * curvature;
+  const c1y = bestSource.y + bestSource.normal.y * curvature;
+  const c2x = bestTarget.x + bestTarget.normal.x * curvature;
+  const c2y = bestTarget.y + bestTarget.normal.y * curvature;
+
+  const path = `M ${bestSource.x} ${bestSource.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${bestTarget.x} ${bestTarget.y}`;
+
+  return {
+    source: bestSource,
+    target: bestTarget,
+    path,
+  };
+}
+
+export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
+  devices,
+  currentUser,
+  onSelectDevice,
+  onEditDevice,
+  onCloneDevice,
+  onDeleteDevice,
+  onRefresh,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Layout node coordinates (x, y) map
+  const [positions, setPositions] = useState<Record<string, Point>>({});
+  const positionsRef = useRef<Record<string, Point>>({});
+  positionsRef.current = positions;
+
+  // Drag tracking to distinguish pure clicks from drags
+  const isDragMovedRef = useRef<boolean>(false);
+  const dragStartClientPos = useRef<Point>({ x: 0, y: 0 });
+
+  // Canvas Panning State (Drag canvas in all directions: left, right, top, bottom)
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const isPanningRef = useRef<boolean>(false);
+  isPanningRef.current = isPanning;
+  const panStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number }>({
+    clientX: 0,
+    clientY: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+  });
+  const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
+
+  // Tool Mode: 'pointer' (drag nodes or drag background to pan), 'pan' (hand tool), 'marquee' (box select)
+  const [activeTool, setActiveTool] = useState<'pointer' | 'pan' | 'marquee'>('pointer');
+
+  // Multi-Selection Marquee State
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
+  const selectedDeviceIdsRef = useRef<Set<string>>(selectedDeviceIds);
+  selectedDeviceIdsRef.current = selectedDeviceIds;
+
+  const [isMarqueeDragging, setIsMarqueeDragging] = useState<boolean>(false);
+  const [marqueeStart, setMarqueeStart] = useState<Point | null>(null);
+  const [marqueeEnd, setMarqueeEnd] = useState<Point | null>(null);
+
+  // Multi-Device Dragging State
+  const [isDraggingGroup, setIsDraggingGroup] = useState<boolean>(false);
+  const isDraggingGroupRef = useRef<boolean>(false);
+  isDraggingGroupRef.current = isDraggingGroup;
+
+  const dragAnchorIdRef = useRef<string | null>(null);
+  const [dragAnchorId, setDragAnchorId] = useState<string | null>(null);
+  dragAnchorIdRef.current = dragAnchorId;
+
+  const [dragStartMouse, setDragStartMouse] = useState<Point>({ x: 0, y: 0 });
+  const [dragInitialPositions, setDragInitialPositions] = useState<Record<string, Point>>({});
+
+  // Canvas Settings
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingSourceId, setConnectingSourceId] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
+  const [selectedCable, setSelectedCable] = useState<{
+    sourceId: string;
+    targetId: string;
+    type: NetworkConnectionType;
+    speed?: string;
+  } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const canManage = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
+
+  // Spacebar listener for temporary Hand Pan tool
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.code === 'Space' &&
+        (e.target as HTMLElement).tagName !== 'INPUT' &&
+        (e.target as HTMLElement).tagName !== 'TEXTAREA'
+      ) {
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Device Map for O(1) lookups
+  const deviceMap = useMemo(() => {
+    const map = new Map<string, NetworkDevice>();
+    devices.forEach((d) => map.set(d.id, d));
+    return map;
+  }, [devices]);
+
+  // Initialize or update positions with stored coordinates or hierarchical ordering
+  useEffect(() => {
+    setPositions((prev) => {
+      // If initial state was empty, load from devices or compute hierarchy
+      if (Object.keys(prev).length === 0 && devices.length > 0) {
+        const hierarchical = computeHierarchicalOrder(devices);
+        const initial: Record<string, Point> = {};
+        devices.forEach((d) => {
+          if (typeof d.canvasX === 'number' && typeof d.canvasY === 'number') {
+            initial[d.id] = { x: d.canvasX, y: d.canvasY };
+          } else if (hierarchical[d.id]) {
+            initial[d.id] = hierarchical[d.id];
+          } else {
+            initial[d.id] = { x: 200, y: 200 };
+          }
+        });
+        return initial;
+      }
+
+      const next = { ...prev };
+      let hasChanges = false;
+
+      // Check if there are new devices that don't have coordinates in state
+      const hierarchical = computeHierarchicalOrder(devices);
+      devices.forEach((d) => {
+        if (!next[d.id]) {
+          if (typeof d.canvasX === 'number' && typeof d.canvasY === 'number') {
+            next[d.id] = { x: d.canvasX, y: d.canvasY };
+          } else {
+            next[d.id] = hierarchical[d.id] || { x: 200, y: 200 };
+          }
+          hasChanges = true;
+        }
+      });
+
+      // If devices were deleted, clean up from positions map
+      const currentIds = new Set(devices.map((d) => d.id));
+      Object.keys(next).forEach((id) => {
+        if (!currentIds.has(id)) {
+          delete next[id];
+          hasChanges = true;
+        }
+      });
+
+      return hasChanges ? next : prev;
+    });
+  }, [devices]);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Convert client viewport coordinates to canvas virtual coordinates
+  const getCanvasPoint = useCallback(
+    (clientX: number, clientY: number): Point => {
+      if (!containerRef.current) return { x: clientX, y: clientY };
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = (clientX - rect.left + containerRef.current.scrollLeft) / zoomLevel;
+      const y = (clientY - rect.top + containerRef.current.scrollTop) / zoomLevel;
+      return { x, y };
+    },
+    [zoomLevel]
+  );
+
+  // Center canvas viewport on devices
+  const centerCanvasView = useCallback(() => {
+    if (!containerRef.current || devices.length === 0) return;
+    const currentPositions = positionsRef.current;
+    const devPositions = devices.map((d) => currentPositions[d.id] || { x: 400, y: 300 });
+    const avgX = devPositions.reduce((acc, p) => acc + p.x, 0) / devPositions.length;
+    const avgY = devPositions.reduce((acc, p) => acc + p.y, 0) / devPositions.length;
+
+    const viewportW = containerRef.current.clientWidth;
+    const viewportH = containerRef.current.clientHeight;
+
+    containerRef.current.scrollTo({
+      left: Math.max(0, avgX * zoomLevel - viewportW / 2 + (NODE_WIDTH * zoomLevel) / 2),
+      top: Math.max(0, avgY * zoomLevel - viewportH / 2 + (NODE_HEIGHT * zoomLevel) / 2),
+      behavior: 'smooth',
+    });
+  }, [devices, zoomLevel]);
+
+  // Canvas Mouse Down: Starts Canvas Panning OR Marquee Box Selection on background
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (isConnecting) return;
+
+    // Check if clicked directly on canvas background
+    const target = e.target as HTMLElement;
+    const isBackground =
+      target === containerRef.current ||
+      target.tagName === 'svg' ||
+      target.getAttribute('data-canvas-bg') === 'true' ||
+      target.closest('.canvas-background');
+
+    if (isBackground) {
+      const isMarquee = activeTool === 'marquee' || e.shiftKey || e.metaKey || e.ctrlKey;
+
+      if (isMarquee) {
+        const pt = getCanvasPoint(e.clientX, e.clientY);
+        setIsMarqueeDragging(true);
+        setMarqueeStart(pt);
+        setMarqueeEnd(pt);
+
+        if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          setSelectedDeviceIds(new Set());
+        }
+      } else {
+        // Default: Drag canvas to pan in any direction (left, right, top, bottom)
+        setIsPanning(true);
+        panStartRef.current = {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          scrollLeft: containerRef.current?.scrollLeft || 0,
+          scrollTop: containerRef.current?.scrollTop || 0,
+        };
+      }
+    }
+  };
+
+  // Node Mouse Down: Selects individual or starts dragging group
+  const handleNodeMouseDown = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (isConnecting) return;
+
+    // If Hand tool or Spacebar is active, delegate to canvas panning
+    if (activeTool === 'pan' || isSpacePressed) {
+      setIsPanning(true);
+      panStartRef.current = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        scrollLeft: containerRef.current?.scrollLeft || 0,
+        scrollTop: containerRef.current?.scrollTop || 0,
+      };
+      return;
+    }
+
+    // Reset drag movement tracker
+    isDragMovedRef.current = false;
+    dragStartClientPos.current = { x: e.clientX, y: e.clientY };
+
+    const pt = getCanvasPoint(e.clientX, e.clientY);
+    const isShift = e.shiftKey || e.metaKey || e.ctrlKey;
+
+    let nextSelected = new Set(selectedDeviceIds);
+
+    if (isShift) {
+      if (nextSelected.has(id)) {
+        nextSelected.delete(id);
+      } else {
+        nextSelected.add(id);
+      }
+      setSelectedDeviceIds(nextSelected);
+      return;
+    }
+
+    // If clicking on an unselected node without Shift, make it the sole selection
+    if (!nextSelected.has(id)) {
+      nextSelected = new Set([id]);
+      setSelectedDeviceIds(nextSelected);
+    }
+
+    // Start multi-device drag
+    setIsDraggingGroup(true);
+    setDragAnchorId(id);
+    setDragStartMouse(pt);
+    setDragInitialPositions({ ...positions });
+  };
+
+  // Canvas Mouse Move: Handles Panning, Marquee Box, and Multi-Device Dragging
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    const pt = getCanvasPoint(e.clientX, e.clientY);
+    setMousePos(pt);
+
+    // 1. CANVAS VIEWPORT PANNING (Left, Right, Top, Bottom)
+    if (isPanningRef.current && containerRef.current) {
+      const dx = e.clientX - panStartRef.current.clientX;
+      const dy = e.clientY - panStartRef.current.clientY;
+      containerRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+      containerRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+      return;
+    }
+
+    // 2. MARQUEE SELECTION LOGIC
+    if (isMarqueeDragging && marqueeStart) {
+      setMarqueeEnd(pt);
+
+      const minX = Math.min(marqueeStart.x, pt.x);
+      const maxX = Math.max(marqueeStart.x, pt.x);
+      const minY = Math.min(marqueeStart.y, pt.y);
+      const maxY = Math.max(marqueeStart.y, pt.y);
+
+      // Find all devices intersecting selection rectangle
+      const newlySelected = new Set(
+        e.shiftKey || e.metaKey || e.ctrlKey ? selectedDeviceIds : []
+      );
+
+      devices.forEach((dev) => {
+        const nodePos = positions[dev.id] || { x: 0, y: 0 };
+        const nodeMinX = nodePos.x;
+        const nodeMaxX = nodePos.x + NODE_WIDTH;
+        const nodeMinY = nodePos.y;
+        const nodeMaxY = nodePos.y + NODE_HEIGHT;
+
+        // Check AABB 2D bounding box intersection
+        const intersects = !(
+          nodeMaxX < minX ||
+          nodeMinX > maxX ||
+          nodeMaxY < minY ||
+          nodeMinY > maxY
+        );
+
+        if (intersects) {
+          newlySelected.add(dev.id);
+        }
+      });
+
+      setSelectedDeviceIds(newlySelected);
+      return;
+    }
+
+    // 3. SIMULTANEOUS MULTI-DEVICE DRAG LOGIC
+    if (isDraggingGroup && dragAnchorId) {
+      const dist = Math.hypot(
+        e.clientX - dragStartClientPos.current.x,
+        e.clientY - dragStartClientPos.current.y
+      );
+      if (dist > 4) {
+        isDragMovedRef.current = true;
+      }
+
+      let deltaX = pt.x - dragStartMouse.x;
+      let deltaY = pt.y - dragStartMouse.y;
+
+      if (snapToGrid) {
+        deltaX = Math.round(deltaX / 20) * 20;
+        deltaY = Math.round(deltaY / 20) * 20;
+      }
+
+      setPositions((prev) => {
+        const next = { ...prev };
+        const targetIds = selectedDeviceIds.size > 0 ? selectedDeviceIds : new Set([dragAnchorId]);
+        targetIds.forEach((devId) => {
+          const initPos = dragInitialPositions[devId] || prev[devId] || { x: 100, y: 100 };
+          const newX = Math.max(20, Math.min(2200, initPos.x + deltaX));
+          const newY = Math.max(20, Math.min(1600, initPos.y + deltaY));
+          next[devId] = { x: newX, y: newY };
+        });
+        return next;
+      });
+    }
+  };
+
+  // Canvas Mouse Up: Finalize Panning, Marquee & Save All Moved Positions Permanently
+  const handleCanvasMouseUp = async () => {
+    // Finalize Panning
+    if (isPanningRef.current) {
+      setIsPanning(false);
+    }
+
+    // Finalize Marquee selection
+    if (isMarqueeDragging) {
+      setIsMarqueeDragging(false);
+      setMarqueeStart(null);
+      setMarqueeEnd(null);
+    }
+
+    // Finalize Multi-Device Drag and save coordinates to storage
+    if (isDraggingGroupRef.current) {
+      const wasMoved = isDragMovedRef.current;
+      const anchorId = dragAnchorIdRef.current;
+      const currentSelected = selectedDeviceIdsRef.current;
+
+      setIsDraggingGroup(false);
+      setDragAnchorId(null);
+
+      if (wasMoved) {
+        const idsToUpdate: string[] = Array.from(
+          currentSelected.size > 0 ? currentSelected : (anchorId ? [anchorId] : [])
+        ) as string[];
+
+        const updatesToSave: { id: string; canvasX: number; canvasY: number }[] = [];
+        idsToUpdate.forEach((devId: string) => {
+          const p = positionsRef.current[devId];
+          if (p) {
+            updatesToSave.push({ id: devId, canvasX: p.x, canvasY: p.y });
+          }
+        });
+
+        if (updatesToSave.length > 0) {
+          await networkService.updatePositions(updatesToSave);
+          onRefresh();
+          showToast(`Saved new layout position for ${updatesToSave.length} device(s)`);
+        }
+      }
+    }
+  };
+
+  // Global window listeners for drag/pan release to ensure smooth drops
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDraggingGroupRef.current || isMarqueeDragging || isPanningRef.current) {
+        handleCanvasMouseUp();
+      }
+    };
+
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isMarqueeDragging]);
+
+  // Apply Strict Hierarchical Predecessor-Successor Order (Default Layout)
+  const applyHierarchicalLayout = async () => {
+    const hierarchical = computeHierarchicalOrder(devices);
+    setPositions(hierarchical);
+    const updates = (Object.entries(hierarchical) as [string, Point][]).map(([id, p]) => ({
+      id,
+      canvasX: p.x,
+      canvasY: p.y,
+    }));
+    await networkService.updatePositions(updates);
+    showToast('Arranged devices according to predecessor-successor hierarchy');
+    onRefresh();
+  };
+
+  // Preset Star Radial Layout
+  const applyStarLayout = async () => {
+    const hub =
+      devices.find((d) => d.deviceType === 'Core Switch') ||
+      devices.find((d) => d.deviceType === 'Router') ||
+      devices[0];
+
+    if (!hub) return;
+
+    const centerX = 750;
+    const centerY = 450;
+    const radius = 340;
+    const others = devices.filter((d) => d.id !== hub.id);
+    const nextPositions: Record<string, Point> = {
+      [hub.id]: { x: centerX, y: centerY },
+    };
+
+    others.forEach((dev, idx) => {
+      const angle = (idx / others.length) * 2 * Math.PI - Math.PI / 2;
+      const x = Math.round((centerX + radius * Math.cos(angle)) / 20) * 20;
+      const y = Math.round((centerY + radius * Math.sin(angle)) / 20) * 20;
+      nextPositions[dev.id] = { x, y };
+    });
+
+    setPositions(nextPositions);
+    const updates = (Object.entries(nextPositions) as [string, Point][]).map(([id, p]) => ({
+      id,
+      canvasX: p.x,
+      canvasY: p.y,
+    }));
+    await networkService.updatePositions(updates);
+    showToast('Applied Star & Radial Hub Topology Layout');
+    onRefresh();
+  };
+
+  // Preset Grid Layout
+  const applyGridLayout = async () => {
+    const cols = 4;
+    const spacingX = 290;
+    const spacingY = 160;
+    const startX = 80;
+    const startY = 60;
+
+    const nextPositions: Record<string, Point> = {};
+    devices.forEach((dev, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      nextPositions[dev.id] = {
+        x: startX + col * spacingX,
+        y: startY + row * spacingY,
+      };
+    });
+
+    setPositions(nextPositions);
+    const updates = (Object.entries(nextPositions) as [string, Point][]).map(([id, p]) => ({
+      id,
+      canvasX: p.x,
+      canvasY: p.y,
+    }));
+    await networkService.updatePositions(updates);
+    showToast('Arranged nodes in structured grid');
+    onRefresh();
+  };
+
+  // Bulk Alignment Tools for Selected Devices
+  const handleAlignSelectedHorizontally = async () => {
+    if (selectedDeviceIds.size <= 1) return;
+    const selectedList = Array.from(selectedDeviceIds) as string[];
+    const firstY = positions[selectedList[0]]?.y ?? 100;
+
+    const next = { ...positions };
+    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
+
+    selectedList.forEach((id: string) => {
+      if (next[id]) {
+        next[id] = { ...next[id], y: firstY };
+        updates.push({ id, canvasX: next[id].x, canvasY: firstY });
+      }
+    });
+
+    setPositions(next);
+    await networkService.updatePositions(updates);
+    showToast(`Aligned ${selectedDeviceIds.size} devices horizontally`);
+  };
+
+  const handleAlignSelectedVertically = async () => {
+    if (selectedDeviceIds.size <= 1) return;
+    const selectedList = Array.from(selectedDeviceIds) as string[];
+    const firstX = positions[selectedList[0]]?.x ?? 100;
+
+    const next = { ...positions };
+    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
+
+    selectedList.forEach((id: string) => {
+      if (next[id]) {
+        next[id] = { ...next[id], x: firstX };
+        updates.push({ id, canvasX: firstX, canvasY: next[id].y });
+      }
+    });
+
+    setPositions(next);
+    await networkService.updatePositions(updates);
+    showToast(`Aligned ${selectedDeviceIds.size} devices vertically`);
+  };
+
+  const handleDistributeSelectedHorizontally = async () => {
+    if (selectedDeviceIds.size <= 2) return;
+    const selectedList = (Array.from(selectedDeviceIds) as string[]).sort(
+      (a: string, b: string) => (positions[a]?.x || 0) - (positions[b]?.x || 0)
+    );
+
+    const firstX = positions[selectedList[0]]?.x || 100;
+    const lastX = positions[selectedList[selectedList.length - 1]]?.x || 800;
+    const step = (lastX - firstX) / (selectedList.length - 1);
+
+    const next = { ...positions };
+    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
+
+    selectedList.forEach((id: string, idx: number) => {
+      if (next[id]) {
+        const newX = Math.round((firstX + idx * step) / 20) * 20;
+        next[id] = { ...next[id], x: newX };
+        updates.push({ id, canvasX: newX, canvasY: next[id].y });
+      }
+    });
+
+    setPositions(next);
+    await networkService.updatePositions(updates);
+    showToast(`Distributed ${selectedDeviceIds.size} devices evenly`);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedDeviceIds(new Set(devices.map((d) => d.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedDeviceIds(new Set());
+  };
+
+  // Interactive Cable Connection Workflow
+  const handleStartConnect = (e: React.MouseEvent, sourceId: string) => {
+    e.stopPropagation();
+    setIsConnecting(true);
+    setConnectingSourceId(sourceId);
+    showToast(`Click any target device node to attach cable from ${deviceMap.get(sourceId)?.deviceName}`);
+  };
+
+  const handleTargetConnect = async (e: React.MouseEvent, targetId: string) => {
+    e.stopPropagation();
+    if (!isConnecting || !connectingSourceId || !currentUser) return;
+    if (connectingSourceId === targetId) {
+      showToast('Cannot connect device to itself');
+      setIsConnecting(false);
+      setConnectingSourceId(null);
+      return;
+    }
+
+    try {
+      const source = deviceMap.get(connectingSourceId);
+      const cableType = source?.connectionType || 'Ethernet Cat6';
+      await networkService.connectNodes(
+        connectingSourceId,
+        targetId,
+        currentUser,
+        cableType,
+        CABLE_CONFIGS[cableType].speedDefault
+      );
+      showToast(
+        `Connected cable: ${deviceMap.get(connectingSourceId)?.deviceName} ➔ ${deviceMap.get(targetId)?.deviceName}`
+      );
+      onRefresh();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to link nodes');
+    } finally {
+      setIsConnecting(false);
+      setConnectingSourceId(null);
+    }
+  };
+
+  const cancelConnect = () => {
+    setIsConnecting(false);
+    setConnectingSourceId(null);
+  };
+
+  const handleDisconnectCable = async (sourceId: string, targetId: string) => {
+    if (!currentUser) return;
+    try {
+      await networkService.disconnectNodes(sourceId, targetId, currentUser);
+      setSelectedCable(null);
+      showToast(`Disconnected cable between nodes`);
+      onRefresh();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to disconnect');
+    }
+  };
+
+  const handleChangeCableType = async (
+    targetDevId: string,
+    newType: NetworkConnectionType
+  ) => {
+    if (!currentUser) return;
+    try {
+      await networkService.updateDevice(
+        targetDevId,
+        {
+          connectionType: newType,
+          portSpeed: CABLE_CONFIGS[newType].speedDefault,
+        },
+        currentUser
+      );
+      if (selectedCable) {
+        setSelectedCable({ ...selectedCable, type: newType, speed: CABLE_CONFIGS[newType].speedDefault });
+      }
+      showToast(`Cable medium updated to ${newType}`);
+      onRefresh();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update cable');
+    }
+  };
+
+  // Collect All Physical / Logical Cable Edges with natural port endpoints
+  const edges = useMemo(() => {
+    const list: {
+      id: string;
+      sourceId: string;
+      targetId: string;
+      type: NetworkConnectionType;
+      speed?: string;
+      path: string;
+      sourcePos: AnchorPoint;
+      targetPos: AnchorPoint;
+    }[] = [];
+
+    devices.forEach((dev) => {
+      const predId = dev.predecessorId || dev.uplinkDeviceId;
+      if (predId && deviceMap.has(predId) && positions[predId] && positions[dev.id]) {
+        const p1 = positions[predId];
+        const p2 = positions[dev.id];
+        const cableInfo = getBestCableEndpoints(p1, p2);
+
+        list.push({
+          id: `${predId}->${dev.id}`,
+          sourceId: predId,
+          targetId: dev.id,
+          type: dev.connectionType || 'Ethernet Cat6',
+          speed: dev.portSpeed || '1 Gbps',
+          path: cableInfo.path,
+          sourcePos: cableInfo.source,
+          targetPos: cableInfo.target,
+        });
+      }
+    });
+
+    return list;
+  }, [devices, positions, deviceMap]);
+
+  // Compute smooth curved cubic bezier path for rubberband connection
+  const getLiveRubberbandPath = (sourcePos: Point, mouse: Point) => {
+    const anchors = getNodeAnchors(sourcePos);
+    let bestAnchor = anchors.bottom;
+    let minD = Infinity;
+
+    Object.values(anchors).forEach((a) => {
+      const d = Math.hypot(mouse.x - a.x, mouse.y - a.y);
+      if (d < minD) {
+        minD = d;
+        bestAnchor = a;
+      }
+    });
+
+    const dist = Math.hypot(mouse.x - bestAnchor.x, mouse.y - bestAnchor.y);
+    const curvature = Math.max(30, Math.min(120, dist * 0.4));
+    const cx = bestAnchor.x + bestAnchor.normal.x * curvature;
+    const cy = bestAnchor.y + bestAnchor.normal.y * curvature;
+
+    return {
+      d: `M ${bestAnchor.x} ${bestAnchor.y} Q ${cx} ${cy}, ${mouse.x} ${mouse.y}`,
+      start: bestAnchor,
+    };
+  };
+
+  const getDeviceIcon = (type: NetworkDevice['deviceType'], className = 'w-5 h-5') => {
+    switch (type) {
+      case 'Starlink Terminal':
+        return <Radio className={className} />;
+      case 'Router':
+        return <Network className={className} />;
+      case 'Core Switch':
+      case 'Distribution Switch':
+      case 'Switch':
+        return <Layers className={className} />;
+      case 'Server':
+        return <Server className={className} />;
+      case 'Access Point':
+        return <Wifi className={className} />;
+      case 'Firewall':
+        return <Shield className={className} />;
+      default:
+        return <Cpu className={className} />;
+    }
+  };
+
+  // Marquee Selection Box Calculations
+  const marqueeBox = useMemo(() => {
+    if (!isMarqueeDragging || !marqueeStart || !marqueeEnd) return null;
+    const x = Math.min(marqueeStart.x, marqueeEnd.x);
+    const y = Math.min(marqueeStart.y, marqueeEnd.y);
+    const width = Math.abs(marqueeStart.x - marqueeEnd.x);
+    const height = Math.abs(marqueeStart.y - marqueeEnd.y);
+    return { x, y, width, height };
+  }, [isMarqueeDragging, marqueeStart, marqueeEnd]);
+
+  return (
+    <div className="flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative select-none">
+      {/* Canvas Action Bar */}
+      <div className="flex flex-wrap items-center justify-between p-3.5 bg-slate-900/90 border-b border-slate-800 gap-3 z-30">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Tool Mode Selector: Pointer / Move & Pan, Hand Pan, Marquee Selection */}
+          <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+            <button
+              onClick={() => setActiveTool('pointer')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeTool === 'pointer'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Pointer Mode: Move nodes, or drag background to pan view"
+            >
+              <MousePointer className="w-3.5 h-3.5" />
+              <span>Pointer & Move</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('pan')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeTool === 'pan'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Hand Tool: Click & drag anywhere to pan the canvas (Hold Spacebar as shortcut)"
+            >
+              <Hand className="w-3.5 h-3.5" />
+              <span>Pan Canvas</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('marquee')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeTool === 'marquee'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Box Marquee Selection Tool"
+            >
+              <BoxSelect className="w-3.5 h-3.5" />
+              <span>Marquee Tool</span>
+            </button>
+          </div>
+
+          {selectedDeviceIds.size > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1 bg-sky-950/90 border border-sky-600 text-sky-300 rounded-xl text-xs font-bold animate-fade-in">
+              <CheckSquare className="w-3.5 h-3.5 text-sky-400" />
+              <span>{selectedDeviceIds.size} selected</span>
+              <button
+                onClick={handleClearSelection}
+                className="ml-1 p-0.5 hover:bg-sky-900 rounded text-sky-300 hover:text-white"
+                title="Deselect All"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {isConnecting && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-amber-950/80 border border-amber-600 rounded-xl text-amber-300 text-xs font-bold animate-pulse">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>Wiring: Click any port or any device node to attach cable</span>
+              <button
+                onClick={cancelConnect}
+                className="ml-1 p-0.5 hover:bg-amber-900 rounded text-amber-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Layout & Alignment Presets */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Multi-Selection Bulk Alignment Controls */}
+          {selectedDeviceIds.size > 1 && (
+            <div className="flex items-center bg-sky-950/80 border border-sky-700/80 p-0.5 rounded-xl gap-1 animate-fade-in">
+              <button
+                onClick={handleAlignSelectedHorizontally}
+                className="px-2 py-1 text-[11px] font-bold text-sky-200 hover:bg-sky-900 rounded-lg transition"
+                title="Align all selected nodes along horizontal Y axis"
+              >
+                Align Row
+              </button>
+              <button
+                onClick={handleAlignSelectedVertically}
+                className="px-2 py-1 text-[11px] font-bold text-sky-200 hover:bg-sky-900 rounded-lg transition"
+                title="Align all selected nodes along vertical X axis"
+              >
+                Align Column
+              </button>
+              {selectedDeviceIds.size > 2 && (
+                <button
+                  onClick={handleDistributeSelectedHorizontally}
+                  className="px-2 py-1 text-[11px] font-bold text-sky-200 hover:bg-sky-900 rounded-lg transition"
+                  title="Distribute selected nodes evenly along X axis"
+                >
+                  Distribute
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Center Viewport Button */}
+          <button
+            onClick={centerCanvasView}
+            title="Center viewport on devices"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-xl transition cursor-pointer"
+          >
+            <Compass className="w-3.5 h-3.5 text-sky-400" />
+            <span>Center View</span>
+          </button>
+
+          <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+            <button
+              title="Arrange according to Predecessor-Successor Hierarchy"
+              onClick={applyHierarchicalLayout}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-sky-300 hover:text-white hover:bg-slate-700 rounded-lg transition cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+              <span>Hierarchical Tree</span>
+            </button>
+            <button
+              title="Arrange in Radial Star Hub"
+              onClick={applyStarLayout}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Star Hub</span>
+            </button>
+            <button
+              title="Arrange in Grid Matrix"
+              onClick={applyGridLayout}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition cursor-pointer"
+            >
+              <Grid className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Grid</span>
+            </button>
+          </div>
+
+          {/* Grid Snap Toggle */}
+          <button
+            onClick={() => setSnapToGrid(!snapToGrid)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+              snapToGrid
+                ? 'bg-sky-600/20 border-sky-500 text-sky-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+            title={snapToGrid ? 'Snap-to-Grid: Active (20px)' : 'Snap-to-Grid: Disabled'}
+          >
+            <Grid className="w-3.5 h-3.5" />
+            <span className="text-[11px] font-mono">Snap {snapToGrid ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {/* Zoom Controls */}
+          <div className="flex items-center bg-slate-800/90 rounded-xl border border-slate-700 p-0.5">
+            <button
+              onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.1))}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 cursor-pointer"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span className="px-2 text-[10px] font-mono text-slate-300 font-bold">
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            <button
+              onClick={() => setZoomLevel((z) => Math.min(1.4, z + 0.1))}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 cursor-pointer"
+              title="Zoom In"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            {zoomLevel !== 1 && (
+              <button
+                onClick={() => setZoomLevel(1)}
+                className="px-1.5 text-[10px] text-sky-400 hover:underline cursor-pointer"
+              >
+                100%
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Cable Legend Bar & Selection Hints */}
+      <div className="flex flex-wrap items-center justify-between px-4 py-2 bg-slate-900/60 border-b border-slate-800 text-[11px] z-20 gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-slate-400 font-semibold flex items-center gap-1">
+            <Cable className="w-3.5 h-3.5 text-slate-400" />
+            <span>Cable Links:</span>
+          </span>
+
+          {Object.entries(CABLE_CONFIGS).map(([typeKey, cfg]) => (
+            <div key={typeKey} className="flex items-center gap-1.5">
+              <span
+                className="w-3 h-1 rounded-full shadow-xs"
+                style={{ backgroundColor: cfg.stroke, boxShadow: `0 0 6px ${cfg.glow}` }}
+              />
+              <span className="text-slate-300 font-medium">{cfg.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="text-slate-400 text-[11px] flex items-center gap-3">
+          <span>
+            💡 <strong>Drag canvas background</strong> to pan (left/right/up/down) • <strong>Click any part of device or ports</strong> to connect
+          </span>
+          {selectedDeviceIds.size < devices.length && (
+            <button
+              onClick={handleSelectAll}
+              className="text-sky-400 hover:text-sky-300 hover:underline font-semibold cursor-pointer"
+            >
+              Select All
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Draggable Viewport Canvas */}
+      <div
+        ref={containerRef}
+        onMouseDown={handleCanvasMouseDown}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseUp={handleCanvasMouseUp}
+        data-canvas-bg="true"
+        className={`relative w-full h-[760px] overflow-auto bg-slate-950 ${
+          isPanning
+            ? 'cursor-grabbing'
+            : activeTool === 'pan' || isSpacePressed
+            ? 'cursor-grab'
+            : activeTool === 'marquee' || isMarqueeDragging
+            ? 'cursor-crosshair'
+            : 'cursor-grab'
+        }`}
+        style={{
+          backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)`,
+          backgroundSize: `${20 * zoomLevel}px ${20 * zoomLevel}px`,
+        }}
+      >
+        {/* Scaled Workspace Container */}
+        <div
+          data-canvas-bg="true"
+          className="relative origin-top-left"
+          style={{
+            width: '2400px',
+            height: '1800px',
+            transform: `scale(${zoomLevel})`,
+          }}
+        >
+          {/* SVG LAYER FOR CABLES, LINES, ARROWS, AND SIGNALS */}
+          <svg
+            data-canvas-bg="true"
+            className="absolute inset-0 pointer-events-none w-full h-full z-10"
+            style={{ width: '2400px', height: '1800px' }}
+          >
+            <defs>
+              {/* Dynamic Arrow Markers */}
+              {Object.entries(CABLE_CONFIGS).map(([key, cfg]) => (
+                <marker
+                  key={`arrow-${key}`}
+                  id={`arrow-${key.replace(/[^a-zA-Z0-9]/g, '')}`}
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 10 5 L 0 9 z" fill={cfg.stroke} />
+                </marker>
+              ))}
+
+              {/* Glowing Filters */}
+              <filter id="cable-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {/* Render Static/Live Connected Cables */}
+            {edges.map((edge) => {
+              const cfg = CABLE_CONFIGS[edge.type] || CABLE_CONFIGS['Ethernet Cat6'];
+              const pathD = edge.path;
+              const markerId = `arrow-${edge.type.replace(/[^a-zA-Z0-9]/g, '')}`;
+              const isSelected =
+                selectedCable?.sourceId === edge.sourceId &&
+                selectedCable?.targetId === edge.targetId;
+
+              // Midpoint for badge / label
+              const midX = (edge.sourcePos.x + edge.targetPos.x) / 2;
+              const midY = (edge.sourcePos.y + edge.targetPos.y) / 2;
+
+              return (
+                <g key={edge.id} className="pointer-events-auto">
+                  {/* Thick Invisible Hit Area for easier clicking/hovering */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth="22"
+                    className="cursor-pointer"
+                    onClick={() =>
+                      setSelectedCable({
+                        sourceId: edge.sourceId,
+                        targetId: edge.targetId,
+                        type: edge.type,
+                        speed: edge.speed,
+                      })
+                    }
+                  />
+
+                  {/* Outer Glowing Stroke */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke={cfg.stroke}
+                    strokeWidth={isSelected ? 5 : 3.5}
+                    strokeOpacity={isSelected ? 0.9 : 0.65}
+                    strokeDasharray={cfg.dash}
+                    markerEnd={`url(#${markerId})`}
+                    filter="url(#cable-glow)"
+                    className="transition-all duration-300"
+                  />
+
+                  {/* Core High-Intensity Line */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeWidth={1.2}
+                    strokeOpacity={0.8}
+                    strokeDasharray="4 16"
+                    className="animate-[dash_1.5s_linear_infinite]"
+                  />
+
+                  {/* Flowing Traffic Pulse Animated Particle */}
+                  <circle r="3.5" fill="#ffffff">
+                    <animateMotion
+                      dur="2.8s"
+                      repeatCount="indefinite"
+                      path={pathD}
+                    />
+                  </circle>
+
+                  {/* Midpoint Interactive Cable Badge */}
+                  <g
+                    transform={`translate(${midX}, ${midY})`}
+                    className="cursor-pointer group"
+                    onClick={() =>
+                      setSelectedCable({
+                        sourceId: edge.sourceId,
+                        targetId: edge.targetId,
+                        type: edge.type,
+                        speed: edge.speed,
+                      })
+                    }
+                  >
+                    <rect
+                      x="-45"
+                      y="-11"
+                      width="90"
+                      height="22"
+                      rx="6"
+                      fill="#0f172a"
+                      stroke={cfg.stroke}
+                      strokeWidth={isSelected ? 2 : 1}
+                      className="shadow-md transition group-hover:scale-105"
+                    />
+                    <text
+                      x="0"
+                      y="4"
+                      textAnchor="middle"
+                      fill="#e2e8f0"
+                      fontSize="9"
+                      fontFamily="monospace"
+                      fontWeight="bold"
+                    >
+                      {edge.speed || cfg.label}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+
+            {/* LIVE RUBBERBAND CABLE (During Wire Connection Mode) */}
+            {isConnecting && connectingSourceId && positions[connectingSourceId] && (
+              <g>
+                {(() => {
+                  const live = getLiveRubberbandPath(positions[connectingSourceId], mousePos);
+                  return (
+                    <>
+                      <path
+                        d={live.d}
+                        fill="none"
+                        stroke="#38bdf8"
+                        strokeWidth="3.5"
+                        strokeDasharray="5 3"
+                        className="animate-pulse"
+                      />
+                      <circle
+                        cx={mousePos.x}
+                        cy={mousePos.y}
+                        r="6"
+                        fill="#38bdf8"
+                        className="animate-ping opacity-75"
+                      />
+                    </>
+                  );
+                })()}
+              </g>
+            )}
+          </svg>
+
+          {/* LIVE MARQUEE SELECTION RECTANGLE */}
+          {marqueeBox && (
+            <div
+              className="absolute pointer-events-none z-40 border-2 border-dashed border-sky-400 bg-sky-500/15 rounded-lg shadow-[0_0_15px_rgba(56,189,248,0.25)] transition-none"
+              style={{
+                left: `${marqueeBox.x}px`,
+                top: `${marqueeBox.y}px`,
+                width: `${marqueeBox.width}px`,
+                height: `${marqueeBox.height}px`,
+              }}
+            />
+          )}
+
+          {/* RENDER HARDWARE DEVICE NODES */}
+          {devices.map((device) => {
+            const pos = positions[device.id] || { x: 100, y: 100 };
+            const isSelected = selectedDeviceIds.has(device.id);
+            const isDraggingThis = isDraggingGroup && isSelected;
+            const isSourceForWiring = connectingSourceId === device.id;
+            const pred = device.predecessorId ? deviceMap.get(device.predecessorId) : null;
+
+            return (
+              <div
+                key={device.id}
+                onMouseDown={(e) => handleNodeMouseDown(e, device.id)}
+                onClick={(e) => {
+                  if (isDragMovedRef.current) {
+                    // Suppress click event if user was dragging/moving the node
+                    return;
+                  }
+                  if (isConnecting) {
+                    // ANY part of device can be clicked to complete connection
+                    handleTargetConnect(e, device.id);
+                  } else {
+                    // Select node on canvas without opening modal dialog
+                    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                      const next = new Set(selectedDeviceIds);
+                      if (next.has(device.id)) next.delete(device.id);
+                      else next.add(device.id);
+                      setSelectedDeviceIds(next);
+                    } else {
+                      setSelectedDeviceIds(new Set([device.id]));
+                    }
+                  }
+                }}
+                style={{
+                  transform: `translate(${pos.x}px, ${pos.y}px)`,
+                  width: `${NODE_WIDTH}px`,
+                  minHeight: `${NODE_HEIGHT}px`,
+                }}
+                className={`absolute z-20 rounded-2xl p-3.5 transition-all border ${
+                  isConnecting
+                    ? isSourceForWiring
+                      ? 'shadow-2xl ring-4 ring-amber-500/60 bg-slate-900 border-amber-400 animate-pulse'
+                      : 'bg-slate-900/95 border-emerald-500/60 ring-2 ring-emerald-500/40 hover:ring-4 hover:ring-emerald-400 hover:border-emerald-300 hover:bg-slate-850 cursor-pointer scale-[1.01]'
+                    : isSelected
+                    ? 'ring-3 ring-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.5)] bg-slate-900 border-sky-400 z-30 scale-[1.02] cursor-grab active:cursor-grabbing'
+                    : 'bg-slate-900/90 hover:bg-slate-900 border-slate-700/80 hover:border-slate-500 shadow-xl cursor-grab active:cursor-grabbing'
+                } ${isDraggingThis ? 'opacity-95' : ''}`}
+              >
+                {/* Visual Connection Overlay during Wiring Mode */}
+                {isConnecting && !isSourceForWiring && (
+                  <div className="absolute inset-0 rounded-2xl bg-emerald-500/10 border-2 border-emerald-400/80 flex items-center justify-center pointer-events-none z-30 backdrop-blur-[1px]">
+                    <span className="bg-emerald-950/90 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500 flex items-center gap-1 shadow-lg">
+                      <Zap className="w-3 h-3 text-emerald-400" />
+                      <span>Click to Connect</span>
+                    </span>
+                  </div>
+                )}
+
+                {/* Selection Checkbox Indicator */}
+                {isSelected && (
+                  <div className="absolute top-2 right-2 p-0.5 rounded bg-sky-500 text-slate-950 shadow-md z-20">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  </div>
+                )}
+
+                {/* --- 4 MULTI-DIRECTIONAL PORT ANCHOR PINS (Top, Bottom, Left, Right) --- */}
+                {/* 1. Top Port Pin */}
+                <div
+                  title="Top Port: Click to connect or snap cable"
+                  onClick={(e) => {
+                    if (isConnecting) handleTargetConnect(e, device.id);
+                    else handleStartConnect(e, device.id);
+                  }}
+                  className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-slate-950 border-2 border-slate-600 hover:border-emerald-400 hover:bg-emerald-950 flex items-center justify-center cursor-pointer transition shadow-md group z-30"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400 group-hover:bg-emerald-400" />
+                </div>
+
+                {/* 2. Bottom Port Pin */}
+                <div
+                  title="Bottom Port: Click to connect or snap cable"
+                  onClick={(e) => {
+                    if (isConnecting) handleTargetConnect(e, device.id);
+                    else handleStartConnect(e, device.id);
+                  }}
+                  className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-slate-950 border-2 border-slate-600 hover:border-emerald-400 hover:bg-emerald-950 flex items-center justify-center cursor-pointer transition shadow-md group z-30"
+                >
+                  <Plus className="w-3 h-3 text-slate-400 group-hover:text-emerald-300 transition" />
+                </div>
+
+                {/* 3. Left Port Pin */}
+                <div
+                  title="Left Port: Click to connect or snap cable"
+                  onClick={(e) => {
+                    if (isConnecting) handleTargetConnect(e, device.id);
+                    else handleStartConnect(e, device.id);
+                  }}
+                  className="absolute top-1/2 -left-2.5 -translate-y-1/2 w-5 h-5 rounded-full bg-slate-950 border-2 border-slate-600 hover:border-emerald-400 hover:bg-emerald-950 flex items-center justify-center cursor-pointer transition shadow-md group z-30"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400 group-hover:bg-emerald-400" />
+                </div>
+
+                {/* 4. Right Port Pin */}
+                <div
+                  title="Right Port: Click to connect or snap cable"
+                  onClick={(e) => {
+                    if (isConnecting) handleTargetConnect(e, device.id);
+                    else handleStartConnect(e, device.id);
+                  }}
+                  className="absolute top-1/2 -right-2.5 -translate-y-1/2 w-5 h-5 rounded-full bg-slate-950 border-2 border-slate-600 hover:border-emerald-400 hover:bg-emerald-950 flex items-center justify-center cursor-pointer transition shadow-md group z-30"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400 group-hover:bg-emerald-400" />
+                </div>
+
+                {/* Node Header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 pr-4">
+                    <div
+                      className={`p-2 rounded-xl shrink-0 ${
+                        device.deviceType === 'Starlink Terminal'
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                          : device.deviceType === 'Router'
+                          ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30'
+                          : ['Core Switch', 'Distribution Switch', 'Switch'].includes(device.deviceType)
+                          ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+                          : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                      }`}
+                    >
+                      {getDeviceIcon(device.deviceType, 'w-4 h-4')}
+                    </div>
+
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-white truncate" title={device.deviceName}>
+                        {device.deviceName}
+                      </h4>
+                      <div className="text-[10px] font-mono text-sky-400 font-semibold truncate">
+                        {device.ipAddress}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status Indicator */}
+                  {!isSelected && (
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        device.status === 'Online'
+                          ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
+                          : device.status === 'Warning'
+                          ? 'bg-amber-400'
+                          : 'bg-rose-500'
+                      }`}
+                      title={`Status: ${device.status}`}
+                    />
+                  )}
+                </div>
+
+                {/* Node Metadata Badges */}
+                <div className="mt-2.5 flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-slate-800/80">
+                  <span className="truncate max-w-[130px]" title={device.location}>
+                    {device.location}
+                  </span>
+                  <span className="font-mono text-slate-500 text-[9px]">
+                    {device.portsCount ? `${device.activePorts || 0}/${device.portsCount}p` : 'Port 1'}
+                  </span>
+                </div>
+
+                {/* Action Hover Toolbar (Clone, Edit, Delete, Connect) */}
+                {canManage && (
+                  <div className="mt-2 flex items-center justify-between pt-1.5 border-t border-slate-800/60 text-xs">
+                    <button
+                      title="Clone / Duplicate this device"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloneDevice(device);
+                      }}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-sky-300 hover:text-white hover:bg-sky-600/30 transition cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3 text-sky-400" />
+                      <span>Clone</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        title="Inspect Device Details"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectDevice(device);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
+                      >
+                        <Info className="w-3 h-3" />
+                      </button>
+                      <button
+                        title="Wire / Connect Cable to another node"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartConnect(e, device.id);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-amber-950/60 cursor-pointer"
+                      >
+                        <Link2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        title="Edit Node Settings"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditDevice(device);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        title="Delete Device"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteDevice(device);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/60 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* CABLE INSPECTION & MANAGEMENT DRAWER / MODAL */}
+      {selectedCable && (
+        <div className="p-4 bg-slate-900 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 z-30">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-sky-950/80 border border-sky-800 text-sky-400">
+              <Cable className="w-5 h-5" />
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                <span>{deviceMap.get(selectedCable.sourceId)?.deviceName}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-sky-400" />
+                <span>{deviceMap.get(selectedCable.targetId)?.deviceName}</span>
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                Connected link: <strong className="text-white">{selectedCable.type}</strong> ({selectedCable.speed || '1 Gbps'})
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {canManage && (
+              <>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span>Switch Medium:</span>
+                  <select
+                    value={selectedCable.type}
+                    onChange={(e) =>
+                      handleChangeCableType(
+                        selectedCable.targetId,
+                        e.target.value as NetworkConnectionType
+                      )
+                    }
+                    className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none"
+                  >
+                    {Object.keys(CABLE_CONFIGS).map((typeKey) => (
+                      <option key={typeKey} value={typeKey}>
+                        {typeKey}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={() =>
+                    handleDisconnectCable(selectedCable.sourceId, selectedCable.targetId)
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/80 border border-rose-800 text-rose-300 hover:bg-rose-900 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  <Unlink2 className="w-3.5 h-3.5" />
+                  <span>Sever Cable (Disconnect)</span>
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={() => setSelectedCable(null)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="absolute bottom-4 right-4 bg-slate-800 border border-slate-700 text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold flex items-center gap-2 z-50 animate-fade-in">
+          <Activity className="w-4 h-4 text-sky-400 animate-spin" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
