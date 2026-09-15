@@ -1,0 +1,173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions for Role-Based Access Control
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserData().role == 'SUPER_ADMIN';
+    }
+    
+    function isITAdmin() {
+      return isAuthenticated() && (getUserData().role == 'SUPER_ADMIN' || getUserData().role == 'IT_ADMIN');
+    }
+    
+    function isITStaff() {
+      return isAuthenticated() && (
+        getUserData().role == 'SUPER_ADMIN' || 
+        getUserData().role == 'IT_ADMIN' || 
+        getUserData().role == 'IT_OFFICER'
+      );
+    }
+    
+    function isAuditor() {
+      return isAuthenticated() && getUserData().role == 'AUDITOR';
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isITAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Departments & Locations
+    match /departments/{deptId} {
+      allow read: if isAuthenticated();
+      allow write: if isITAdmin();
+    }
+    
+    match /locations/{locId} {
+      allow read: if isAuthenticated();
+      allow write: if isITAdmin();
+    }
+
+    // Helpdesk Tickets
+    match /tickets/{ticketId} {
+      // Staff can read their own tickets or department tickets; IT staff and Auditors can read all
+      allow read: if isAuthenticated() && (
+        isITStaff() || 
+        isAuditor() || 
+        resource.data.reportedBy.uid == request.auth.uid ||
+        getUserData().role == 'HOSPITAL_MANAGEMENT' ||
+        (getUserData().role == 'DEPARTMENT_HEAD' && resource.data.department == getUserData().department)
+      );
+      // Any authenticated staff can create tickets
+      allow create: if isAuthenticated() && request.resource.data.reportedBy.uid == request.auth.uid;
+      // IT staff can update tickets; reporting user can add comments or close/confirm resolution
+      allow update: if isAuthenticated() && (
+        isITStaff() || 
+        resource.data.reportedBy.uid == request.auth.uid
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // IT Assets & Asset History
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isITStaff();
+      allow delete: if isSuperAdmin();
+    }
+    
+    match /assetHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isITStaff();
+      allow update, delete: if false; // Immutable history
+    }
+
+    // Preventive Maintenance
+    match /maintenance/{maintenanceId} {
+      allow read: if isAuthenticated();
+      allow write: if isITStaff();
+    }
+
+    // Major Incidents & Timeline
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated();
+      allow write: if isITStaff();
+    }
+
+    // Hospital Systems
+    match /hospitalSystems/{systemId} {
+      allow read: if isAuthenticated();
+      allow write: if isITAdmin();
+    }
+
+    // Network Devices & Incidents
+    match /networkDevices/{deviceId} {
+      allow read: if isAuthenticated();
+      allow write: if isITStaff();
+    }
+    
+    match /networkIncidents/{incidentId} {
+      allow read: if isAuthenticated();
+      allow write: if isITStaff();
+    }
+
+    // Inventory & Transactions
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isITStaff() || getUserData().role == 'PROCUREMENT_OFFICER';
+      allow delete: if isSuperAdmin();
+    }
+    
+    match /inventoryTransactions/{txId} {
+      allow read: if isAuthenticated();
+      allow create: if isITStaff() || getUserData().role == 'PROCUREMENT_OFFICER';
+      allow update, delete: if false; // Transactions are immutable ledger entries
+    }
+
+    // Procurement Requests
+    match /procurementRequests/{reqId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isITAdmin() || getUserData().role == 'PROCUREMENT_OFFICER' || getUserData().role == 'DEPARTMENT_HEAD';
+      allow delete: if isSuperAdmin();
+    }
+
+    // Backups
+    match /backups/{backupId} {
+      allow read, write: if isITAdmin();
+    }
+
+    // Knowledge Base
+    match /knowledgeBase/{articleId} {
+      allow read: if isAuthenticated();
+      allow write: if isITStaff();
+    }
+
+    // In-App Notifications
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == 'ALL' || 
+        resource.data.userId == request.auth.uid
+      );
+      allow write: if isAuthenticated();
+    }
+
+    // Audit Logs - Strictly Append-Only, Read restricted to Super Admin & Auditor
+    match /auditLogs/{logId} {
+      allow read: if isSuperAdmin() || isAuditor();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Tamper-proof audit logs
+    }
+
+    // System Settings & SLA Rules
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    // Cloud Sync metadata collection
+    match /syncState/{docId} {
+      allow read, write: if isITStaff();
+    }
+  }
+}

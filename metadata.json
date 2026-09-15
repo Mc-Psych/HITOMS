@@ -1,0 +1,6 @@
+{
+  "name": "Hospital IT Operations Management System (HITOMS)",
+  "description": "Offline-first Hospital IT Operations Management System (HITOMS) for managing help desk tickets, IT assets, preventive maintenance, network infrastructure, major incidents, consumables inventory, procurement, local backups, and cloud synchronization.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

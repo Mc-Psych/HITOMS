@@ -1,0 +1,338 @@
+import {
+  type User,
+  type Department,
+  type LocationItem,
+  type Ticket,
+  type Asset,
+  type AssetHistoryEntry,
+  type MaintenanceRecord,
+  type Incident,
+  type HospitalSystem,
+  type NetworkDevice,
+  type NetworkIncident,
+  type InventoryItem,
+  type InventoryTransaction,
+  type ProcurementRequest,
+  type BackupRecord,
+  type KnowledgeArticle,
+  type AppNotification,
+  type AuditLog,
+  type SyncQueueItem,
+  type SyncConflict,
+  type SystemSettings,
+} from '../types';
+
+const DB_NAME = 'HITOMS_Local_Database_v1';
+const DB_VERSION = 1;
+
+export const STORE_NAMES = {
+  users: 'users',
+  departments: 'departments',
+  locations: 'locations',
+  tickets: 'tickets',
+  assets: 'assets',
+  assetHistory: 'assetHistory',
+  maintenance: 'maintenance',
+  incidents: 'incidents',
+  hospitalSystems: 'hospitalSystems',
+  networkDevices: 'networkDevices',
+  networkIncidents: 'networkIncidents',
+  inventory: 'inventory',
+  inventoryTransactions: 'inventoryTransactions',
+  procurementRequests: 'procurementRequests',
+  backups: 'backups',
+  knowledgeBase: 'knowledgeBase',
+  notifications: 'notifications',
+  auditLogs: 'auditLogs',
+  syncQueue: 'syncQueue',
+  syncConflicts: 'syncConflicts',
+  settings: 'settings',
+} as const;
+
+export type StoreName = keyof typeof STORE_NAMES;
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+// Unique Device ID generation
+export function getDeviceId(): string {
+  let devId = localStorage.getItem('hitoms_device_id');
+  if (!devId) {
+    devId = 'DEV-HOSP-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+    localStorage.setItem('hitoms_device_id', devId);
+  }
+  return devId;
+}
+
+// Generate collision-resistant UUID
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'hit-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9);
+}
+
+// Open or initialize IndexedDB
+export function getDB(): Promise<IDBDatabase> {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+
+        // Create object stores
+        if (!db.objectStoreNames.contains(STORE_NAMES.users)) {
+          const s = db.createObjectStore(STORE_NAMES.users, { keyPath: 'id' });
+          s.createIndex('email', 'email', { unique: true });
+          s.createIndex('role', 'role', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.departments)) {
+          db.createObjectStore(STORE_NAMES.departments, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.locations)) {
+          db.createObjectStore(STORE_NAMES.locations, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.tickets)) {
+          const s = db.createObjectStore(STORE_NAMES.tickets, { keyPath: 'id' });
+          s.createIndex('ticketNumber', 'ticketNumber', { unique: true });
+          s.createIndex('status', 'status', { unique: false });
+          s.createIndex('department', 'department', { unique: false });
+          s.createIndex('priority', 'priority', { unique: false });
+          s.createIndex('assignedToUid', 'assignedTo.uid', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.assets)) {
+          const s = db.createObjectStore(STORE_NAMES.assets, { keyPath: 'id' });
+          s.createIndex('assetTag', 'assetTag', { unique: true });
+          s.createIndex('status', 'status', { unique: false });
+          s.createIndex('department', 'department', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.assetHistory)) {
+          const s = db.createObjectStore(STORE_NAMES.assetHistory, { keyPath: 'id' });
+          s.createIndex('assetId', 'assetId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.maintenance)) {
+          const s = db.createObjectStore(STORE_NAMES.maintenance, { keyPath: 'id' });
+          s.createIndex('status', 'status', { unique: false });
+          s.createIndex('scheduledDate', 'scheduledDate', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.incidents)) {
+          const s = db.createObjectStore(STORE_NAMES.incidents, { keyPath: 'id' });
+          s.createIndex('status', 'status', { unique: false });
+          s.createIndex('severity', 'severity', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.hospitalSystems)) {
+          db.createObjectStore(STORE_NAMES.hospitalSystems, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.networkDevices)) {
+          const s = db.createObjectStore(STORE_NAMES.networkDevices, { keyPath: 'id' });
+          s.createIndex('ipAddress', 'ipAddress', { unique: false });
+          s.createIndex('status', 'status', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.networkIncidents)) {
+          db.createObjectStore(STORE_NAMES.networkIncidents, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.inventory)) {
+          const s = db.createObjectStore(STORE_NAMES.inventory, { keyPath: 'id' });
+          s.createIndex('itemCode', 'itemCode', { unique: true });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.inventoryTransactions)) {
+          const s = db.createObjectStore(STORE_NAMES.inventoryTransactions, { keyPath: 'id' });
+          s.createIndex('itemId', 'itemId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.procurementRequests)) {
+          db.createObjectStore(STORE_NAMES.procurementRequests, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.backups)) {
+          db.createObjectStore(STORE_NAMES.backups, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.knowledgeBase)) {
+          db.createObjectStore(STORE_NAMES.knowledgeBase, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.notifications)) {
+          const s = db.createObjectStore(STORE_NAMES.notifications, { keyPath: 'id' });
+          s.createIndex('userId', 'userId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.auditLogs)) {
+          const s = db.createObjectStore(STORE_NAMES.auditLogs, { keyPath: 'id' });
+          s.createIndex('timestamp', 'timestamp', { unique: false });
+          s.createIndex('module', 'module', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.syncQueue)) {
+          const s = db.createObjectStore(STORE_NAMES.syncQueue, { keyPath: 'operationId' });
+          s.createIndex('status', 'status', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.syncConflicts)) {
+          db.createObjectStore(STORE_NAMES.syncConflicts, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
+          db.createObjectStore(STORE_NAMES.settings, { keyPath: 'id' });
+        }
+      };
+
+      request.onsuccess = (event) => {
+        resolve((event.target as IDBOpenDBRequest).result);
+      };
+
+      request.onerror = (event) => {
+        reject((event.target as IDBOpenDBRequest).error);
+      };
+    });
+  }
+  return dbPromise;
+}
+
+// Generic CRUD operations
+export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getFromStore<T>(storeName: StoreName, key: string): Promise<T | null> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function putToStore<T extends { id?: string; operationId?: string }>(
+  storeName: StoreName,
+  value: T
+): Promise<T> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const request = store.put(value);
+    request.onsuccess = () => resolve(value);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function putBatchToStore<T>(storeName: StoreName, values: T[]): Promise<void> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    for (const item of values) {
+      store.put(item);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function deleteFromStore(storeName: StoreName, key: string): Promise<void> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const request = store.delete(key);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function countStore(storeName: StoreName): Promise<number> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const request = store.count();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Next Sequential Ticket Number Generator (e.g. HIT-2026-000001)
+export async function getNextTicketNumber(): Promise<string> {
+  const tickets = await getAllFromStore<Ticket>('tickets');
+  const year = new Date().getFullYear();
+  const count = tickets.length + 1;
+  const padded = count.toString().padStart(6, '0');
+  return `HIT-${year}-${padded}`;
+}
+
+// Next Maintenance Number (e.g. MN-2026-001)
+export async function getNextMaintenanceNumber(): Promise<string> {
+  const list = await getAllFromStore<MaintenanceRecord>('maintenance');
+  const year = new Date().getFullYear();
+  const count = list.length + 1;
+  return `MN-${year}-${count.toString().padStart(3, '0')}`;
+}
+
+// Next Incident Number (e.g. INC-2026-001)
+export async function getNextIncidentNumber(): Promise<string> {
+  const list = await getAllFromStore<Incident>('incidents');
+  const year = new Date().getFullYear();
+  const count = list.length + 1;
+  return `INC-${year}-${count.toString().padStart(3, '0')}`;
+}
+
+// Next Procurement Request Number (e.g. PR-2026-001)
+export async function getNextProcurementNumber(): Promise<string> {
+  const list = await getAllFromStore<ProcurementRequest>('procurementRequests');
+  const year = new Date().getFullYear();
+  const count = list.length + 1;
+  return `PR-${year}-${count.toString().padStart(3, '0')}`;
+}
+
+// Next Asset Tag (e.g. AST-HOSP-00105)
+export async function getNextAssetTag(): Promise<string> {
+  const assets = await getAllFromStore<Asset>('assets');
+  const count = 100 + assets.length + 1;
+  return `AST-HOSP-00${count}`;
+}
+
+// Next Inventory Code (e.g. INV-025)
+export async function getNextInventoryCode(): Promise<string> {
+  const items = await getAllFromStore<InventoryItem>('inventory');
+  const count = items.length + 1;
+  return `INV-${count.toString().padStart(3, '0')}`;
+}
+
+// Next KB Article ID (e.g. KB-010)
+export async function getNextKnowledgeId(): Promise<string> {
+  const items = await getAllFromStore<KnowledgeArticle>('knowledgeBase');
+  const count = items.length + 1;
+  return `KB-${count.toString().padStart(3, '0')}`;
+}
+
+// Full Database Export for Local Backups
+export async function exportFullDatabase(): Promise<Record<string, any>> {
+  const backupData: Record<string, any> = {
+    _meta: {
+      exportedAt: new Date().toISOString(),
+      version: '1.0',
+      system: 'HITOMS Local Hospital Server',
+      deviceId: getDeviceId(),
+    },
+  };
+
+  for (const key of Object.keys(STORE_NAMES) as StoreName[]) {
+    backupData[key] = await getAllFromStore(key);
+  }
+
+  return backupData;
+}
+
+// Restore Full Database from JSON Snapshot
+export async function restoreFullDatabase(snapshot: Record<string, any>): Promise<{ success: boolean; count: number }> {
+  let restoredItems = 0;
+  for (const key of Object.keys(STORE_NAMES) as StoreName[]) {
+    if (Array.isArray(snapshot[key])) {
+      await putBatchToStore(key, snapshot[key]);
+      restoredItems += snapshot[key].length;
+    }
+  }
+  return { success: true, count: restoredItems };
+}
