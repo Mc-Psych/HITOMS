@@ -9,10 +9,10 @@ export const LOCAL_STORAGE_SETTINGS_KEY = 'hitoms_facility_settings';
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   id: 'main',
-  hospitalName: 'St. Jude General Hospital',
+  hospitalName: 'St. Mary Theresa Catholic Hospital',
   hospitalLogo: '',
   hospitalLanUrl: 'http://hitoms.local',
-  contactEmail: 'it-support@stjude-hospital.local',
+  contactEmail: 'it-support@stmarytheresa-hospital.local',
   contactPhone: '+1 (555) 234-5678',
   emergencyExtension: 'Ext. 9911',
   address: '104 Healthcare Boulevard, Ward 4',
@@ -37,6 +37,19 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   lastSuccessfulSync: null,
 };
 
+function normalizeFacilitySettings(settings: SystemSettings): SystemSettings {
+  if (!settings.hospitalName || settings.hospitalName.includes('St. Jude')) {
+    return {
+      ...settings,
+      hospitalName: 'St. Mary Theresa Catholic Hospital',
+      contactEmail: (!settings.contactEmail || settings.contactEmail.includes('stjude'))
+        ? 'it-support@stmarytheresa-hospital.local'
+        : settings.contactEmail,
+    };
+  }
+  return settings;
+}
+
 class SettingsService {
   /**
    * Get settings synchronously from localStorage cache if available
@@ -45,7 +58,8 @@ class SettingsService {
     try {
       const cached = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
       if (cached) {
-        return { ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(cached) };
+        const parsed = normalizeFacilitySettings({ ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(cached) });
+        return parsed;
       }
     } catch {
       // Fallback
@@ -64,19 +78,24 @@ class SettingsService {
       }
 
       if (stored) {
+        const normalized = normalizeFacilitySettings({ ...DEFAULT_SYSTEM_SETTINGS, ...stored });
+        if (stored.hospitalName && stored.hospitalName.includes('St. Jude')) {
+          await putToStore('settings', { ...normalized, id: 'main' });
+          await putToStore('settings', { ...normalized, id: 'app_settings' });
+        }
         // Cache to localStorage
         try {
-          localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(stored));
+          localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(normalized));
         } catch {
           // ignore
         }
-        return { ...DEFAULT_SYSTEM_SETTINGS, ...stored };
+        return normalized;
       }
 
       // Check localStorage if not in IndexedDB
       const cached = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
       if (cached) {
-        const parsed = { ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(cached) };
+        const parsed = normalizeFacilitySettings({ ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(cached) });
         await putToStore('settings', { ...parsed, id: 'main' });
         await putToStore('settings', { ...parsed, id: 'app_settings' });
         return parsed;

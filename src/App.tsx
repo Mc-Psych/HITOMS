@@ -414,6 +414,7 @@ export default function App() {
                 auditLogs={auditLogs}
                 syncQueue={syncQueue}
                 currentUser={currentUser}
+                systemSettings={systemSettings}
                 onNavigate={setCurrentView}
                 onOpenCreateTicket={() => setQuickTicketOpen(true)}
               />
@@ -459,6 +460,7 @@ export default function App() {
               <HospitalSystemsView
                 systems={hospitalSystems}
                 currentUser={currentUser}
+                systemSettings={systemSettings}
                 onRefresh={refreshAllData}
               />
             )}
@@ -508,6 +510,7 @@ export default function App() {
                 maintenance={maintenanceRecords}
                 incidents={incidents}
                 inventory={inventoryItems}
+                systemSettings={systemSettings}
               />
             )}
 

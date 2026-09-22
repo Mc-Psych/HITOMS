@@ -22,6 +22,7 @@ import {
   type HospitalSystem,
   type InventoryItem,
   type User,
+  type SystemSettings,
 } from '../types';
 
 interface DashboardViewProps {
@@ -38,6 +39,7 @@ interface DashboardViewProps {
   auditLogs?: any[];
   syncQueue?: any[];
   currentUser?: User | null;
+  systemSettings?: SystemSettings | null;
   onNavigate?: (viewId: string) => void;
   onOpenCreateTicket?: () => void;
 }
@@ -53,6 +55,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   inventory = [],
   inventoryItems = [],
   currentUser,
+  systemSettings,
   onNavigate = (_viewId: string) => {},
   onOpenCreateTicket = () => {},
 }) => {
@@ -84,7 +87,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div>
           <h1 className="text-xl sm:text-2xl font-black tracking-tight">Hospital IT Operations Center</h1>
           <p className="text-xs sm:text-sm text-slate-300 mt-1">
-            Real-time local node telemetry for St. Jude Hospital. All services operating locally on LAN.
+            Real-time local node telemetry for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}. All services operating locally on LAN.
           </p>
         </div>
       </div>

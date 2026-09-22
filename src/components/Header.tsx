@@ -123,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <span className="font-extrabold text-xs sm:text-sm md:text-base tracking-wide text-white truncate max-w-[120px] xs:max-w-[160px] sm:max-w-none">
-                {systemSettings?.hospitalName ? systemSettings.hospitalName : 'HITOMS'}
+                {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}
               </span>
               <span className="hidden lg:inline-block text-[10px] font-semibold uppercase tracking-wider bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded-full shrink-0">
                 Offline-First Ops

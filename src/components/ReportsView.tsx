@@ -14,6 +14,7 @@ import {
   type MaintenanceRecord,
   type Incident,
   type InventoryItem,
+  type SystemSettings,
 } from '../types';
 
 interface ReportsViewProps {
@@ -22,6 +23,7 @@ interface ReportsViewProps {
   maintenance?: MaintenanceRecord[];
   incidents?: Incident[];
   inventory?: InventoryItem[];
+  systemSettings?: SystemSettings | null;
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -30,6 +32,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   maintenance = [],
   incidents = [],
   inventory = [],
+  systemSettings,
 }) => {
   const safeTickets = tickets || [];
   const safeAssets = assets || [];
@@ -166,7 +169,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <h3 className="font-bold text-sm text-slate-900 dark:text-white">
               Report Preview: {reportType}
             </h3>
-            <p className="text-xs text-slate-400">Generated on {new Date().toLocaleDateString()} for St. Jude Hospital Management</p>
+            <p className="text-xs text-slate-400">
+              Generated on {new Date().toLocaleDateString()} for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'} Management
+            </p>
           </div>
           <span className="font-mono text-xs font-bold text-sky-600">
             Node: hitoms.local

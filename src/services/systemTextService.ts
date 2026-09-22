@@ -15,7 +15,7 @@ export const SYSTEM_TEXT_CATALOG: SystemTextItem[] = [
     key: 'hospital_name',
     label: 'Hospital Name',
     category: 'Branding & Header',
-    defaultValue: 'St. Jude General Hospital',
+    defaultValue: 'St. Mary Theresa Catholic Hospital',
     description: 'Primary facility display name in header and system banners',
   },
   {
@@ -52,7 +52,7 @@ export const SYSTEM_TEXT_CATALOG: SystemTextItem[] = [
     key: 'dash_welcome_subtitle',
     label: 'Operations Center Banner Subtitle',
     category: 'Dashboard',
-    defaultValue: 'Real-time local node telemetry for St. Jude Hospital. All services operating locally on LAN.',
+    defaultValue: 'Real-time local node telemetry for St. Mary Theresa Catholic Hospital. All services operating locally on LAN.',
     description: 'Descriptive subtitle beneath the dashboard heading',
   },
   {
@@ -112,7 +112,7 @@ export const SYSTEM_TEXT_CATALOG: SystemTextItem[] = [
     key: 'systems_page_subtitle',
     label: 'Hospital Systems Subtitle',
     category: 'Systems & Network',
-    defaultValue: 'Real-time latency, availability, and clinical service operational tracking for St. Jude Hospital.',
+    defaultValue: 'Real-time latency, availability, and clinical service operational tracking for St. Mary Theresa Catholic Hospital.',
     description: 'Subtitle for hospital systems page',
   },
   {

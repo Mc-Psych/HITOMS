@@ -1451,8 +1451,9 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   // 11. System Settings & Default SLA Rules
   let settings: SystemSettings = {
     id: 'main',
-    hospitalName: 'St. Jude Metropolitan Hospital',
+    hospitalName: 'St. Mary Theresa Catholic Hospital',
     hospitalLanUrl: 'http://hitoms.local',
+    contactEmail: 'it-support@stmarytheresa-hospital.local',
     cloudSyncEnabled: true,
     autoSyncIntervalSec: 30,
     offlinePolicy: {
@@ -1476,7 +1477,10 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   try {
     const rawCustom = localStorage.getItem('hitoms_facility_settings');
     if (rawCustom) {
-      settings = { ...settings, ...JSON.parse(rawCustom) };
+      const parsed = JSON.parse(rawCustom);
+      if (parsed.hospitalName && !parsed.hospitalName.includes('St. Jude')) {
+        settings = { ...settings, ...parsed };
+      }
     }
   } catch (e) {
     console.warn('[SeedData] Could not load custom facility settings from localStorage:', e);

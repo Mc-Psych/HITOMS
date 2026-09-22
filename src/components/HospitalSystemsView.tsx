@@ -13,19 +13,21 @@ import {
   Clock,
   Wifi,
 } from 'lucide-react';
-import { type HospitalSystem, type User } from '../types';
+import { type HospitalSystem, type User, type SystemSettings } from '../types';
 import { putToStore } from '../services/localDatabaseService';
 import { authService } from '../services/authService';
 
 interface HospitalSystemsViewProps {
   systems: HospitalSystem[];
   currentUser?: User | null;
+  systemSettings?: SystemSettings | null;
   onRefresh: () => void;
 }
 
 export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
   systems,
   currentUser,
+  systemSettings,
   onRefresh,
 }) => {
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
             <span>Core Hospital Systems & Telemetry</span>
           </h1>
           <p className="text-xs text-slate-500">
-            Real-time latency, availability, and clinical service operational tracking for St. Jude Hospital.
+            Real-time latency, availability, and clinical service operational tracking for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}.
           </p>
         </div>
 

@@ -38,6 +38,8 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
   const [matchedAsset, setMatchedAsset] = useState<Asset | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [isRequestingCamera, setIsRequestingCamera] = useState(false);
   const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -45,24 +47,34 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
   const animFrameIdRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Stop camera stream cleanly
+  // Stop camera stream cleanly and release hardware immediately
   const stopCamera = () => {
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
       animFrameIdRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
+      try {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (e) {
+        console.warn('Error stopping video stream tracks:', e);
+      }
       videoRef.current.srcObject = null;
     }
     setCameraActive(false);
+    setCameraEnabled(false);
+    setIsRequestingCamera(false);
   };
 
-  // Start live camera QR scanner loop
+  // Start live camera QR scanner loop on-demand when requested by user
   const startCamera = async () => {
     setCameraPermissionError(null);
+    setIsRequestingCamera(true);
     try {
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access API is not available in this browser environment.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
       });
@@ -71,13 +83,19 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
         videoRef.current.setAttribute('playsinline', 'true');
         await videoRef.current.play();
         setCameraActive(true);
+        setCameraEnabled(true);
+        setIsRequestingCamera(false);
         requestScanFrame();
       }
     } catch (err: any) {
       console.warn('Camera access error:', err);
-      setCameraPermissionError('Could not access live camera. Please use manual search or image upload.');
+      const msg = err?.name === 'NotAllowedError'
+        ? 'Camera permission was denied. You can still look up assets by tag/serial or upload a QR image.'
+        : 'Could not access live camera. Please use manual search or image upload.';
+      setCameraPermissionError(msg);
       setCameraActive(false);
-      setActiveTab('MANUAL');
+      setCameraEnabled(false);
+      setIsRequestingCamera(false);
     }
   };
 
@@ -117,16 +135,21 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
     animFrameIdRef.current = requestAnimationFrame(requestScanFrame);
   };
 
+  // Cleanly shut down camera if modal is closed or user navigates to manual/upload tabs
   useEffect(() => {
-    if (isOpen && activeTab === 'CAMERA') {
-      startCamera();
-    } else {
+    if (!isOpen) {
       stopCamera();
     }
     return () => {
       stopCamera();
     };
-  }, [isOpen, activeTab]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (activeTab !== 'CAMERA') {
+      stopCamera();
+    }
+  }, [activeTab]);
 
   if (!isOpen) return null;
 
@@ -337,36 +360,88 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
               {/* Tab 1: Live Camera View */}
               {activeTab === 'CAMERA' && (
                 <div className="space-y-3">
-                  <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
-                    <video
-                      ref={videoRef}
-                      className="w-full h-full object-cover"
-                      muted
-                      playsInline
-                    />
-                    <canvas ref={canvasRef} className="hidden" />
+                  {cameraActive ? (
+                    <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
+                      <video
+                        ref={videoRef}
+                        className="w-full h-full object-cover"
+                        muted
+                        playsInline
+                      />
+                      <canvas ref={canvasRef} className="hidden" />
 
-                    {/* Scanning Frame Reticle */}
-                    <div className="absolute inset-0 border-2 border-dashed border-sky-400/70 rounded-xl m-8 pointer-events-none flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-sky-400/80 animate-pulse shadow-sm shadow-sky-400" />
-                    </div>
-
-                    {!cameraActive && (
-                      <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-center p-4 text-slate-300">
-                        <Camera className="w-8 h-8 text-sky-400 mb-2 animate-bounce" />
-                        <p className="font-semibold text-xs">Initializing webcam feed...</p>
-                        {cameraPermissionError && (
-                          <p className="text-[11px] text-rose-400 mt-2 max-w-xs">
-                            {cameraPermissionError}
-                          </p>
-                        )}
+                      {/* Scanning Frame Reticle */}
+                      <div className="absolute inset-0 border-2 border-dashed border-sky-400/70 rounded-xl m-8 pointer-events-none flex items-center justify-center">
+                        <div className="w-full h-0.5 bg-sky-400/80 animate-pulse shadow-sm shadow-sky-400" />
                       </div>
-                    )}
-                  </div>
 
-                  <p className="text-center text-[11px] text-slate-400">
-                    Position the physical asset QR code label inside the reticle.
-                  </p>
+                      {/* Stop Camera Button */}
+                      <button
+                        type="button"
+                        onClick={stopCamera}
+                        className="absolute top-3 right-3 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 backdrop-blur-xs transition cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Stop Camera</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center p-6 text-center">
+                      <video ref={videoRef} className="hidden" muted playsInline />
+                      <canvas ref={canvasRef} className="hidden" />
+
+                      <div className="w-12 h-12 rounded-2xl bg-sky-950/80 border border-sky-800/80 flex items-center justify-center mb-3">
+                        <Camera className="w-6 h-6 text-sky-400" />
+                      </div>
+                      <h4 className="text-sm font-bold text-white mb-1">
+                        Optical QR Barcode Scanner
+                      </h4>
+                      <p className="text-xs text-slate-300 max-w-xs mb-4">
+                        Camera access is strictly on-demand. Click below to activate your webcam or mobile camera to scan asset QR labels.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={startCamera}
+                        disabled={isRequestingCamera}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-sky-950 cursor-pointer transition"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>{isRequestingCamera ? 'Requesting Camera Access...' : 'Start Camera Scanner'}</span>
+                      </button>
+
+                      {cameraPermissionError ? (
+                        <div className="mt-3 p-2.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-[11px] max-w-xs text-left">
+                          {cameraPermissionError}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 mt-3">
+                          No camera? Switch to{' '}
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('MANUAL')}
+                            className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                          >
+                            Enter Tag
+                          </button>{' '}
+                          or{' '}
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('FILE')}
+                            className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                          >
+                            Upload Photo
+                          </button>.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {cameraActive && (
+                    <p className="text-center text-[11px] text-slate-400">
+                      Position the physical asset QR code label inside the reticle.
+                    </p>
+                  )}
                 </div>
               )}
 

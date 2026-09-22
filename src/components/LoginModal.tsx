@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LogIn, Lock, User, AlertCircle, CheckCircle2, X, Building2, Server, Shield } from 'lucide-react';
 import { type User as UserType, type SystemSettings } from '../types';
 import { authService, extractSurname, getDefaultPasswordForSurname } from '../services/authService';
+import { settingsService } from '../services/settingsService';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -25,6 +26,36 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStaffPreset, setSelectedStaffPreset] = useState<UserType | null>(null);
+
+  // Dynamically sync facility settings so Login Page ALWAYS matches the facility details
+  const [activeSettings, setActiveSettings] = useState<SystemSettings>(() => {
+    return systemSettings || settingsService.getSettingsSync();
+  });
+
+  useEffect(() => {
+    if (systemSettings) {
+      setActiveSettings(systemSettings);
+    } else {
+      settingsService.getSettings().then((s) => {
+        if (s) setActiveSettings(s);
+      });
+    }
+  }, [systemSettings]);
+
+  useEffect(() => {
+    const handleSettingsUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<SystemSettings>;
+      if (customEvent.detail) {
+        setActiveSettings(customEvent.detail);
+      }
+    };
+    window.addEventListener('hitoms_settings_updated', handleSettingsUpdated);
+    return () => window.removeEventListener('hitoms_settings_updated', handleSettingsUpdated);
+  }, []);
+
+  const facilityName = activeSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
+  const facilityLogo = activeSettings?.hospitalLogo;
+  const facilityRegion = activeSettings?.regionOrDistrict;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -83,10 +114,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* Header Banner */}
         <div className="bg-gradient-to-r from-sky-700 to-indigo-800 px-6 py-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {systemSettings?.hospitalLogo ? (
+            {facilityLogo ? (
               <img
-                src={systemSettings.hospitalLogo}
-                alt="Logo"
+                src={facilityLogo}
+                alt="Hospital Logo"
                 referrerPolicy="no-referrer"
                 className="w-10 h-10 rounded-xl object-contain bg-white p-1 shadow-sm"
               />
@@ -97,13 +128,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             )}
             <div>
               <h2 className="font-extrabold text-base tracking-tight">
-                {systemSettings?.hospitalName || 'St. Jude General Hospital'}
+                {facilityName}
               </h2>
               <div className="flex items-center gap-2 text-[11px] text-sky-200 mt-0.5">
                 <Server className="w-3 h-3 text-emerald-300" />
                 <span className="font-mono">Local HITOMS Terminal Login</span>
                 <span>•</span>
-                <span>Offline LAN Mode</span>
+                <span>{facilityRegion ? `${facilityRegion} LAN` : 'Offline LAN Mode'}</span>
               </div>
             </div>
           </div>
