@@ -34,6 +34,7 @@ import {
   type AssetCondition,
   type AssetHistoryEntry,
   type User as UserType,
+  type SystemSettings,
 } from '../types';
 import { assetService } from '../services/assetService';
 import { authService } from '../services/authService';
@@ -49,6 +50,7 @@ interface AssetsViewProps {
   assets: Asset[];
   allUsers: UserType[];
   currentUser: UserType | null;
+  systemSettings?: SystemSettings | null;
   onRefresh: () => void;
   onReportIssueForAsset?: (asset: Asset) => void;
 }
@@ -57,6 +59,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   assets,
   allUsers,
   currentUser,
+  systemSettings,
   onRefresh,
   onReportIssueForAsset,
 }) => {
@@ -1158,7 +1161,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           isOpen={true}
           onClose={() => setQrLabelAsset(null)}
           asset={qrLabelAsset}
-          hospitalName="REGIONAL HOSPITAL IT UNIT"
+          hospitalName={systemSettings?.hospitalName || 'GENERAL HOSPITAL IT UNIT'}
         />
       )}
 
@@ -1173,7 +1176,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               ? assets.filter((a) => selectedAssetIds.has(a.id))
               : filteredAssets
           }
-          hospitalName="REGIONAL HOSPITAL IT UNIT"
+          hospitalName={systemSettings?.hospitalName || 'GENERAL HOSPITAL IT UNIT'}
         />
       )}
 

@@ -38,6 +38,7 @@ import { networkService } from './services/networkService';
 import { auditService } from './services/auditService';
 import { emergencyService } from './services/emergencyService';
 import { ticketSoundService } from './services/ticketSoundService';
+import { settingsService } from './services/settingsService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
 
 // Component Views
@@ -134,7 +135,7 @@ export default function App() {
         syncService.getPendingQueue(),
         syncService.getSyncLogs(),
         getAllFromStore<User>('users'),
-        getFromStore<SystemSettings>('settings', 'main'),
+        settingsService.getSettings(),
         emergencyService.getActiveBroadcasts(),
       ]);
 
@@ -196,10 +197,19 @@ export default function App() {
       syncService.getPendingQueue().then(setSyncQueue);
     });
 
+    const handleSettingsUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<SystemSettings>;
+      if (customEvent.detail) {
+        setSystemSettings(customEvent.detail);
+      }
+    };
+    window.addEventListener('hitoms_settings_updated', handleSettingsUpdated);
+
     return () => {
       isMounted = false;
       ticketSoundService.stopRecurringBellMonitor();
       unsubSync();
+      window.removeEventListener('hitoms_settings_updated', handleSettingsUpdated);
     };
   }, [refreshAllData]);
 
@@ -428,6 +438,7 @@ export default function App() {
                 assets={assets}
                 allUsers={allUsers}
                 currentUser={currentUser}
+                systemSettings={systemSettings}
                 onRefresh={refreshAllData}
                 onReportIssueForAsset={handleReportIssueForAsset}
               />

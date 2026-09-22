@@ -1449,7 +1449,8 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   ];
 
   // 11. System Settings & Default SLA Rules
-  const settings: SystemSettings = {
+  let settings: SystemSettings = {
+    id: 'main',
     hospitalName: 'St. Jude Metropolitan Hospital',
     hospitalLanUrl: 'http://hitoms.local',
     cloudSyncEnabled: true,
@@ -1471,6 +1472,16 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
     lastSuccessfulSync: now,
   };
 
+  // Preserve custom facility settings if user edited them previously
+  try {
+    const rawCustom = localStorage.getItem('hitoms_facility_settings');
+    if (rawCustom) {
+      settings = { ...settings, ...JSON.parse(rawCustom) };
+    }
+  } catch (e) {
+    console.warn('[SeedData] Could not load custom facility settings from localStorage:', e);
+  }
+
   // Seed into IndexedDB stores
   await putBatchToStore('users', users);
   await putBatchToStore('departments', departments);
@@ -1482,7 +1493,8 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   await putBatchToStore('tickets', tickets);
   await putBatchToStore('inventory', inventory);
   await putBatchToStore('knowledgeBase', knowledgeBase);
-  await putToStore('settings', { id: 'app_settings', ...settings });
+  await putToStore('settings', { ...settings, id: 'main' });
+  await putToStore('settings', { ...settings, id: 'app_settings' });
 
   console.log('HITOMS initial seed data populated successfully.');
 }
