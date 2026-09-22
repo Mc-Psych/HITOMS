@@ -57,6 +57,7 @@ import { AdministrationView } from './components/AdministrationView';
 import { AuditLogsView } from './components/AuditLogsView';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { ScanQrToReportModal } from './components/ScanQrToReportModal';
 
 export default function App() {
   const [initialized, setInitialized] = useState(false);
@@ -67,6 +68,11 @@ export default function App() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const [passwordChangeUser, setPasswordChangeUser] = useState<User | null>(null);
+
+  // Global Scan QR to Report Modal state
+  const [globalScanQrModalOpen, setGlobalScanQrModalOpen] = useState(false);
+  const [preselectedAssetForTicket, setPreselectedAssetForTicket] = useState<Asset | null>(null);
+  const [openTicketCreateModal, setOpenTicketCreateModal] = useState(false);
 
   // Core Data States
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -200,6 +206,13 @@ export default function App() {
     }
   };
 
+  // Report issue directly for scanned or selected asset
+  const handleReportIssueForAsset = (asset: Asset) => {
+    setPreselectedAssetForTicket(asset);
+    setCurrentView('tickets');
+    setOpenTicketCreateModal(true);
+  };
+
   // Quick ticket creation
   const handleQuickCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,6 +279,7 @@ export default function App() {
         onNavigate={setCurrentView}
         onOpenLoginModal={() => setLoginModalOpen(true)}
         onLogout={handleLogout}
+        onOpenScanQrReport={() => setGlobalScanQrModalOpen(true)}
       />
 
       {/* Offline Status Simulation Notice */}
@@ -354,6 +368,10 @@ export default function App() {
                 assets={assets}
                 currentUser={currentUser}
                 onRefresh={refreshAllData}
+                openCreateModal={openTicketCreateModal}
+                onCloseCreateModal={() => setOpenTicketCreateModal(false)}
+                preselectedAssetForTicket={preselectedAssetForTicket}
+                onClearPreselectedAsset={() => setPreselectedAssetForTicket(null)}
               />
             )}
 
@@ -363,6 +381,7 @@ export default function App() {
                 allUsers={allUsers}
                 currentUser={currentUser}
                 onRefresh={refreshAllData}
+                onReportIssueForAsset={handleReportIssueForAsset}
               />
             )}
 
@@ -628,6 +647,14 @@ export default function App() {
           systemSettings={systemSettings}
         />
       )}
+
+      {/* Global Scan QR to Report Modal */}
+      <ScanQrToReportModal
+        isOpen={globalScanQrModalOpen}
+        onClose={() => setGlobalScanQrModalOpen(false)}
+        assets={assets}
+        onReportIssueForAsset={handleReportIssueForAsset}
+      />
     </div>
   );
 }

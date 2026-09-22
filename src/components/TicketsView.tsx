@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LifeBuoy,
   Plus,
@@ -18,6 +18,8 @@ import {
   FileText,
   AlertTriangle,
   Star,
+  QrCode,
+  HardDrive,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -26,34 +28,71 @@ import {
   type TicketStatus,
   type User as UserType,
   type Attachment,
+  type Asset,
 } from '../types';
 import { ticketService } from '../services/ticketService';
+import { ScanQrToReportModal } from './ScanQrToReportModal';
 
 interface TicketsViewProps {
   tickets?: Ticket[];
   allUsers?: UserType[];
-  assets?: any[];
+  assets?: Asset[];
   currentUser: UserType | null;
   onRefresh: () => void;
   openCreateModal?: boolean;
   onCloseCreateModal?: () => void;
+  preselectedAssetForTicket?: Asset | null;
+  onClearPreselectedAsset?: () => void;
 }
 
 export const TicketsView: React.FC<TicketsViewProps> = ({
   tickets = [],
   allUsers = [],
+  assets = [],
   currentUser,
   onRefresh,
   openCreateModal = false,
   onCloseCreateModal,
+  preselectedAssetForTicket = null,
+  onClearPreselectedAsset,
 }) => {
   const safeTickets = tickets || [];
   const safeAllUsers = allUsers || [];
+  const safeAssets = assets || [];
   const [localCreateModalOpen, setLocalCreateModalOpen] = useState(false);
   const isCreateModalOpen = openCreateModal || localCreateModalOpen;
 
+  const [linkedAsset, setLinkedAsset] = useState<Asset | null>(preselectedAssetForTicket);
+  const [scanModalOpen, setScanModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (preselectedAssetForTicket) {
+      applyAssetToTicketForm(preselectedAssetForTicket);
+    }
+  }, [preselectedAssetForTicket]);
+
+  const applyAssetToTicketForm = (asset: Asset) => {
+    setLinkedAsset(asset);
+    setTitle(`[${asset.assetTag}] Issue reported on ${asset.manufacturer} ${asset.model}`);
+    if (asset.department) setDepartment(asset.department);
+    if (asset.location) setLocation(asset.location);
+    
+    // Auto categorize
+    const typeUpper = (asset.assetType || '').toUpperCase();
+    if (typeUpper.includes('PRINTER')) setCategory('Printer');
+    else if (typeUpper.includes('NETWORK') || typeUpper.includes('ROUTER') || typeUpper.includes('SWITCH')) setCategory('Network');
+    else if (typeUpper.includes('SERVER')) setCategory('Server');
+    else setCategory('Hardware');
+
+    setDescription(`Issue reported directly via QR Code scan for asset ${asset.assetTag} (${asset.manufacturer} ${asset.model}, S/N: ${asset.serialNumber || 'N/A'}).\n\nIssue Details / Symptoms:\n`);
+  };
+
   const handleCloseCreateModal = () => {
     setLocalCreateModalOpen(false);
+    setLinkedAsset(null);
+    if (onClearPreselectedAsset) {
+      onClearPreselectedAsset();
+    }
     if (onCloseCreateModal) {
       onCloseCreateModal();
     }
@@ -168,6 +207,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
           location,
           isGeneralIssue,
           attachments: attachedFiles,
+          assetId: linkedAsset?.id || null,
         },
         currentUser
       );
@@ -177,6 +217,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
       setDescription('');
       setIsGeneralIssue(false);
       setAttachedFiles([]);
+      setLinkedAsset(null);
       handleCloseCreateModal();
       onRefresh();
     } catch (err) {
@@ -921,6 +962,45 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateTicket} className="space-y-3">
+              {/* Linked Asset Info Banner */}
+              {linkedAsset ? (
+                <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-sky-600 shrink-0" />
+                    <div>
+                      <span className="font-bold text-sky-900 dark:text-sky-200 block">
+                        Linked Asset: {linkedAsset.assetTag}
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {linkedAsset.manufacturer} {linkedAsset.model} • {linkedAsset.department} ({linkedAsset.location})
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLinkedAsset(null)}
+                    className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-200/50 dark:hover:bg-slate-800"
+                    title="Unlink Asset"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
+                  <span className="text-slate-500 text-[11px]">
+                    Reporting on a physical device/hardware?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setScanModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[11px] cursor-pointer transition"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>Scan Asset QR</span>
+                  </button>
+                </div>
+              )}
+
               <div>
                 <label className="block text-slate-500 font-semibold mb-1">Issue Title *</label>
                 <input
@@ -1063,6 +1143,19 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Scan QR Modal */}
+      <ScanQrToReportModal
+        isOpen={scanModalOpen}
+        onClose={() => setScanModalOpen(false)}
+        assets={safeAssets}
+        onReportIssueForAsset={(asset) => {
+          applyAssetToTicketForm(asset);
+          if (!isCreateModalOpen) {
+            setLocalCreateModalOpen(true);
+          }
+        }}
+      />
     </div>
   );
 };

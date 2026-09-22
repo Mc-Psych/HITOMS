@@ -26,6 +26,7 @@ import {
   Upload,
   Download,
   Image as ImageIcon,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   type Asset,
@@ -49,6 +50,7 @@ interface AssetsViewProps {
   allUsers: UserType[];
   currentUser: UserType | null;
   onRefresh: () => void;
+  onReportIssueForAsset?: (asset: Asset) => void;
 }
 
 export const AssetsView: React.FC<AssetsViewProps> = ({
@@ -56,6 +58,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   allUsers,
   currentUser,
   onRefresh,
+  onReportIssueForAsset,
 }) => {
   const [activeTab, setActiveTab] = useState<'HARDWARE' | 'SUBSCRIPTIONS'>('HARDWARE');
   const [searchQuery, setSearchQuery] = useState('');
@@ -940,6 +943,20 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap gap-2 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/60">
+                  {onReportIssueForAsset && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = scannedAssetFound;
+                        setQrModalOpen(false);
+                        onReportIssueForAsset(target);
+                      }}
+                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition"
+                    >
+                      <AlertTriangle className="w-4 h-4 text-white" />
+                      <span>Report Issue on {scannedAssetFound.assetTag}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -949,7 +966,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Print QR Label / Download JPEG</span>
+                    <span>Print QR Label</span>
                   </button>
                   <button
                     type="button"

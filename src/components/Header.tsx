@@ -14,6 +14,7 @@ import {
   LogIn,
   LogOut,
   KeyRound,
+  QrCode,
 } from 'lucide-react';
 import { syncService, type SyncStats } from '../services/syncService';
 import { authService, getUserInitials } from '../services/authService';
@@ -29,6 +30,7 @@ interface HeaderProps {
   onNavigate: (view: string) => void;
   onOpenLoginModal?: () => void;
   onLogout?: () => void;
+  onOpenScanQrReport?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -39,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   onOpenLoginModal,
   onLogout,
+  onOpenScanQrReport,
 }) => {
   const [syncStats, setSyncStats] = useState<SyncStats>(syncService.getStats());
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -185,6 +188,19 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden md:block">
             <PWAInstallButton />
           </div>
+
+          {/* Scan QR to Report Button */}
+          {onOpenScanQrReport && (
+            <button
+              id="scan-qr-report-btn"
+              onClick={onOpenScanQrReport}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition cursor-pointer shadow-sm hover:shadow"
+              title="Scan QR Code to Report Asset Issue"
+            >
+              <QrCode className="w-4 h-4 text-white" />
+              <span className="hidden md:inline">Scan QR</span>
+            </button>
+          )}
 
           {/* Notifications Center */}
           <div className="relative shrink-0" ref={notifsRef}>
