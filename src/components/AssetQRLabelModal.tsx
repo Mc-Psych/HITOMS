@@ -47,6 +47,19 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
   const [includeDeptLocation, setIncludeDeptLocation] = useState(true);
   const [includeCustodian, setIncludeCustodian] = useState(true);
   const [includeSecurityNotice, setIncludeSecurityNotice] = useState(true);
+
+  // Editable Label Content Overrides for Admins & IT Staff
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [customHospitalHeader, setCustomHospitalHeader] = useState('');
+  const [customBadgeText, setCustomBadgeText] = useState('IT ASSET');
+  const [customAssetTag, setCustomAssetTag] = useState('');
+  const [customModelText, setCustomModelText] = useState('');
+  const [customAssetType, setCustomAssetType] = useState('');
+  const [customSerialNumber, setCustomSerialNumber] = useState('');
+  const [customDeptLocation, setCustomDeptLocation] = useState('');
+  const [customCustodian, setCustomCustodian] = useState('');
+  const [customFooterNotice, setCustomFooterNotice] = useState('');
+
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [batchQrCodes, setBatchQrCodes] = useState<{ [tag: string]: string }>({});
   const [copied, setCopied] = useState(false);
@@ -57,6 +70,41 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
   const isBatch = Boolean(selectedAssets && selectedAssets.length > 0);
   const activeAssets = isBatch ? selectedAssets! : asset ? [asset] : [];
 
+  // Reset/populate custom edit fields when active asset or hospitalName changes
+  useEffect(() => {
+    if (asset) {
+      setCustomHospitalHeader(hospitalName || 'GENERAL HOSPITAL IT UNIT');
+      setCustomBadgeText('IT ASSET');
+      setCustomAssetTag(asset.assetTag || '');
+      setCustomModelText(`${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.name || '');
+      setCustomAssetType(asset.assetType || '');
+      setCustomSerialNumber(asset.serialNumber || '');
+      setCustomDeptLocation([asset.department, asset.location].filter(Boolean).join(' • '));
+      setCustomCustodian(asset.assignedUser || '');
+      setCustomFooterNotice('PROPERTY OF HOSPITAL IT • DO NOT REMOVE');
+    }
+  }, [asset, hospitalName]);
+
+  const getRenderOptions = () => ({
+    hospitalName,
+    labelSize,
+    includeHospitalHeader,
+    includeSerial,
+    includeDeptLocation,
+    includeCustodian,
+    includeSecurityNotice,
+    scale: 3,
+    customHospitalHeader: customHospitalHeader || undefined,
+    customBadgeText: customBadgeText || undefined,
+    customAssetTag: customAssetTag || undefined,
+    customModelText: customModelText || undefined,
+    customAssetType: customAssetType || undefined,
+    customSerialNumber: customSerialNumber || undefined,
+    customDeptLocation: customDeptLocation || undefined,
+    customCustodian: customCustodian || undefined,
+    customFooterNotice: customFooterNotice || undefined,
+  });
+
   // Generate QR Code data URLs with full rich label metadata embedded
   useEffect(() => {
     if (!isOpen || activeAssets.length === 0) return;
@@ -65,8 +113,9 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
 
     const generateCodes = async () => {
       try {
+        const renderOpts = getRenderOptions();
         if (!isBatch && asset) {
-          const payload = generateAssetQrMetadataPayload(asset, hospitalName);
+          const payload = generateAssetQrMetadataPayload(asset, renderOpts);
           const url = await QRCode.toDataURL(payload, {
             width: 360,
             margin: 1,
@@ -80,7 +129,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
         } else {
           const mapping: { [tag: string]: string } = {};
           for (const item of activeAssets) {
-            const payload = generateAssetQrMetadataPayload(item, hospitalName);
+            const payload = generateAssetQrMetadataPayload(item, renderOpts);
             mapping[item.assetTag] = await QRCode.toDataURL(payload, {
               width: 300,
               margin: 1,
@@ -103,22 +152,29 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, asset, selectedAssets, isBatch, activeAssets, hospitalName]);
+  }, [
+    isOpen,
+    asset,
+    selectedAssets,
+    isBatch,
+    activeAssets,
+    hospitalName,
+    customHospitalHeader,
+    customBadgeText,
+    customAssetTag,
+    customModelText,
+    customAssetType,
+    customSerialNumber,
+    customDeptLocation,
+    customCustodian,
+    customFooterNotice,
+  ]);
 
   if (!isOpen || activeAssets.length === 0) return null;
 
   // Render high-resolution JPEG data URL matching the exact print preview design
   const generateLabelJpegDataUrl = async (targetAsset: Asset): Promise<string> => {
-    return renderAssetQrJpegDataUrl(targetAsset, {
-      hospitalName,
-      labelSize,
-      includeHospitalHeader,
-      includeSerial,
-      includeDeptLocation,
-      includeCustodian,
-      includeSecurityNotice,
-      scale: 3,
-    });
+    return renderAssetQrJpegDataUrl(targetAsset, getRenderOptions());
   };
 
   // Download high-resolution JPEG Label for an asset (Exact match to preview)
@@ -426,6 +482,148 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
               </label>
             </div>
 
+            {/* Admin & IT Label Content Editor */}
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Admin Label Editor</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingContent(!isEditingContent)}
+                  className="text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline cursor-pointer"
+                >
+                  {isEditingContent ? 'Hide Inputs' : 'Edit Content Text'}
+                </button>
+              </div>
+
+              {isEditingContent && (
+                <div className="space-y-2.5 pt-1 border-t border-slate-200 dark:border-slate-700/60 animate-in fade-in duration-150 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                      Facility Header
+                    </label>
+                    <input
+                      type="text"
+                      value={customHospitalHeader}
+                      onChange={(e) => setCustomHospitalHeader(e.target.value)}
+                      placeholder="e.g. REGIONAL HOSPITAL IT UNIT"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                        Badge Text
+                      </label>
+                      <input
+                        type="text"
+                        value={customBadgeText}
+                        onChange={(e) => setCustomBadgeText(e.target.value)}
+                        placeholder="IT ASSET"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                        Asset Tag ID
+                      </label>
+                      <input
+                        type="text"
+                        value={customAssetTag}
+                        onChange={(e) => setCustomAssetTag(e.target.value)}
+                        placeholder="TAG-0001"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                      Hardware Name / Model
+                    </label>
+                    <input
+                      type="text"
+                      value={customModelText}
+                      onChange={(e) => setCustomModelText(e.target.value)}
+                      placeholder="e.g. Dell Latitude 5530"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                        Equipment Type
+                      </label>
+                      <input
+                        type="text"
+                        value={customAssetType}
+                        onChange={(e) => setCustomAssetType(e.target.value)}
+                        placeholder="e.g. Workstation"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                        Serial Number (S/N)
+                      </label>
+                      <input
+                        type="text"
+                        value={customSerialNumber}
+                        onChange={(e) => setCustomSerialNumber(e.target.value)}
+                        placeholder="e.g. S/N: 7X89231"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                      Dept & Location
+                    </label>
+                    <input
+                      type="text"
+                      value={customDeptLocation}
+                      onChange={(e) => setCustomDeptLocation(e.target.value)}
+                      placeholder="e.g. Radiology • Room 204"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                      Assigned Custodian
+                    </label>
+                    <input
+                      type="text"
+                      value={customCustodian}
+                      onChange={(e) => setCustomCustodian(e.target.value)}
+                      placeholder="e.g. Dr. Sarah Jenkins"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                      Footer Warning Notice
+                    </label>
+                    <input
+                      type="text"
+                      value={customFooterNotice}
+                      onChange={(e) => setCustomFooterNotice(e.target.value)}
+                      placeholder="PROPERTY OF HOSPITAL IT • DO NOT REMOVE"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 uppercase focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Quick Summary Info */}
             <div className="text-[11px] text-slate-500 space-y-1.5 p-3 rounded-xl bg-sky-50/50 dark:bg-sky-950/30 border border-sky-200/50 dark:border-sky-900/40">
               <div className="font-semibold text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
@@ -479,10 +677,10 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                   >
                     {/* Header */}
                     {includeHospitalHeader && (
-                      <div className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center justify-between mb-1.5">
-                        <span className="truncate">{hospitalName}</span>
-                        <span className="text-[8px] bg-sky-500 text-white px-1 rounded uppercase tracking-wider">
-                          IT ASSET
+                      <div className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center justify-between mb-1.5 gap-1">
+                        <span className="truncate">{customHospitalHeader || hospitalName}</span>
+                        <span className="text-[8px] bg-sky-500 text-white px-1 rounded uppercase tracking-wider shrink-0">
+                          {customBadgeText || 'IT ASSET'}
                         </span>
                       </div>
                     )}
@@ -494,7 +692,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                         {qrUrl ? (
                           <img
                             src={qrUrl}
-                            alt={`QR for ${item.assetTag}`}
+                            alt={`QR for ${customAssetTag || item.assetTag}`}
                             className={
                               labelSize === 'compact'
                                 ? 'w-16 h-16'
@@ -513,28 +711,40 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                       {/* Info Columns */}
                       <div className="flex-1 min-w-0 flex flex-col justify-center text-left leading-tight">
                         <div className="font-mono font-black text-sky-600 text-sm tracking-tight truncate">
-                          {item.assetTag}
+                          {customAssetTag || item.assetTag}
                         </div>
                         <div className="font-bold text-slate-900 text-xs truncate mt-0.5">
-                          {item.manufacturer} {item.model}
+                          {customModelText || `${item.manufacturer || ''} ${item.model || ''}`.trim() || 'IT Equipment'}
                         </div>
-                        <div className="text-[10px] text-slate-500 truncate">{item.assetType}</div>
-
-                        {includeSerial && item.serialNumber && (
-                          <div className="text-[10px] font-mono text-slate-600 truncate mt-1">
-                            S/N: {item.serialNumber}
+                        {(customAssetType || item.assetType) && (
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {customAssetType || item.assetType}
                           </div>
                         )}
 
-                        {includeDeptLocation && (
+                        {includeSerial && (customSerialNumber || item.serialNumber) && (
+                          <div className="text-[10px] font-mono text-slate-600 truncate mt-0.5">
+                            {customSerialNumber
+                              ? customSerialNumber.startsWith('S/N:')
+                                ? customSerialNumber
+                                : `S/N: ${customSerialNumber}`
+                              : `S/N: ${item.serialNumber}`}
+                          </div>
+                        )}
+
+                        {includeDeptLocation && (customDeptLocation || item.department || item.location) && (
                           <div className="text-[10px] text-slate-600 truncate">
-                            {item.department} • {item.location}
+                            {customDeptLocation || [item.department, item.location].filter(Boolean).join(' • ')}
                           </div>
                         )}
 
-                        {includeCustodian && item.assignedUser && (
+                        {includeCustodian && (customCustodian || item.assignedUser) && (
                           <div className="text-[10px] text-sky-700 font-medium truncate">
-                            Cust: {item.assignedUser}
+                            {customCustodian
+                              ? customCustodian.startsWith('Cust:')
+                                ? customCustodian
+                                : `Cust: ${customCustodian}`
+                              : `Cust: ${item.assignedUser}`}
                           </div>
                         )}
                       </div>
@@ -543,7 +753,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                     {/* Security Notice Footer */}
                     {includeSecurityNotice && (
                       <div className="text-[8px] font-semibold text-slate-400 text-center tracking-tight border-t border-slate-200 pt-1 mt-1 truncate uppercase">
-                        Property of Hospital IT • Do Not Remove
+                        {customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE'}
                       </div>
                     )}
                   </div>

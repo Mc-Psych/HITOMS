@@ -10,6 +10,16 @@ export interface QrLabelRenderOptions {
   includeCustodian?: boolean;
   includeSecurityNotice?: boolean;
   scale?: number;
+  // Dynamic Label Content Overrides for Admins & IT Staff
+  customHospitalHeader?: string;
+  customBadgeText?: string;
+  customAssetTag?: string;
+  customModelText?: string;
+  customAssetType?: string;
+  customSerialNumber?: string;
+  customDeptLocation?: string;
+  customCustodian?: string;
+  customFooterNotice?: string;
 }
 
 /**
@@ -18,26 +28,41 @@ export interface QrLabelRenderOptions {
  */
 export function generateAssetQrMetadataPayload(
   asset: Partial<Asset>,
-  hospitalName = 'REGIONAL HOSPITAL IT UNIT'
+  hospitalNameOrOptions: string | QrLabelRenderOptions = 'REGIONAL HOSPITAL IT UNIT'
 ): string {
-  const assetName = `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.assetType || 'IT Equipment';
+  const options: QrLabelRenderOptions =
+    typeof hospitalNameOrOptions === 'string'
+      ? { hospitalName: hospitalNameOrOptions }
+      : hospitalNameOrOptions || {};
+
+  const hospital = options.customHospitalHeader || options.hospitalName || 'REGIONAL HOSPITAL IT UNIT';
+  const tag = options.customAssetTag || asset.assetTag || 'N/A';
+  const assetName =
+    options.customModelText ||
+    `${asset.manufacturer || ''} ${asset.model || ''}`.trim() ||
+    asset.assetType ||
+    'IT Equipment';
+  const serial = options.customSerialNumber || asset.serialNumber || 'N/A';
+  const deptLoc =
+    options.customDeptLocation ||
+    `${asset.department || 'IT Unit'}${asset.location ? ` - ${asset.location}` : ''}`;
+  const custodian = options.customCustodian || asset.assignedUser || '';
+  const typeText = options.customAssetType || asset.assetType || '';
+  const footer = options.customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE';
 
   const lines: string[] = [
-    `🏥 ${hospitalName}`,
-    `🏷️ ASSET TAG: ${asset.assetTag || 'N/A'}`,
+    `🏥 ${hospital}`,
+    `🏷️ ASSET TAG: ${tag}`,
     `💻 NAME: ${assetName}`,
-    `🔢 SERIAL (S/N): ${asset.serialNumber || 'N/A'}`,
-    `🏢 ASSIGNED DEPT: ${asset.department || 'N/A'}`,
+    `🔢 SERIAL (S/N): ${serial}`,
+    `🏢 DEPT / LOC: ${deptLoc}`,
   ];
 
-  if (asset.location) {
-    lines.push(`📍 LOCATION: ${asset.location}`);
+  if (custodian) {
+    lines.push(`👤 CUSTODIAN: ${custodian}`);
   }
-  if (asset.assignedUser) {
-    lines.push(`👤 CUSTODIAN: ${asset.assignedUser}`);
-  }
-  if (asset.assetType) {
-    lines.push(`📦 TYPE: ${asset.assetType}`);
+  if (typeText) {
+    lines.push(`📦 TYPE: ${typeText}`);
   }
   if (asset.status || asset.condition) {
     lines.push(`⚡ STATUS: ${asset.status || 'Active'} (${asset.condition || 'Good'})`);
@@ -49,7 +74,7 @@ export function generateAssetQrMetadataPayload(
     lines.push(`💿 OS: ${asset.operatingSystem}`);
   }
 
-  lines.push(`🔒 PROPERTY OF HOSPITAL IT • DO NOT REMOVE`);
+  lines.push(`🔒 ${footer}`);
 
   return lines.join('\n');
 }
@@ -109,7 +134,34 @@ export async function renderAssetLabelCanvas(
     includeCustodian = true,
     includeSecurityNotice = true,
     scale = 3, // 3x for ultra-sharp high-DPI rendering (300+ DPI equivalent)
+    customHospitalHeader,
+    customBadgeText,
+    customAssetTag,
+    customModelText,
+    customAssetType,
+    customSerialNumber,
+    customDeptLocation,
+    customCustodian,
+    customFooterNotice,
   } = options;
+
+  const activeHospitalName = customHospitalHeader || hospitalName || 'REGIONAL HOSPITAL IT UNIT';
+  const activeBadgeText = customBadgeText || 'IT ASSET';
+  const activeTag = customAssetTag || asset.assetTag || 'TAG-0000';
+  const activeModel =
+    customModelText ||
+    `${asset.manufacturer || ''} ${asset.model || ''}`.trim() ||
+    'IT Equipment';
+  const activeType = customAssetType !== undefined ? customAssetType : asset.assetType;
+  const activeSerial = customSerialNumber !== undefined ? customSerialNumber : asset.serialNumber;
+  const activeDeptLoc =
+    customDeptLocation !== undefined
+      ? customDeptLocation
+      : [asset.department || 'IT Unit', asset.location].filter(Boolean).join(' • ');
+  const activeCustodian =
+    customCustodian !== undefined ? customCustodian : asset.assignedUser;
+  const activeFooter =
+    customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE';
 
   // Set card dimensions matching the exact print preview aspect ratios
   // Standard: 320 x 176 (approx 3" x 2" label)
@@ -172,7 +224,10 @@ export async function renderAssetLabelCanvas(
     ctx.fill();
 
     // Right Badge: IT ASSET (bg-sky-500 text-white uppercase)
-    const badgeW = (labelSize === 'compact' ? 44 : 54) * scale;
+    const badgeTextFormatted = activeBadgeText.toUpperCase();
+    ctx.font = `bold ${8 * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    const measuredBadgeW = ctx.measureText(badgeTextFormatted).width + 12 * scale;
+    const badgeW = Math.max((labelSize === 'compact' ? 44 : 54) * scale, measuredBadgeW);
     const badgeH = headerHeight - 4 * scale;
     const badgeX = headerX + headerW - badgeW - 3 * scale;
     const badgeY = headerY + 2 * scale;
@@ -183,10 +238,9 @@ export async function renderAssetLabelCanvas(
     ctx.fill();
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${8 * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('IT ASSET', badgeX + badgeW / 2, badgeY + badgeH / 2);
+    ctx.fillText(badgeTextFormatted, badgeX + badgeW / 2, badgeY + badgeH / 2);
 
     // Left text: Hospital Name
     ctx.fillStyle = '#ffffff';
@@ -194,7 +248,7 @@ export async function renderAssetLabelCanvas(
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const maxHospitalNameWidth = headerW - badgeW - 14 * scale;
-    const displayHospitalName = truncateText(ctx, hospitalName.toUpperCase(), maxHospitalNameWidth);
+    const displayHospitalName = truncateText(ctx, activeHospitalName.toUpperCase(), maxHospitalNameWidth);
     ctx.fillText(displayHospitalName, headerX + 6 * scale, headerY + headerHeight / 2);
 
     currentY += headerHeight + 6 * scale;
@@ -205,8 +259,8 @@ export async function renderAssetLabelCanvas(
   const footerHeight = includeSecurityNotice ? 16 * scale : 0;
   const middleAreaHeight = cardY + cardH - innerPad - footerHeight - currentY;
 
-  // Generate QR code data URL
-  const payload = generateAssetQrMetadataPayload(asset, hospitalName);
+  // Generate QR code data URL with full metadata
+  const payload = generateAssetQrMetadataPayload(asset, options);
   const qrDataUrl = await QRCode.toDataURL(payload, {
     width: 320 * scale,
     margin: 1,
@@ -225,7 +279,10 @@ export async function renderAssetLabelCanvas(
   });
 
   // QR Box Dimensions (matching preview: rounded-lg border border-slate-300)
-  const qrBoxSize = Math.min(middleAreaHeight - 4 * scale, (labelSize === 'compact' ? 68 : labelSize === 'large' ? 104 : 84) * scale);
+  const qrBoxSize = Math.min(
+    middleAreaHeight - 4 * scale,
+    (labelSize === 'compact' ? 68 : labelSize === 'large' ? 104 : 84) * scale
+  );
   const qrBoxX = cardX + innerPad;
   const qrBoxY = currentY + (middleAreaHeight - qrBoxSize) / 2;
   const qrBoxRadius = 6 * scale;
@@ -258,52 +315,57 @@ export async function renderAssetLabelCanvas(
   // 1. Asset Tag (matching: font-mono font-black text-sky-600 text-sm tracking-tight truncate)
   ctx.fillStyle = '#0284c7'; // sky-600
   ctx.font = `900 ${(labelSize === 'compact' ? 12 : labelSize === 'large' ? 17 : 14) * scale}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-  const displayTag = truncateText(ctx, asset.assetTag, textMaxW);
+  const displayTag = truncateText(ctx, activeTag, textMaxW);
   ctx.fillText(displayTag, textX, textY);
   textY += (labelSize === 'compact' ? 13 : labelSize === 'large' ? 19 : 16) * scale;
 
   // 2. Hardware Model (matching: font-bold text-slate-900 text-xs truncate mt-0.5)
-  const modelText = `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || 'IT Equipment';
   ctx.fillStyle = '#0f172a'; // slate-900
   ctx.font = `bold ${(labelSize === 'compact' ? 9.5 : labelSize === 'large' ? 13 : 11) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-  const displayModel = truncateText(ctx, modelText, textMaxW);
+  const displayModel = truncateText(ctx, activeModel, textMaxW);
   ctx.fillText(displayModel, textX, textY);
   textY += (labelSize === 'compact' ? 11 : labelSize === 'large' ? 15 : 13) * scale;
 
   // 3. Asset Type (matching: text-[10px] text-slate-500 truncate)
-  if (asset.assetType) {
+  if (activeType) {
     ctx.fillStyle = '#64748b'; // slate-500
     ctx.font = `${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-    const displayType = truncateText(ctx, asset.assetType, textMaxW);
+    const displayType = truncateText(ctx, activeType, textMaxW);
     ctx.fillText(displayType, textX, textY);
     textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
   }
 
   // 4. Serial Number (matching: text-[10px] font-mono text-slate-600 truncate mt-1)
-  if (includeSerial && asset.serialNumber) {
+  if (includeSerial && activeSerial) {
     ctx.fillStyle = '#475569'; // slate-600
     ctx.font = `600 ${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-monospace, SFMono-Regular, monospace`;
-    const displaySerial = truncateText(ctx, `S/N: ${asset.serialNumber}`, textMaxW);
+    const displaySerial = truncateText(
+      ctx,
+      activeSerial.startsWith('S/N:') ? activeSerial : `S/N: ${activeSerial}`,
+      textMaxW
+    );
     ctx.fillText(displaySerial, textX, textY);
     textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
   }
 
   // 5. Department & Location (matching: text-[10px] text-slate-600 truncate)
-  if (includeDeptLocation) {
-    const locParts = [asset.department || 'IT Unit'];
-    if (asset.location) locParts.push(asset.location);
+  if (includeDeptLocation && activeDeptLoc) {
     ctx.fillStyle = '#475569'; // slate-600
     ctx.font = `${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-    const displayDept = truncateText(ctx, locParts.join(' • '), textMaxW);
+    const displayDept = truncateText(ctx, activeDeptLoc, textMaxW);
     ctx.fillText(displayDept, textX, textY);
     textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
   }
 
   // 6. Assigned Custodian (matching: text-[10px] text-sky-700 font-medium truncate)
-  if (includeCustodian && asset.assignedUser) {
+  if (includeCustodian && activeCustodian) {
     ctx.fillStyle = '#0369a1'; // sky-700
     ctx.font = `600 ${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-    const displayCust = truncateText(ctx, `Cust: ${asset.assignedUser}`, textMaxW);
+    const displayCust = truncateText(
+      ctx,
+      activeCustodian.startsWith('Cust:') ? activeCustodian : `Cust: ${activeCustodian}`,
+      textMaxW
+    );
     ctx.fillText(displayCust, textX, textY);
   }
 
@@ -325,7 +387,8 @@ export async function renderAssetLabelCanvas(
     ctx.font = `600 ${(labelSize === 'compact' ? 7.5 : labelSize === 'large' ? 9.5 : 8) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('PROPERTY OF HOSPITAL IT • DO NOT REMOVE', cardX + cardW / 2, footerY - 2 * scale);
+    const displayFooter = truncateText(ctx, activeFooter.toUpperCase(), cardW - innerPad * 2);
+    ctx.fillText(displayFooter, cardX + cardW / 2, footerY - 2 * scale);
   }
 
   return canvas;
@@ -355,9 +418,10 @@ export async function downloadAssetQrJpeg(
       : optionsOrHospitalName || {};
 
   const dataUrl = await renderAssetQrJpegDataUrl(asset, options);
+  const tag = options.customAssetTag || asset.assetTag || 'ASSET';
   const link = document.createElement('a');
   link.href = dataUrl;
-  link.download = `ASSET-LABEL-${asset.assetTag}.jpeg`;
+  link.download = `ASSET-LABEL-${tag}.jpeg`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

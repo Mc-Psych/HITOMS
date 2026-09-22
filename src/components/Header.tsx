@@ -95,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md w-full max-w-full overflow-hidden">
+    <header className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800 text-white shadow-md w-full max-w-full overflow-visible">
       <div className="flex items-center justify-between px-2.5 sm:px-4 md:px-6 py-2 gap-2 sm:gap-4 w-full">
         {/* Left: Brand + Hospital LAN Info */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink">
@@ -190,20 +190,24 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative shrink-0" ref={notifsRef}>
             <button
               id="notifications-toggle-btn"
-              onClick={() => setShowNotifs(!showNotifs)}
-              className="relative p-1.5 sm:p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowNotifs((prev) => !prev);
+              }}
+              className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition cursor-pointer text-xs font-semibold"
               title="Hospital IT Notifications"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-4 h-4 text-sky-400" />
+              <span className="hidden sm:inline">Alerts</span>
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                <span className="px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-bold rounded-full">
                   {unreadCount}
                 </span>
               )}
             </button>
 
             {showNotifs && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3 sm:p-4 z-50 text-slate-200">
+              <div className="absolute right-0 mt-2 w-72 sm:w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3 sm:p-4 z-50 text-slate-200 animate-in fade-in zoom-in-95 duration-150">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                   <span className="font-semibold text-xs uppercase tracking-wider text-slate-400">
                     Notifications ({notifications.length})
@@ -259,22 +263,21 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative shrink-0" ref={roleMenuRef}>
             <button
               id="user-role-switcher-btn"
-              onClick={() => setShowRoleMenu(!showRoleMenu)}
-              className="flex items-center gap-1.5 sm:gap-2 p-1 sm:pl-2 sm:pr-3 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer"
-              title={`Logged in as ${currentUser?.fullName || 'Staff'}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowRoleMenu((prev) => !prev);
+              }}
+              className="flex items-center gap-1.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+              title={`Logged in as ${currentUser?.fullName || 'Staff'} (${currentUser?.role?.replace('_', ' ') || ''})`}
             >
-              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider shrink-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider shrink-0">
                 {getUserInitials(currentUser?.fullName || '')}
-              </div>
-              <div className="hidden md:block text-xs">
-                <div className="font-semibold text-white leading-tight max-w-[110px] truncate">{currentUser?.fullName}</div>
-                <div className="text-[10px] text-sky-400 font-mono truncate">{currentUser?.role?.replace('_', ' ')}</div>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
 
             {showRoleMenu && (
-              <div className="absolute right-0 mt-2 w-72 max-w-[90vw] rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50">
+              <div className="absolute right-0 mt-2 w-72 sm:w-80 max-w-[90vw] rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                 <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
                   <div>
                     <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Switch Hospital Role</p>
