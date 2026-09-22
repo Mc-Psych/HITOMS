@@ -148,6 +148,11 @@ export interface Ticket extends SyncMetadata {
     uid: string;
     name: string;
     email: string;
+    phone?: string;
+    department?: string;
+    autoAssignedBySpecialty?: boolean;
+    specialtyMatched?: TicketCategory;
+    month?: string;
   } | null;
   assetId?: string | null;
   attachments: Attachment[];
@@ -605,10 +610,102 @@ export interface SlaRule {
   resolutionHours: number;
 }
 
+export interface OfficerMonthlySpecialty {
+  id: string;
+  userId: string;
+  userName: string;
+  month: string; // e.g. "2026-09" (YYYY-MM)
+  specialties: TicketCategory[]; // e.g. ['Network', 'Internet']
+  notes?: string;
+  isActive: boolean;
+}
+
+export type MemoType =
+  | 'EXECUTIVE_IT_MEMO'
+  | 'INCIDENT_DEBRIEF'
+  | 'OPERATIONS_REPORT'
+  | 'EQUIPMENT_JUSTIFICATION'
+  | 'CLINICAL_ADVISORY'
+  | 'MAINTENANCE_DOWNTIME'
+  | 'POLICY_CIRCULAR'
+  | 'GENERAL_MEMO';
+
+export type MemoStatus = 'DRAFT' | 'UNDER_REVIEW' | 'APPROVED' | 'PUBLISHED' | 'ARCHIVED';
+
+export interface HospitalMemo {
+  id: string;
+  memoNumber: string;
+  title: string;
+  memoType: MemoType;
+  department: string;
+  targetAudience: string;
+  fromSender: {
+    uid: string;
+    name: string;
+    role: Role | string;
+    title?: string;
+  };
+  executiveSummary: string;
+  backgroundAndContext: string;
+  detailedFindingsOrBody: string;
+  actionRequiredOrChecklist: string[];
+  timelineOrDeadline?: string;
+  contactPersonOrExtension?: string;
+  recommendedDistribution?: string;
+  status: MemoStatus;
+  isAiGenerated: boolean;
+  aiPromptContext?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+  approvedBy?: {
+    name: string;
+    title: string;
+    approvedAt: string;
+  };
+}
+
+export interface AiMemoRequest {
+  memoType: MemoType;
+  topic: string;
+  targetAudience?: string;
+  department?: string;
+  rawNotes: string;
+  tone?: 'FORMAL' | 'URGENT' | 'CLINICAL_ADVISORY' | 'EXECUTIVE' | 'EDUCATIONAL';
+  includeLiveData?: boolean;
+  hospitalName?: string;
+  senderName?: string;
+  senderTitle?: string;
+  refineInstruction?: string;
+  existingDraft?: Partial<HospitalMemo>;
+}
+
+export interface AiMemoResponse {
+  memoNumber: string;
+  title: string;
+  memoType: MemoType;
+  targetAudience: string;
+  executiveSummary: string;
+  backgroundAndContext: string;
+  detailedFindingsOrBody: string;
+  actionRequiredOrChecklist: string[];
+  timelineOrDeadline?: string;
+  contactPersonOrExtension?: string;
+  recommendedDistribution?: string;
+  isFallback?: boolean;
+}
+
+export type LetterheadMode = 'CUSTOM_BANNER' | 'DYNAMIC_HEADER' | 'HEADER_AND_BANNER';
+
 export interface SystemSettings {
   id?: string;
   hospitalName: string;
   hospitalLogo?: string; // Base64 data URL or image path
+  hospitalLetterheadImage?: string; // Base64 data URL for uploaded official letterhead header/banner
+  letterheadSubTitle?: string; // e.g. "Department of Information Technology & Clinical Informatics"
+  letterheadAddressLine?: string; // e.g. "104 Healthcare Boulevard, Ward 4 • Emergency: Ext 9911 / 222"
+  letterheadFooterText?: string; // e.g. "CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT"
+  letterheadMode?: LetterheadMode; // Layout style for memos and printed reports
   hospitalLanUrl: string;
   contactEmail?: string;
   contactPhone?: string;
@@ -622,6 +719,9 @@ export interface SystemSettings {
   slaRules: Record<TicketPriority, SlaRule>;
   lastSuccessfulSync: string | null;
   mandatoryPasswordChangeOnFirstLogin?: boolean;
+  disableDemoLogin?: boolean; // When true, quick demo profiles on login modal are hidden (controlled by Super Admin Courage Kay)
+  systemNotificationRingEnabled?: boolean; // Active notification ring for alerts & tickets even if app is closed
+  officerMonthlySpecialties?: OfficerMonthlySpecialty[]; // Auto-assignment specialty roster per month
   customTexts?: Record<string, string>;
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;

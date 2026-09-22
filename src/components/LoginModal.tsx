@@ -172,9 +172,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
                 />
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Staff accounts use their <strong>Surname</strong> as the default username.
-              </p>
+             
             </div>
 
             <div>
@@ -192,9 +190,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
                 />
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                For first-time logins, your default password is the <strong>last 4 letters of your Surname</strong> (e.g. Mensah &rarr; <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-sky-600">nsah</code>, Boateng &rarr; <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-sky-600">teng</code>).
-              </p>
+              
             </div>
 
             <div className="pt-2">
@@ -210,39 +206,56 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </form>
 
           {/* Quick Staff Selection Tray for Instant Testing & Verification */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
-                Quick Terminal Profiles (Click to prefill)
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono">Offline Local Auth</span>
-            </div>
+          {!activeSettings?.disableDemoLogin ? (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
+                  Quick Terminal Profiles (Click to prefill)
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">Offline Local Auth</span>
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
-              {allUsers.slice(0, 9).map((u) => {
-                const surname = extractSurname(u.fullName);
-                const defaultPass = getDefaultPasswordForSurname(surname);
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleSelectPreset(u)}
-                    className={`p-2 text-left rounded-xl border transition cursor-pointer ${
-                      selectedStaffPreset?.id === u.id
-                        ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'
-                    }`}
-                  >
-                    <div className="font-bold text-slate-900 dark:text-white truncate">{u.fullName}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{u.role}</div>
-                    <div className="text-[9px] font-mono text-sky-600 dark:text-sky-400 mt-0.5">
-                      Pass: {defaultPass}
-                    </div>
-                  </button>
-                );
-              })}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
+                {[...allUsers]
+                  .sort((a, b) => {
+                    if (a.fullName.toLowerCase().includes('courage') || a.role === 'SUPER_ADMIN') return -1;
+                    if (b.fullName.toLowerCase().includes('courage') || b.role === 'SUPER_ADMIN') return 1;
+                    return 0;
+                  })
+                  .slice(0, 9)
+                  .map((u) => {
+                    const surname = extractSurname(u.fullName);
+                    const defaultPass = getDefaultPasswordForSurname(surname);
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => handleSelectPreset(u)}
+                        className={`p-2 text-left rounded-xl border transition cursor-pointer ${
+                          selectedStaffPreset?.id === u.id
+                            ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500'
+                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'
+                        }`}
+                      >
+                        <div className="font-bold text-slate-900 dark:text-white truncate">{u.fullName}</div>
+                        <div className="text-[10px] text-slate-500 truncate">{u.role}</div>
+                        <div className="text-[9px] font-mono text-sky-600 dark:text-sky-400 mt-0.5">
+                          Pass: {defaultPass}
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span>Quick demo login disabled by Super Administrator Courage Kay</span>
+              </span>
+              <span className="font-mono text-[10px] text-slate-500">Security Active</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

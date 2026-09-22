@@ -138,9 +138,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'reports',
-      label: 'Local Reports & Export',
+      label: 'Memos & Reports',
       icon: FileBarChart2,
-      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'HOSPITAL_MANAGEMENT', 'DEPARTMENT_HEAD', 'PROCUREMENT_OFFICER', 'AUDITOR'],
+      rolesAllowed: [
+        'SUPER_ADMIN',
+        'IT_ADMIN',
+        'IT_OFFICER',
+        'HOSPITAL_MANAGEMENT',
+        'DEPARTMENT_HEAD',
+        'PROCUREMENT_OFFICER',
+        'AUDITOR',
+        'STAFF_USER',
+      ],
     },
     {
       id: 'backups',

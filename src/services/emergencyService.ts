@@ -7,6 +7,7 @@ import {
 } from './localDatabaseService';
 import { auditService } from './auditService';
 import { notificationService } from './notificationService';
+import { systemNotificationRingService } from './ticketSoundService';
 
 class EmergencyService {
   public async getActiveBroadcasts(): Promise<EmergencyBroadcastAlert[]> {
@@ -47,6 +48,17 @@ class EmergencyService {
     };
 
     await putToStore(STORE_NAMES.emergencyBroadcasts, alert);
+
+    // Trigger system notification ring for alert (rings siren & delivers background notification even if app closed)
+    try {
+      await systemNotificationRingService.ringEmergencyAlert(
+        data.title,
+        data.message,
+        data.severity
+      );
+    } catch (e) {
+      console.warn('[EmergencyService] Failed to ring alert:', e);
+    }
 
     // Audit log
     await auditService.logAction(

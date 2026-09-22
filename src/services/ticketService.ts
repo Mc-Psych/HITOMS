@@ -22,6 +22,7 @@ import { auditService } from './auditService';
 import { notificationService } from './notificationService';
 import { syncService } from './syncService';
 import { ticketSoundService } from './ticketSoundService';
+import { officerSpecialtyService } from './officerSpecialtyService';
 
 class TicketService {
   public async getTickets(): Promise<Ticket[]> {
@@ -35,13 +36,38 @@ class TicketService {
 
   /**
    * Determine the appropriate IT technician or IT Unit team to automatically assign an incoming ticket
-   * based on ticket category and specialist role mapping.
+   * based on officer monthly specialties roster (e.g. Officer 1 specialty is networking, so networking issues are auto-assigned to him).
    */
   public async determineAutoAssignee(
     category: TicketCategory,
     department?: string
-  ): Promise<{ uid: string; name: string; email: string }> {
+  ): Promise<{
+    uid: string;
+    name: string;
+    email: string;
+    phone?: string;
+    department?: string;
+    autoAssignedBySpecialty?: boolean;
+    specialtyMatched?: TicketCategory;
+    month?: string;
+  }> {
     try {
+      // 1. Check monthly specialties roster (e.g. Officer 1 specialty is networking)
+      const specialtyMatch = await officerSpecialtyService.findOfficerForTicketCategory(category);
+      if (specialtyMatch) {
+        return {
+          uid: specialtyMatch.user.id,
+          name: specialtyMatch.user.fullName,
+          email: specialtyMatch.user.email,
+          phone: specialtyMatch.user.phone,
+          department: specialtyMatch.user.department,
+          autoAssignedBySpecialty: true,
+          specialtyMatched: specialtyMatch.specialtyMatched,
+          month: specialtyMatch.month,
+        };
+      }
+
+      // 2. Fallback to active IT staff
       const allUsers = await getAllFromStore<User>('users');
       const itUsers = allUsers.filter(
         (u) =>
@@ -58,20 +84,17 @@ class TicketService {
         switch (category) {
           case 'Network':
           case 'Internet':
-            // Route to Network Administrator or Senior IT Admin
             selectedTech =
-              itUsers.find((u) => u.jobTitle.toLowerCase().includes('network')) ||
-              itUsers.find((u) => u.role === 'IT_ADMIN') ||
-              itUsers.find((u) => u.jobTitle.toLowerCase().includes('infrastructure'));
+              itUsers.find((u) => u.fullName.toLowerCase().includes('daniel') || u.jobTitle.toLowerCase().includes('network')) ||
+              itUsers.find((u) => u.role === 'IT_OFFICER') ||
+              itUsers.find((u) => u.role === 'IT_ADMIN');
             break;
 
           case 'Server':
           case 'Hospital System':
           case 'Security':
           case 'Email':
-            // Route to IT Systems Lead, Systems Admin, or Super Admin
             selectedTech =
-              itUsers.find((u) => u.jobTitle.toLowerCase().includes('systems') || u.jobTitle.toLowerCase().includes('head')) ||
               itUsers.find((u) => u.role === 'SUPER_ADMIN') ||
               itUsers.find((u) => u.role === 'IT_ADMIN');
             break;
@@ -80,27 +103,27 @@ class TicketService {
           case 'Printer':
           case 'Software':
           case 'Account/Login':
-            // Route to IT Support Officer / Field Technician
+          default:
             selectedTech =
               itUsers.find((u) => u.role === 'IT_OFFICER') ||
-              itUsers.find((u) => u.jobTitle.toLowerCase().includes('technician') || u.jobTitle.toLowerCase().includes('support'));
-            break;
-
-          default:
-            selectedTech = itUsers[0];
+              itUsers[0];
             break;
         }
 
         if (selectedTech) {
           return {
             uid: selectedTech.id,
-            name: `${selectedTech.fullName} (${selectedTech.jobTitle || 'IT Unit'})`,
+            name: selectedTech.fullName,
             email: selectedTech.email,
+            phone: selectedTech.phone,
+            department: selectedTech.department,
+            autoAssignedBySpecialty: true,
+            specialtyMatched: category,
           };
         }
       }
     } catch (err) {
-      console.warn('[TicketService] Could not resolve user list for auto-assignment, using default IT Unit team:', err);
+      console.warn('[TicketService] Could not resolve user list for auto-assignment:', err);
     }
 
     // Default Fallback
@@ -108,6 +131,7 @@ class TicketService {
       uid: 'it-unit-team',
       name: 'IT Operations Unit',
       email: 'it-unit@hospital.local',
+      autoAssignedBySpecialty: false,
     };
   }
 
@@ -168,7 +192,18 @@ class TicketService {
       assignedAt: autoAssignee ? now : undefined,
       assetId: data.assetId || null,
       attachments: data.attachments || [],
-      comments: [],
+      comments: autoAssignee?.autoAssignedBySpecialty
+        ? [
+            {
+              id: generateUUID(),
+              userId: 'hitoms-system',
+              userName: 'HITOMS Auto-Dispatch',
+              userRole: 'SUPER_ADMIN',
+              comment: `Ticket automatically assigned to ${autoAssignee.name} based on monthly specialty for [${autoAssignee.specialtyMatched || data.category}] (${autoAssignee.month || 'Current Month'}).`,
+              createdAt: now,
+            },
+          ]
+        : [],
       resolution: null,
       confirmationRating: null,
       aiTriage: data.aiTriage || null,

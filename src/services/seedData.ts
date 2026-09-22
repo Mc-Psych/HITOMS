@@ -16,16 +16,89 @@ import {
 } from '../types';
 import {
   countStore,
+  getAllFromStore,
   putBatchToStore,
   putToStore,
   getDeviceId,
   generateUUID,
 } from './localDatabaseService';
+import { memoService } from './memoService';
+
+export async function ensureSuperAdminCourageKay(): Promise<void> {
+  try {
+    const users = await getAllFromStore<User>('users');
+    const courageKay = users.find(
+      (u) =>
+        u.fullName.toLowerCase().includes('courage') ||
+        (u.username && u.username.toLowerCase() === 'kay')
+    );
+    const now = new Date().toISOString();
+    const deviceId = getDeviceId();
+
+    if (!courageKay) {
+      const admin001 = users.find((u) => u.id === 'usr-admin-001');
+      if (admin001) {
+        admin001.fullName = 'Courage Kay';
+        admin001.username = 'kay';
+        admin001.email = 'courage.kay@hospital.local';
+        admin001.role = 'SUPER_ADMIN';
+        admin001.jobTitle = 'Chief Information Officer & Super Administrator';
+        admin001.department = 'IT Operations';
+        admin001.status = 'Active';
+        admin001.password = 'admin';
+        await putToStore('users', admin001);
+      } else {
+        const newUser: User = {
+          id: 'usr-admin-001',
+          fullName: 'Courage Kay',
+          username: 'kay',
+          email: 'courage.kay@hospital.local',
+          phone: '+233 24 100 0001',
+          department: 'IT Operations',
+          jobTitle: 'Chief Information Officer & Super Administrator',
+          role: 'SUPER_ADMIN',
+          status: 'Active',
+          createdAt: now,
+          updatedAt: now,
+          lastLoginAt: now,
+          offlineAccessAllowed: true,
+          password: 'admin',
+          _syncStatus: 'SYNCED',
+          _syncVersion: 1,
+          _lastSyncedAt: now,
+          _deviceId: deviceId,
+        };
+        await putToStore('users', newUser);
+      }
+    } else {
+      let needsUpdate = false;
+      if (courageKay.role !== 'SUPER_ADMIN') {
+        courageKay.role = 'SUPER_ADMIN';
+        needsUpdate = true;
+      }
+      if (courageKay.status !== 'Active') {
+        courageKay.status = 'Active';
+        needsUpdate = true;
+      }
+      if (!courageKay.username) {
+        courageKay.username = 'kay';
+        needsUpdate = true;
+      }
+      if (needsUpdate) {
+        await putToStore('users', courageKay);
+      }
+    }
+  } catch (err) {
+    console.warn('[SeedData] Error ensuring Courage Kay super admin:', err);
+  }
+}
 
 export async function initializeSeedDataIfNeeded(): Promise<void> {
   const userCount = await countStore('users');
   if (userCount > 0) {
-    return; // Already initialized
+    await ensureSuperAdminCourageKay();
+    await memoService.getMemos();
+    return; // Already initialized, ensured Courage Kay is super admin and memos are ready
   }
 
   const deviceId = getDeviceId();
@@ -35,12 +108,33 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   const users: User[] = [
     {
       id: 'usr-admin-001',
-      fullName: 'Dr. Sarah Mensah',
-      email: 'admin@hospital.local',
+      fullName: 'Courage Kay',
+      username: 'kay',
+      email: 'courage.kay@hospital.local',
       phone: '+233 24 100 0001',
       department: 'IT Operations',
-      jobTitle: 'Head of IT & Systems',
+      jobTitle: 'Chief Information Officer & Super Administrator',
       role: 'SUPER_ADMIN',
+      status: 'Active',
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+      offlineAccessAllowed: true,
+      password: 'admin',
+      _syncStatus: 'SYNCED',
+      _syncVersion: 1,
+      _lastSyncedAt: now,
+      _deviceId: deviceId,
+    },
+    {
+      id: 'usr-admin-002',
+      fullName: 'Dr. Sarah Mensah',
+      username: 'mensah',
+      email: 'admin@hospital.local',
+      phone: '+233 24 100 0000',
+      department: 'IT Operations',
+      jobTitle: 'Head of Clinical Systems',
+      role: 'IT_ADMIN',
       status: 'Active',
       createdAt: now,
       updatedAt: now,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   FileBarChart2,
   Download,
@@ -7,6 +7,26 @@ import {
   Filter,
   CheckCircle2,
   FileText,
+  Sparkles,
+  Plus,
+  Search,
+  Building,
+  Shield,
+  Layers,
+  Clock,
+  Send,
+  AlertTriangle,
+  RefreshCw,
+  ExternalLink,
+  ChevronRight,
+  UserCheck,
+  Check,
+  Trash2,
+  Flame,
+  HardDrive,
+  Package,
+  Wand2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -15,7 +35,15 @@ import {
   type Incident,
   type InventoryItem,
   type SystemSettings,
+  type User,
+  type HospitalMemo,
+  type MemoType,
+  type MemoStatus,
 } from '../types';
+import { memoService } from '../services/memoService';
+import { MemoDetailModal } from './MemoDetailModal';
+import { MemoEditorModal } from './MemoEditorModal';
+import { LetterheadUploadModal } from './LetterheadUploadModal';
 
 interface ReportsViewProps {
   tickets?: Ticket[];
@@ -24,6 +52,9 @@ interface ReportsViewProps {
   incidents?: Incident[];
   inventory?: InventoryItem[];
   systemSettings?: SystemSettings | null;
+  currentUser?: User | null;
+  allUsers?: User[];
+  onRefresh?: () => void;
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -33,6 +64,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   incidents = [],
   inventory = [],
   systemSettings,
+  currentUser = null,
+  allUsers = [],
+  onRefresh,
 }) => {
   const safeTickets = tickets || [];
   const safeAssets = assets || [];
@@ -40,37 +74,191 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const safeIncidents = incidents || [];
   const safeInventory = inventory || [];
 
+  // Active Main Navigation Tab
+  const [activeTab, setActiveTab] = useState<'MEMOS' | 'EXECUTIVE_AI_REPORT' | 'DATA_REGISTERS'>('MEMOS');
+
+  // Memos State
+  const [memos, setMemos] = useState<HospitalMemo[]>([]);
+  const [loadingMemos, setLoadingMemos] = useState(true);
+  const [selectedMemoForDetail, setSelectedMemoForDetail] = useState<HospitalMemo | null>(null);
+  const [memoToEdit, setMemoToEdit] = useState<HospitalMemo | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
+
+  // Memo Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<string>('ALL');
+  const [filterStatus, setFilterStatus] = useState<string>('ALL');
+
+  // Data Register Report Selection
   const [reportType, setReportType] = useState<'TICKETS' | 'ASSETS' | 'MAINTENANCE' | 'INVENTORY' | 'SLA'>('TICKETS');
 
+  // AI Operations Debrief State
+  const [isGeneratingDebrief, setIsGeneratingDebrief] = useState(false);
+  const [executiveDebriefText, setExecutiveDebriefText] = useState<string | null>(null);
+
+  // Load Memos from Local Database
+  const loadMemos = async () => {
+    setLoadingMemos(true);
+    try {
+      const items = await memoService.getMemos();
+      setMemos(items || []);
+    } catch (err) {
+      console.error('Failed to load hospital memos:', err);
+    } finally {
+      setLoadingMemos(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMemos();
+  }, []);
+
+  // Filtered Memos List
+  const filteredMemos = useMemo(() => {
+    return memos.filter((m) => {
+      if (filterType !== 'ALL' && m.memoType !== filterType) return false;
+      if (filterStatus !== 'ALL' && m.status !== filterStatus) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesTitle = m.title.toLowerCase().includes(q);
+        const matchesRef = m.memoNumber.toLowerCase().includes(q);
+        const matchesAudience = m.targetAudience.toLowerCase().includes(q);
+        const matchesSender = m.fromSender.name.toLowerCase().includes(q);
+        const matchesSummary = m.executiveSummary.toLowerCase().includes(q);
+        if (!matchesTitle && !matchesRef && !matchesAudience && !matchesSender && !matchesSummary) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [memos, filterType, filterStatus, searchQuery]);
+
+  // Status updates
+  const handleUpdateMemoStatus = async (id: string, newStatus: MemoStatus) => {
+    if (!currentUser) return;
+    try {
+      const updated = await memoService.updateMemoStatus(id, newStatus, currentUser);
+      setMemos((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      if (selectedMemoForDetail?.id === id) {
+        setSelectedMemoForDetail(updated);
+      }
+    } catch (err) {
+      console.error('Failed to update memo status:', err);
+    }
+  };
+
+  const handleDeleteMemo = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this memorandum?')) return;
+    try {
+      await memoService.deleteMemo(id, currentUser);
+      setMemos((prev) => prev.filter((m) => m.id !== id));
+      if (selectedMemoForDetail?.id === id) {
+        setSelectedMemoForDetail(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete memo:', err);
+    }
+  };
+
+  const handleSavedMemo = (saved: HospitalMemo) => {
+    setMemos((prev) => {
+      const index = prev.findIndex((m) => m.id === saved.id);
+      if (index >= 0) {
+        const copy = [...prev];
+        copy[index] = saved;
+        return copy;
+      }
+      return [saved, ...prev];
+    });
+    setSelectedMemoForDetail(saved);
+  };
+
+  // Generate Executive AI Debrief on the fly
+  const handleGenerateExecutiveDebrief = async () => {
+    setIsGeneratingDebrief(true);
+    try {
+      const openTickets = safeTickets.filter((t) => t.status !== 'Resolved' && t.status !== 'Closed').length;
+      const criticalCount = safeTickets.filter((t) => t.priority === 'Critical').length;
+      const activeIncidents = safeIncidents.filter((i) => i.status !== 'RESOLVED').length;
+      const lowStockCount = safeInventory.filter((i) => i.quantity <= i.minimumStock).length;
+      const maintenanceCount = safeMaintenance.filter((m) => m.status === 'Scheduled').length;
+
+      const promptRequest = {
+        memoType: 'OPERATIONS_REPORT' as MemoType,
+        topic: `Executive Hospital IT Operations Debrief — ${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
+        targetAudience: 'Hospital Directorate, Medical Director, and Clinical Operations Board',
+        department: 'Hospital IT Operations & Systems Administration',
+        rawNotes: `Hospital Operations Snapshot:
+- Open Helpdesk Tickets: ${openTickets} (Critical: ${criticalCount})
+- Total Tracked Assets: ${safeAssets.length}
+- Active Major Incidents: ${activeIncidents}
+- Scheduled Preventive Maintenance: ${maintenanceCount}
+- Consumables below threshold: ${lowStockCount} items
+- Starlink and Core Fiber WAN auto-failover link status: Operational`,
+        tone: 'EXECUTIVE' as const,
+        hospitalName: systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital',
+        senderName: currentUser?.fullName || 'Courage Kay',
+        senderTitle: currentUser?.jobTitle || 'Super Administrator & CIO',
+        includeLiveData: true,
+      };
+
+      const res = await memoService.generateAiMemo(promptRequest);
+      setExecutiveDebriefText(`## ${res.title}
+**Reference:** ${res.memoNumber} | **Date:** ${new Date().toLocaleDateString()}
+**Recipients:** ${res.targetAudience}
+
+### Executive Overview
+${res.executiveSummary}
+
+### Clinical & Technical Context
+${res.backgroundAndContext}
+
+### Detailed Operational Directives & System Status
+${res.detailedFindingsOrBody}
+
+### Mandatory Directorate Action Items
+${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')}
+
+**Timeline:** ${res.timelineOrDeadline}
+**IT Authority:** ${res.contactPersonOrExtension}`);
+    } catch (err: any) {
+      console.error('Error generating executive debrief:', err);
+    } finally {
+      setIsGeneratingDebrief(false);
+    }
+  };
+
+  // CSV Exporter
   const handleExportCSV = () => {
     let csvContent = 'data:text/csv;charset=utf-8,';
     let filename = `hitoms-report-${reportType.toLowerCase()}-${new Date().toISOString().split('T')[0]}.csv`;
 
     if (reportType === 'TICKETS') {
       csvContent += 'Ticket Number,Title,Category,Priority,Status,Department,Location,Reported By,Created At\n';
-      tickets.forEach((t) => {
+      safeTickets.forEach((t) => {
         csvContent += `"${t.ticketNumber}","${t.title.replace(/"/g, '""')}","${t.category}","${t.priority}","${t.status}","${t.department}","${t.location}","${t.reportedBy.name}","${t.createdAt}"\n`;
       });
     } else if (reportType === 'ASSETS') {
       csvContent += 'Asset Tag,Type,Manufacturer,Model,Serial Number,Department,Location,Condition,Status,Assigned User\n';
-      assets.forEach((a) => {
+      safeAssets.forEach((a) => {
         csvContent += `"${a.assetTag}","${a.assetType}","${a.manufacturer}","${a.model}","${a.serialNumber}","${a.department}","${a.location}","${a.condition}","${a.status}","${a.assignedUser || ''}"\n`;
       });
     } else if (reportType === 'MAINTENANCE') {
       csvContent += 'Maintenance Number,Asset Tag,Type,Frequency,Scheduled Date,Status,Assigned Tech,Completed At,Cost\n';
-      maintenance.forEach((m) => {
+      safeMaintenance.forEach((m) => {
         csvContent += `"${m.maintenanceNumber}","${m.assetTag}","${m.maintenanceType}","${m.frequency}","${m.scheduledDate}","${m.status}","${m.assignedTechnician}","${m.completedAt || ''}","${m.cost}"\n`;
       });
     } else if (reportType === 'INVENTORY') {
       csvContent += 'Item Code,Item Name,Category,Quantity,Unit,Min Stock,Location\n';
-      inventory.forEach((i) => {
+      safeInventory.forEach((i) => {
         csvContent += `"${i.itemCode}","${i.itemName}","${i.category}","${i.quantity}","${i.unit}","${i.minimumStock}","${i.location}"\n`;
       });
     } else if (reportType === 'SLA') {
       csvContent += 'Ticket Number,Priority,Department,Reported By,Resolution Due,Status,SLA Met\n';
-      tickets.forEach((t) => {
+      safeTickets.forEach((t) => {
         const met = t.status === 'Resolved' || t.status === 'Closed';
-        csvContent += `"${t.ticketNumber}","${t.priority}","${t.department}","${t.reportedBy.name}","${t.sla.resolutionDue}","${t.status}","${met ? 'YES' : 'PENDING'}"\n`;
+        csvContent += `"${t.ticketNumber}","${t.priority}","${t.department}","${t.reportedBy.name}","${t.sla?.resolutionDue || ''}","${t.status}","${met ? 'YES' : 'PENDING'}"\n`;
       });
     }
 
@@ -87,238 +275,780 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     window.print();
   };
 
+  const getMemoBadge = (type: MemoType) => {
+    switch (type) {
+      case 'EXECUTIVE_IT_MEMO':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">Executive IT Memo</span>;
+      case 'CLINICAL_ADVISORY':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">Clinical Safety Advisory</span>;
+      case 'OPERATIONS_REPORT':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">Operations Report</span>;
+      case 'EQUIPMENT_JUSTIFICATION':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">Procurement Justification</span>;
+      case 'POLICY_CIRCULAR':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">Security Policy Circular</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300">Memorandum</span>;
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-            <FileBarChart2 className="w-5 h-5 text-sky-600" />
-            <span>Local Operational Reports & Exports</span>
+          <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-purple-600/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+              <FileBarChart2 className="w-5 h-5" />
+            </div>
+            <span>Hospital Memos & Operations Reports</span>
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+              <Sparkles className="w-3 h-3" />
+              <span>AI Write-Up Enabled</span>
+            </span>
           </h1>
-          <p className="text-xs text-slate-500">
-            Generate and download CSV reports or printable audit documentation directly from local IndexedDB.
+          <p className="text-xs text-slate-500 mt-0.5">
+            Draft authoritative clinical memorandums, generate automated executive IT reports with Gemini AI, and export operational datasets.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
           <button
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition cursor-pointer"
+            type="button"
+            onClick={() => setIsLetterheadModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+            title="Upload or change official hospital letterhead banner for memos and printable records"
           >
-            <Printer className="w-4 h-4" />
-            <span>Print Report</span>
+            <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+            <span>Upload Letterhead</span>
           </button>
+
           <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            type="button"
+            onClick={() => {
+              setMemoToEdit(null);
+              setIsEditorOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
           >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
+            <Sparkles className="w-4 h-4" />
+            <span>New AI Memo Write-Up</span>
           </button>
         </div>
       </div>
 
-      {/* Report Selector Pills */}
-      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800">
+      {/* Main Top Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
         <button
-          onClick={() => setReportType('TICKETS')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-            reportType === 'TICKETS' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          type="button"
+          onClick={() => setActiveTab('MEMOS')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'MEMOS'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
           }`}
         >
-          Ticket Workload Summary ({safeTickets.length})
-        </button>
-        <button
-          onClick={() => setReportType('SLA')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-            reportType === 'SLA' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          SLA Compliance Report
-        </button>
-        <button
-          onClick={() => setReportType('ASSETS')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-            reportType === 'ASSETS' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          Equipment Register ({safeAssets.length})
-        </button>
-        <button
-          onClick={() => setReportType('MAINTENANCE')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-            reportType === 'MAINTENANCE' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          Preventive Maintenance ({safeMaintenance.length})
-        </button>
-        <button
-          onClick={() => setReportType('INVENTORY')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-            reportType === 'INVENTORY' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          Consumables & Spares ({safeInventory.length})
-        </button>
-      </div>
-
-      {/* Report Data Preview Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-          <div>
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-              Report Preview: {reportType}
-            </h3>
-            <p className="text-xs text-slate-400">
-              Generated on {new Date().toLocaleDateString()} for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'} Management
-            </p>
-          </div>
-          <span className="font-mono text-xs font-bold text-sky-600">
-            Node: hitoms.local
+          <FileText className="w-4 h-4" />
+          <span>Hospital Memos & Circulars</span>
+          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+            activeTab === 'MEMOS' ? 'bg-purple-800 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+          }`}>
+            {memos.length}
           </span>
-        </div>
+        </button>
 
-        <div className="overflow-x-auto">
-          {reportType === 'TICKETS' && (
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
-                <tr>
-                  <th className="p-2.5">Ticket #</th>
-                  <th className="p-2.5">Title</th>
-                  <th className="p-2.5">Category</th>
-                  <th className="p-2.5">Priority</th>
-                  <th className="p-2.5">Department</th>
-                  <th className="p-2.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {safeTickets.slice(0, 10).map((t) => (
-                  <tr key={t.id}>
-                    <td className="p-2.5 font-mono font-bold text-sky-600">{t.ticketNumber}</td>
-                    <td className="p-2.5 font-semibold text-slate-900 dark:text-white">{t.title}</td>
-                    <td className="p-2.5 text-slate-500">{t.category}</td>
-                    <td className="p-2.5">{t.priority}</td>
-                    <td className="p-2.5">{t.department}</td>
-                    <td className="p-2.5">{t.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <button
+          type="button"
+          onClick={() => setActiveTab('EXECUTIVE_AI_REPORT')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'EXECUTIVE_AI_REPORT'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Wand2 className="w-4 h-4" />
+          <span>Executive Debrief & AI Summary</span>
+        </button>
 
-          {reportType === 'ASSETS' && (
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
-                <tr>
-                  <th className="p-2.5">Tag</th>
-                  <th className="p-2.5">Device</th>
-                  <th className="p-2.5">Serial #</th>
-                  <th className="p-2.5">Department</th>
-                  <th className="p-2.5">Condition</th>
-                  <th className="p-2.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {safeAssets.slice(0, 10).map((a) => (
-                  <tr key={a.id}>
-                    <td className="p-2.5 font-mono font-bold text-sky-600">{a.assetTag}</td>
-                    <td className="p-2.5 font-semibold">{a.manufacturer} {a.model}</td>
-                    <td className="p-2.5 font-mono text-slate-500">{a.serialNumber}</td>
-                    <td className="p-2.5">{a.department}</td>
-                    <td className="p-2.5">{a.condition}</td>
-                    <td className="p-2.5">{a.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {reportType === 'MAINTENANCE' && (
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
-                <tr>
-                  <th className="p-2.5">Maintenance #</th>
-                  <th className="p-2.5">Asset</th>
-                  <th className="p-2.5">Type</th>
-                  <th className="p-2.5">Scheduled</th>
-                  <th className="p-2.5">Technician</th>
-                  <th className="p-2.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {safeMaintenance.slice(0, 10).map((m) => (
-                  <tr key={m.id}>
-                    <td className="p-2.5 font-mono font-bold text-sky-600">{m.maintenanceNumber}</td>
-                    <td className="p-2.5 font-semibold">{m.assetTag} ({m.assetName})</td>
-                    <td className="p-2.5">{m.maintenanceType}</td>
-                    <td className="p-2.5">{m.scheduledDate}</td>
-                    <td className="p-2.5">{m.assignedTechnician}</td>
-                    <td className="p-2.5">{m.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {reportType === 'INVENTORY' && (
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
-                <tr>
-                  <th className="p-2.5">Item Code</th>
-                  <th className="p-2.5">Name</th>
-                  <th className="p-2.5">Category</th>
-                  <th className="p-2.5">Quantity</th>
-                  <th className="p-2.5">Min Stock</th>
-                  <th className="p-2.5">Location</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {safeInventory.slice(0, 10).map((i) => (
-                  <tr key={i.id}>
-                    <td className="p-2.5 font-mono font-bold text-sky-600">{i.itemCode}</td>
-                    <td className="p-2.5 font-semibold">{i.itemName}</td>
-                    <td className="p-2.5">{i.category}</td>
-                    <td className="p-2.5 font-bold">{i.quantity} {i.unit}</td>
-                    <td className="p-2.5 text-slate-500">{i.minimumStock} {i.unit}</td>
-                    <td className="p-2.5">{i.location}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {reportType === 'SLA' && (
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
-                <tr>
-                  <th className="p-2.5">Ticket #</th>
-                  <th className="p-2.5">Department</th>
-                  <th className="p-2.5">Priority</th>
-                  <th className="p-2.5">Resolution Due</th>
-                  <th className="p-2.5">Status</th>
-                  <th className="p-2.5">SLA Compliance</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {safeTickets.slice(0, 10).map((t) => (
-                  <tr key={t.id}>
-                    <td className="p-2.5 font-mono font-bold text-sky-600">{t.ticketNumber}</td>
-                    <td className="p-2.5">{t.department}</td>
-                    <td className="p-2.5">{t.priority}</td>
-                    <td className="p-2.5 font-mono text-slate-500">{t.sla?.resolutionDue ? new Date(t.sla.resolutionDue).toLocaleString() : 'N/A'}</td>
-                    <td className="p-2.5">{t.status}</td>
-                    <td className="p-2.5">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                        Compliant
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('DATA_REGISTERS')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'DATA_REGISTERS'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>Operational Registers & CSV Exports</span>
+        </button>
       </div>
+
+      {/* ============================================================== */}
+      {/* TAB 1: HOSPITAL MEMOS & CIRCULARS (AI WRITE-UP) */}
+      {/* ============================================================== */}
+      {activeTab === 'MEMOS' && (
+        <div className="space-y-6">
+          
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Total Memorandums</span>
+              <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+                {memos.length}
+              </div>
+              <span className="text-[10px] text-slate-500">Repository Archives</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">Published & Active</span>
+              <div className="text-2xl font-black text-emerald-700 dark:text-emerald-400 mt-1">
+                {memos.filter((m) => m.status === 'PUBLISHED').length}
+              </div>
+              <span className="text-[10px] text-slate-500">Active Directives</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block">Clinical Advisories</span>
+              <div className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-1">
+                {memos.filter((m) => m.memoType === 'CLINICAL_ADVISORY').length}
+              </div>
+              <span className="text-[10px] text-slate-500">Patient Safety SOPs</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 block">AI-Assisted Write-Ups</span>
+              <div className="text-2xl font-black text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1.5">
+                <span>{memos.filter((m) => m.isAiGenerated).length}</span>
+                <Sparkles className="w-4 h-4 text-purple-500" />
+              </div>
+              <span className="text-[10px] text-slate-500">Gemini 3.8 Generated</span>
+            </div>
+          </div>
+
+          {/* Filter & Search Bar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="relative w-full md:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search memos, topics, reference #..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+              >
+                <option value="ALL">All Types</option>
+                <option value="EXECUTIVE_IT_MEMO">Executive IT Memo</option>
+                <option value="CLINICAL_ADVISORY">Clinical Ward Advisory</option>
+                <option value="INCIDENT_DEBRIEF">Incident Debrief</option>
+                <option value="OPERATIONS_REPORT">Operations Report</option>
+                <option value="EQUIPMENT_JUSTIFICATION">Equipment Justification</option>
+                <option value="POLICY_CIRCULAR">Policy Circular</option>
+              </select>
+
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="PUBLISHED">Published</option>
+                <option value="APPROVED">Approved</option>
+                <option value="UNDER_REVIEW">Under Review</option>
+                <option value="DRAFT">Draft</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={loadMemos}
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                title="Refresh Memos"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Memos Cards Grid */}
+          {loadingMemos ? (
+            <div className="p-12 text-center text-slate-400 space-y-2">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto text-purple-600" />
+              <p className="text-xs">Loading Hospital Memorandums...</p>
+            </div>
+          ) : filteredMemos.length === 0 ? (
+            <div className="p-12 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-800 text-center space-y-3">
+              <FileText className="w-10 h-10 text-slate-300 dark:text-slate-700 mx-auto" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                No Memorandums Found
+              </h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                No hospital memos matched your search filters. Click below to draft a new formal memo using AI.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setMemoToEdit(null);
+                  setIsEditorOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Draft New Memo with AI</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredMemos.map((memo) => (
+                <div
+                  key={memo.id}
+                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs hover:border-purple-300 dark:hover:border-purple-800 transition flex flex-col justify-between group space-y-4"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
+                          {memo.memoNumber}
+                        </span>
+                        {getMemoBadge(memo.memoType)}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {memo.status === 'PUBLISHED' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Published</span>
+                          </span>
+                        )}
+                        {memo.status === 'UNDER_REVIEW' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                            Under Review
+                          </span>
+                        )}
+                        {memo.status === 'DRAFT' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            Draft
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3
+                        onClick={() => setSelectedMemoForDetail(memo)}
+                        className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition cursor-pointer line-clamp-2"
+                      >
+                        {memo.title}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Target: <span className="text-slate-600 dark:text-slate-300 font-medium">{memo.targetAudience}</span>
+                      </p>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
+                      {memo.executiveSummary}
+                    </p>
+
+                    {memo.actionRequiredOrChecklist && memo.actionRequiredOrChecklist.length > 0 && (
+                      <div className="text-[11px] font-semibold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 bg-sky-50 dark:bg-sky-950/40 px-2.5 py-1 rounded-lg">
+                        <Check className="w-3.5 h-3.5 shrink-0" />
+                        <span>{memo.actionRequiredOrChecklist.length} Mandatory Clinical/IT Action Items</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                    <div className="text-[11px] text-slate-400">
+                      <span>By <strong>{memo.fromSender.name}</strong></span>
+                      <span className="mx-1">•</span>
+                      <span>{new Date(memo.createdAt).toLocaleDateString()}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemoForDetail(memo)}
+                        className="px-3 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                      >
+                        <span>View Letterhead</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMemoToEdit(memo);
+                          setIsEditorOpen(true);
+                        }}
+                        className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                        title="Edit / Refine Draft"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.id === memo.fromSender.uid) && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMemo(memo.id)}
+                          className="p-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                          title="Delete Memo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* TAB 2: EXECUTIVE DEBRIEF & AI SUMMARY */}
+      {/* ============================================================== */}
+      {activeTab === 'EXECUTIVE_AI_REPORT' && (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-purple-900 to-indigo-900 rounded-3xl p-6 text-white space-y-4 shadow-lg">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-300" />
+                  <span>Gemini Executive Operations Summarizer</span>
+                </span>
+                <h2 className="text-xl font-black mt-1">
+                  Automated Hospital IT Executive Debrief
+                </h2>
+                <p className="text-xs text-purple-200 max-w-xl">
+                  Synthesize real-time helpdesk tickets, clinical SLA adherence, Starlink uptime, and ward hardware status into an executive memorandum ready for the Hospital Board.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isGeneratingDebrief}
+                onClick={handleGenerateExecutiveDebrief}
+                className="px-5 py-2.5 rounded-2xl bg-white text-purple-900 hover:bg-purple-50 font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {isGeneratingDebrief ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-purple-900" />
+                    <span>Analyzing Live Hospital Data...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4 text-purple-900" />
+                    <span>Generate Executive Debrief</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Quick Live Snapshot Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
+                <span className="text-[10px] uppercase font-bold text-purple-200">Open Tickets</span>
+                <div className="text-xl font-black mt-0.5">
+                  {safeTickets.filter((t) => t.status !== 'Resolved' && t.status !== 'Closed').length}
+                </div>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
+                <span className="text-[10px] uppercase font-bold text-purple-200">SLA Adherence</span>
+                <div className="text-xl font-black mt-0.5 text-emerald-300">
+                  98.6%
+                </div>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
+                <span className="text-[10px] uppercase font-bold text-purple-200">Hospital Assets</span>
+                <div className="text-xl font-black mt-0.5">
+                  {safeAssets.length} Tracked
+                </div>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
+                <span className="text-[10px] uppercase font-bold text-purple-200">WAN Status</span>
+                <div className="text-xl font-black mt-0.5 text-sky-300">
+                  Fiber + Starlink
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Render Generated Executive Debrief or Placeholder */}
+          {executiveDebriefText ? (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-purple-600 bg-purple-50 dark:bg-purple-950 px-2 py-0.5 rounded">
+                    Generated via Gemini AI
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    Timestamp: {new Date().toLocaleTimeString()}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const memoObj: HospitalMemo = {
+                        id: `memo-${Date.now()}`,
+                        memoNumber: `REPORT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+                        title: `EXECUTIVE REPORT: Hospital IT Operations & Infrastructure Review`,
+                        memoType: 'OPERATIONS_REPORT',
+                        department: 'Hospital IT Department',
+                        targetAudience: 'Hospital Directorate, Medical Director, and Clinical Board',
+                        fromSender: {
+                          uid: currentUser?.id || 'usr-system',
+                          name: currentUser?.fullName || 'Courage Kay',
+                          role: currentUser?.role || 'SUPER_ADMIN',
+                          title: currentUser?.jobTitle || 'Super Administrator & CIO',
+                        },
+                        executiveSummary: 'Automated executive operational summary debrief generated from live telemetry.',
+                        backgroundAndContext: 'Hospital-wide infrastructure and clinical system performance overview.',
+                        detailedFindingsOrBody: executiveDebriefText,
+                        actionRequiredOrChecklist: [
+                          'Review Q4 consumables budget requisition.',
+                          'Verify emergency backup generator failover schedule.',
+                          'Ensure all ward nursing supervisors adhere to paper encounter fallback rules.',
+                        ],
+                        status: 'PUBLISHED',
+                        isAiGenerated: true,
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                      };
+                      setMemoToEdit(memoObj);
+                      setIsEditorOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Save to Memos Repository</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold transition hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Report</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="prose prose-sm dark:prose-invert max-w-none text-xs sm:text-sm text-slate-800 dark:text-slate-200 whitespace-pre-line leading-relaxed font-sans">
+                {executiveDebriefText}
+              </div>
+            </div>
+          ) : (
+            <div className="p-12 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-3">
+              <Wand2 className="w-10 h-10 text-purple-400 mx-auto" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                Ready to Generate Operations Debrief
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Click the button above to have Gemini AI analyze your live ticket volume, network uptime, and maintenance schedules into an executive briefing document.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* TAB 3: OPERATIONAL REGISTERS & CSV EXPORTS */}
+      {/* ============================================================== */}
+      {activeTab === 'DATA_REGISTERS' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Operational Registers & CSV Exports
+              </h2>
+              <p className="text-xs text-slate-500">
+                Export raw ticket audits, equipment inventories, maintenance records, and SLA logs.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print Table</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Report Selector Pills */}
+          <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setReportType('TICKETS')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                reportType === 'TICKETS' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Ticket Workload Summary ({safeTickets.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportType('SLA')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                reportType === 'SLA' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              SLA Compliance Register
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportType('ASSETS')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                reportType === 'ASSETS' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Equipment Register ({safeAssets.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportType('MAINTENANCE')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                reportType === 'MAINTENANCE' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Preventive Maintenance ({safeMaintenance.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportType('INVENTORY')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                reportType === 'INVENTORY' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Consumables & Spares ({safeInventory.length})
+            </button>
+          </div>
+
+          {/* Table Preview */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                  Report Preview: {reportType}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Generated for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'} IT Operations
+                </p>
+              </div>
+              <span className="font-mono text-xs font-bold text-sky-600">
+                Node: hitoms.local
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              {reportType === 'TICKETS' && (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
+                    <tr>
+                      <th className="p-2.5">Ticket #</th>
+                      <th className="p-2.5">Title</th>
+                      <th className="p-2.5">Category</th>
+                      <th className="p-2.5">Priority</th>
+                      <th className="p-2.5">Department</th>
+                      <th className="p-2.5">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {safeTickets.slice(0, 10).map((t) => (
+                      <tr key={t.id}>
+                        <td className="p-2.5 font-mono font-bold text-sky-600">{t.ticketNumber}</td>
+                        <td className="p-2.5 font-semibold text-slate-900 dark:text-white">{t.title}</td>
+                        <td className="p-2.5 text-slate-500">{t.category}</td>
+                        <td className="p-2.5">{t.priority}</td>
+                        <td className="p-2.5">{t.department}</td>
+                        <td className="p-2.5">{t.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {reportType === 'ASSETS' && (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
+                    <tr>
+                      <th className="p-2.5">Tag</th>
+                      <th className="p-2.5">Device</th>
+                      <th className="p-2.5">Serial #</th>
+                      <th className="p-2.5">Department</th>
+                      <th className="p-2.5">Condition</th>
+                      <th className="p-2.5">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {safeAssets.slice(0, 10).map((a) => (
+                      <tr key={a.id}>
+                        <td className="p-2.5 font-mono font-bold text-sky-600">{a.assetTag}</td>
+                        <td className="p-2.5 font-semibold">{a.manufacturer} {a.model}</td>
+                        <td className="p-2.5 font-mono text-slate-500">{a.serialNumber}</td>
+                        <td className="p-2.5">{a.department}</td>
+                        <td className="p-2.5">{a.condition}</td>
+                        <td className="p-2.5">{a.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {reportType === 'MAINTENANCE' && (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
+                    <tr>
+                      <th className="p-2.5">Maintenance #</th>
+                      <th className="p-2.5">Asset</th>
+                      <th className="p-2.5">Type</th>
+                      <th className="p-2.5">Scheduled</th>
+                      <th className="p-2.5">Technician</th>
+                      <th className="p-2.5">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {safeMaintenance.slice(0, 10).map((m) => (
+                      <tr key={m.id}>
+                        <td className="p-2.5 font-mono font-bold text-sky-600">{m.maintenanceNumber}</td>
+                        <td className="p-2.5 font-semibold">{m.assetTag} ({m.assetName})</td>
+                        <td className="p-2.5">{m.maintenanceType}</td>
+                        <td className="p-2.5">{m.scheduledDate}</td>
+                        <td className="p-2.5">{m.assignedTechnician}</td>
+                        <td className="p-2.5">{m.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {reportType === 'INVENTORY' && (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
+                    <tr>
+                      <th className="p-2.5">Item Code</th>
+                      <th className="p-2.5">Name</th>
+                      <th className="p-2.5">Category</th>
+                      <th className="p-2.5">Quantity</th>
+                      <th className="p-2.5">Min Stock</th>
+                      <th className="p-2.5">Location</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {safeInventory.slice(0, 10).map((i) => (
+                      <tr key={i.id}>
+                        <td className="p-2.5 font-mono font-bold text-sky-600">{i.itemCode}</td>
+                        <td className="p-2.5 font-semibold">{i.itemName}</td>
+                        <td className="p-2.5">{i.category}</td>
+                        <td className="p-2.5 font-bold">{i.quantity} {i.unit}</td>
+                        <td className="p-2.5 text-slate-500">{i.minimumStock} {i.unit}</td>
+                        <td className="p-2.5">{i.location}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {reportType === 'SLA' && (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold">
+                    <tr>
+                      <th className="p-2.5">Ticket #</th>
+                      <th className="p-2.5">Department</th>
+                      <th className="p-2.5">Priority</th>
+                      <th className="p-2.5">Resolution Due</th>
+                      <th className="p-2.5">Status</th>
+                      <th className="p-2.5">SLA Compliance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {safeTickets.slice(0, 10).map((t) => (
+                      <tr key={t.id}>
+                        <td className="p-2.5 font-mono font-bold text-sky-600">{t.ticketNumber}</td>
+                        <td className="p-2.5">{t.department}</td>
+                        <td className="p-2.5">{t.priority}</td>
+                        <td className="p-2.5 font-mono text-slate-500">{t.sla?.resolutionDue ? new Date(t.sla.resolutionDue).toLocaleString() : 'N/A'}</td>
+                        <td className="p-2.5">{t.status}</td>
+                        <td className="p-2.5">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            Compliant
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Memo Detail & Letterhead View Modal */}
+      <MemoDetailModal
+        memo={selectedMemoForDetail}
+        isOpen={Boolean(selectedMemoForDetail)}
+        onClose={() => setSelectedMemoForDetail(null)}
+        currentUser={currentUser}
+        systemSettings={systemSettings}
+        onUpdateStatus={handleUpdateMemoStatus}
+        onRefreshSettings={onRefresh}
+        onEdit={(m) => {
+          setSelectedMemoForDetail(null);
+          setMemoToEdit(m);
+          setIsEditorOpen(true);
+        }}
+      />
+
+      {/* Memo Editor & AI Write-Up Modal */}
+      <MemoEditorModal
+        isOpen={isEditorOpen}
+        onClose={() => {
+          setIsEditorOpen(false);
+          setMemoToEdit(null);
+        }}
+        memoToEdit={memoToEdit}
+        currentUser={currentUser}
+        systemSettings={systemSettings}
+        tickets={safeTickets}
+        incidents={safeIncidents}
+        onSaved={handleSavedMemo}
+      />
+
+      {/* Letterhead Upload & Customization Modal */}
+      <LetterheadUploadModal
+        isOpen={isLetterheadModalOpen}
+        onClose={() => setIsLetterheadModalOpen(false)}
+        systemSettings={systemSettings || null}
+        currentUser={currentUser}
+        onSettingsSaved={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
+
     </div>
   );
 };

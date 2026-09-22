@@ -503,7 +503,7 @@ export default function App() {
               />
             )}
 
-            {currentView === 'reports' && (
+            {(currentView === 'reports' || currentView === 'memos') && (
               <ReportsView
                 tickets={tickets}
                 assets={assets}
@@ -511,6 +511,9 @@ export default function App() {
                 incidents={incidents}
                 inventory={inventoryItems}
                 systemSettings={systemSettings}
+                currentUser={currentUser}
+                allUsers={allUsers}
+                onRefresh={refreshAllData}
               />
             )}
 

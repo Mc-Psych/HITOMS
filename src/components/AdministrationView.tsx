@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Lock,
   UserCheck,
+  UserX,
   Phone,
   Mail,
   MapPin,
@@ -28,15 +29,29 @@ import {
   X,
   Plus,
   HelpCircle,
+  Calendar,
+  Bell,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  UserPlus,
+  Edit3,
+  Search,
+  Filter,
+  Trash2,
 } from 'lucide-react';
 import {
   type User as UserType,
   type OfflineSecurityPolicy,
   type SystemSettings,
   type Role,
+  type OfficerMonthlySpecialty,
+  type TicketCategory,
+  type AccountStatus,
 } from '../types';
 import {
   authService,
+  extractSurname,
   type Permission,
   type PermissionDefinition,
   PERMISSION_DEFINITIONS,
@@ -44,7 +59,16 @@ import {
   ROLE_PERMISSIONS,
 } from '../services/authService';
 import { settingsService, DEFAULT_SYSTEM_SETTINGS } from '../services/settingsService';
+import {
+  officerSpecialtyService,
+  ALL_SPECIALTY_CATEGORIES,
+  getCurrentMonthKey,
+  formatMonthName,
+} from '../services/officerSpecialtyService';
+import { systemNotificationRingService } from '../services/ticketSoundService';
 import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadModal';
+import { UserEditModal } from './UserEditModal';
+import { LetterheadUploadModal } from './LetterheadUploadModal';
 
 interface AdministrationViewProps {
   currentUser: UserType | null;
@@ -70,7 +94,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onUserSwitch,
   onRefresh,
 }) => {
-  const [activeTab, setActiveTab] = useState<'FACILITY' | 'RBAC' | 'SECURITY_POLICIES'>('FACILITY');
+  const [activeTab, setActiveTab] = useState<'FACILITY' | 'RBAC' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('FACILITY');
   const [rbacSubTab, setRbacSubTab] = useState<'STAFF_DIRECTORY' | 'ROLE_MATRIX' | 'USER_OVERRIDES'>('STAFF_DIRECTORY');
   
   const [offlinePolicy, setOfflinePolicy] = useState<OfflineSecurityPolicy>(authService.getOfflinePolicy());
@@ -79,6 +103,18 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [saveFacilitySuccess, setSaveFacilitySuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string>('');
+
+  // Officer Monthly Specialties states
+  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
+  const [monthlySpecialties, setMonthlySpecialties] = useState<OfficerMonthlySpecialty[]>([]);
+  const [specialtySaveSuccess, setSpecialtySaveSuccess] = useState(false);
+  const [simulatedCategory, setSimulatedCategory] = useState<TicketCategory>('Network');
+  const [simulationResult, setSimulationResult] = useState<string>('');
+  const [selectedOfficerForAdd, setSelectedOfficerForAdd] = useState<string>('');
+
+  // System Notification Ring states
+  const [ringTestSuccess, setRingTestSuccess] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(systemNotificationRingService.isMuted());
 
   // Permission Matrix states
   const [selectedRoleForMatrix, setSelectedRoleForMatrix] = useState<Role>('IT_OFFICER');
@@ -94,6 +130,16 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   // Bulk Staff Upload modal state
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // User Profile Edit & Provisioning Modal state
+  const [isUserEditModalOpen, setIsUserEditModalOpen] = useState(false);
+  const [userToEdit, setUserToEdit] = useState<UserType | null>(null);
+  const [staffSearchQuery, setStaffSearchQuery] = useState('');
+  const [staffRoleFilter, setStaffRoleFilter] = useState<Role | 'ALL'>('ALL');
+  const [staffStatusFilter, setStaffStatusFilter] = useState<AccountStatus | 'ALL'>('ALL');
+
+  // Letterhead modal state
+  const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
   
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
@@ -136,6 +182,129 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isBulkModalOpen, selectedUserForOverride]);
+
+  // Load monthly specialties for selected month
+  useEffect(() => {
+    const loadMonthlyRoster = async () => {
+      const items = await officerSpecialtyService.getSpecialtiesForMonth(selectedMonth);
+      setMonthlySpecialties(items);
+    };
+    loadMonthlyRoster();
+  }, [selectedMonth]);
+
+  // Calculate ticket auto-assignment simulation
+  useEffect(() => {
+    const assigned = monthlySpecialties.find((s) => s.isActive && s.specialties.includes(simulatedCategory));
+    if (assigned) {
+      setSimulationResult(`Will auto-assign to: ${assigned.userName} (${assigned.notes || 'Monthly Specialty Match'})`);
+    } else {
+      setSimulationResult(`No monthly specialist assigned for [${simulatedCategory}]. Will route to default Senior IT Admin.`);
+    }
+  }, [simulatedCategory, monthlySpecialties]);
+
+  const handleToggleSpecialtyCategory = (officerId: string, category: TicketCategory) => {
+    setMonthlySpecialties((prev) =>
+      prev.map((s) => {
+        if (s.userId === officerId) {
+          const hasCat = s.specialties.includes(category);
+          return {
+            ...s,
+            specialties: hasCat
+              ? s.specialties.filter((c) => c !== category)
+              : [...s.specialties, category],
+          };
+        }
+        return s;
+      })
+    );
+  };
+
+  const handleToggleOfficerActive = (officerId: string) => {
+    setMonthlySpecialties((prev) =>
+      prev.map((s) => {
+        if (s.userId === officerId) {
+          return { ...s, isActive: !s.isActive };
+        }
+        return s;
+      })
+    );
+  };
+
+  const handleUpdateOfficerNotes = (officerId: string, notes: string) => {
+    setMonthlySpecialties((prev) =>
+      prev.map((s) => {
+        if (s.userId === officerId) {
+          return { ...s, notes };
+        }
+        return s;
+      })
+    );
+  };
+
+  const handleAddOfficerToMonth = () => {
+    if (!selectedOfficerForAdd) return;
+    const targetUser = allUsers.find((u) => u.id === selectedOfficerForAdd);
+    if (!targetUser) return;
+
+    if (monthlySpecialties.some((s) => s.userId === targetUser.id)) {
+      setSelectedOfficerForAdd('');
+      return;
+    }
+
+    const newEntry: OfficerMonthlySpecialty = {
+      id: `spec-${selectedMonth}-${targetUser.id}`,
+      userId: targetUser.id,
+      userName: targetUser.fullName,
+      month: selectedMonth,
+      specialties: ['Other'],
+      notes: `${targetUser.jobTitle || 'IT Officer'} Specialty Assignment`,
+      isActive: true,
+    };
+
+    setMonthlySpecialties((prev) => [...prev, newEntry]);
+    setSelectedOfficerForAdd('');
+  };
+
+  const handleSaveMonthlySpecialties = async () => {
+    if (!currentUser) return;
+    try {
+      await officerSpecialtyService.saveMonthlySpecialties(monthlySpecialties, currentUser);
+      setSpecialtySaveSuccess(true);
+      setTimeout(() => setSpecialtySaveSuccess(false), 3000);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to save monthly specialties');
+    }
+  };
+
+  const handleToggleDemoLogin = async () => {
+    if (!isSuperAdmin || !currentUser) return;
+    try {
+      const currentVal = Boolean(settings.disableDemoLogin);
+      const updated = await settingsService.updateSettings(
+        { disableDemoLogin: !currentVal },
+        currentUser
+      );
+      setSettings(updated);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to toggle demo login setting');
+    }
+  };
+
+  const handleTestSystemRing = async () => {
+    await systemNotificationRingService.testSystemNotificationRing();
+    setRingTestSuccess(true);
+    setTimeout(() => setRingTestSuccess(false), 3500);
+  };
+
+  const handleToggleAudioMute = () => {
+    const newMuted = !isAudioMuted;
+    systemNotificationRingService.setMuted(newMuted);
+    setIsAudioMuted(newMuted);
+  };
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -317,6 +486,18 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             <Lock className="w-3.5 h-3.5" />
             <span>Offline Policies</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('OFFICER_SPECIALTIES')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'OFFICER_SPECIALTIES'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Monthly Officer Specialties</span>
+          </button>
         </div>
       </div>
 
@@ -406,6 +587,93 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       )}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Official Hospital Letterhead & Top Banner Section */}
+              <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-sky-600" />
+                    <div>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider block">
+                        Official Hospital Letterhead & Memorandum Banner
+                      </span>
+                      <p className="text-[11px] text-slate-500">
+                        Top banner graphic and formal typography applied to official memos, circulars, and printed reports.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsLetterheadModalOpen(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>{settings.hospitalLetterheadImage ? 'Change / Configure Letterhead' : 'Upload Letterhead'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Letterhead Preview Box */}
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 p-4 overflow-hidden">
+                  {settings.hospitalLetterheadImage ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900 shadow-xs">
+                        <img
+                          src={settings.hospitalLetterheadImage}
+                          alt="Hospital Letterhead Banner Preview"
+                          className="w-full max-h-36 object-contain sm:object-cover mx-auto"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px]">
+                            Custom Banner Active
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Mode: {settings.letterheadMode || 'HEADER_AND_BANNER'}
+                          </span>
+                        </div>
+
+                        {isSuperAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSettings((prev) => ({ ...prev, hospitalLetterheadImage: '' }));
+                              settingsService.updateSettings({ hospitalLetterheadImage: '' }, currentUser!);
+                            }}
+                            className="text-rose-600 dark:text-rose-400 hover:underline text-[11px] font-semibold cursor-pointer"
+                          >
+                            Remove Letterhead Graphic
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-6 text-center space-y-2">
+                      <div className="w-12 h-12 rounded-2xl bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Standard Dynamic Header Active
+                        </h5>
+                        <p className="text-[11px] text-slate-500 max-w-md mt-0.5">
+                          Upload an 8.5" graphic header banner (or choose from built-in presets) to render on all official hospital memos, directorate notices, and printed records.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsLetterheadModalOpen(true)}
+                        className="mt-2 text-xs font-bold text-sky-600 hover:text-sky-500 underline cursor-pointer"
+                      >
+                        Launch Letterhead Studio & Presets →
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -549,7 +817,19 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             </div>
 
             {isSuperAdmin && rbacSubTab === 'STAFF_DIRECTORY' && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserToEdit(null);
+                    setIsUserEditModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Add Staff Profile</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => downloadStaffTemplate(true)}
@@ -557,7 +837,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   title="Download CSV staff template with sample entries"
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Download Template (.csv)</span>
+                  <span>Template (.csv)</span>
                 </button>
 
                 <button
@@ -566,7 +846,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Upload Staff with Template</span>
+                  <span>Bulk Upload</span>
                 </button>
               </div>
             )}
@@ -574,15 +854,54 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
           {/* SUB-VIEW 1: STAFF DIRECTORY */}
           {rbacSubTab === 'STAFF_DIRECTORY' && (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden space-y-3">
+              {/* Directory Filter & Search Header */}
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30">
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                    Hospital Staff Directory ({allUsers.length})
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Users className="w-4 h-4 text-sky-600" />
+                    <span>Hospital Staff Directory ({allUsers.length})</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Username convention: Surname in lowercase. Default initial password: last 4 letters of surname.
+                    Manage staff user accounts, update profile details, assign RBAC roles, or suspend access.
                   </p>
+                </div>
+
+                <div className="w-full md:w-auto flex flex-wrap items-center gap-2">
+                  <div className="relative flex-1 md:w-48">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={staffSearchQuery}
+                      onChange={(e) => setStaffSearchQuery(e.target.value)}
+                      placeholder="Search staff..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <select
+                    value={staffRoleFilter}
+                    onChange={(e) => setStaffRoleFilter(e.target.value as Role | 'ALL')}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                  >
+                    <option value="ALL">All Roles</option>
+                    {ALL_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={staffStatusFilter}
+                    onChange={(e) => setStaffStatusFilter(e.target.value as AccountStatus | 'ALL')}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="Active">Active</option>
+                    <option value="Suspended">Suspended</option>
+                    <option value="Disabled">Disabled</option>
+                  </select>
                 </div>
               </div>
 
@@ -590,72 +909,142 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase font-semibold">
                     <tr>
-                      <th className="px-4 py-3">Full Name</th>
+                      <th className="px-4 py-3">Staff Profile</th>
                       <th className="px-4 py-3">Username</th>
-                      <th className="px-4 py-3">Assigned Role</th>
-                      <th className="px-4 py-3">Department</th>
-                      <th className="px-4 py-3">Password Change Status</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3">Department & Title</th>
+                      <th className="px-4 py-3">Account Status</th>
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {allUsers.map((u) => {
-                      const overrides = authService.getUserPermissionOverrides(u.id);
-                      const hasOverrides = overrides.granted.length > 0 || overrides.revoked.length > 0;
+                    {allUsers
+                      .filter((u) => {
+                        const query = staffSearchQuery.trim().toLowerCase();
+                        if (query) {
+                          const matchesName = (u.fullName || '').toLowerCase().includes(query);
+                          const matchesUsername = (u.username || '').toLowerCase().includes(query);
+                          const matchesEmail = (u.email || '').toLowerCase().includes(query);
+                          const matchesDept = (u.department || '').toLowerCase().includes(query);
+                          if (!matchesName && !matchesUsername && !matchesEmail && !matchesDept) return false;
+                        }
+                        if (staffRoleFilter !== 'ALL' && u.role !== staffRoleFilter) return false;
+                        if (staffStatusFilter !== 'ALL' && u.status !== staffStatusFilter) return false;
+                        return true;
+                      })
+                      .map((u) => {
+                        const overrides = authService.getUserPermissionOverrides(u.id);
+                        const hasOverrides = overrides.granted.length > 0 || overrides.revoked.length > 0;
+                        const isSuspended = u.status === 'Suspended' || u.status === 'Disabled';
 
-                      return (
-                        <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                          <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                            <div>{u.fullName}</div>
-                            <div className="text-[11px] text-slate-400 font-normal">{u.email}</div>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-sky-600 font-bold">
-                            @{u.username}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {u.department}
-                          </td>
-                          <td className="px-4 py-3">
-                            {u.mustChangePasswordOnFirstLogin ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                                Mandatory on 1st Login
+                        return (
+                          <tr
+                            key={u.id}
+                            className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
+                              isSuspended ? 'bg-rose-50/30 dark:bg-rose-950/10' : ''
+                            }`}
+                          >
+                            <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                                    isSuspended
+                                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                                      : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                                  }`}
+                                >
+                                  {u.fullName.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{u.fullName}</span>
+                                    {currentUser?.id === u.id && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                                        You
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 font-normal">{u.email}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-mono text-sky-600 font-bold">
+                              @{u.username || extractSurname(u.fullName).toLowerCase()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
+                                {u.role}
                               </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                                Verified Active
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right space-x-2">
-                            {isSuperAdmin && (
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                              <div className="font-medium text-slate-800 dark:text-slate-200">{u.department}</div>
+                              <div className="text-[10px] text-slate-400">{u.jobTitle || 'Staff Member'}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1 items-start">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                                    u.status === 'Active'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      u.status === 'Active' ? 'bg-emerald-500' : 'bg-rose-500'
+                                    }`}
+                                  />
+                                  <span>{u.status || 'Active'}</span>
+                                </span>
+
+                                {u.mustChangePasswordOnFirstLogin && (
+                                  <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                                    Must Change Pass
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right space-x-1.5 whitespace-nowrap">
+                              {/* Edit Profile Button */}
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={() => {
+                                    setUserToEdit(u);
+                                    setIsUserEditModalOpen(true);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                                  title="Edit user profile, reset password, suspend, or delete"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={() => setSelectedUserForOverride(u)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
+                                    hasOverrides
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-200'
+                                      : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200'
+                                  }`}
+                                  title="Customize permissions for this individual user"
+                                >
+                                  {hasOverrides ? 'Custom Perms*' : 'Perms'}
+                                </button>
+                              )}
+
                               <button
-                                onClick={() => setSelectedUserForOverride(u)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                  hasOverrides
-                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-200'
-                                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200'
-                                }`}
-                                title="Customize permissions for this individual user"
+                                onClick={() => onUserSwitch(u)}
+                                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer text-[11px]"
+                                title="Switch session to this user"
                               >
-                                {hasOverrides ? 'Custom Permissions*' : 'Permissions'}
+                                Assume
                               </button>
-                            )}
-
-                            <button
-                              onClick={() => onUserSwitch(u)}
-                              className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-semibold cursor-pointer"
-                            >
-                              Assume
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -794,99 +1183,453 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
       {/* TAB 3: OFFLINE SECURITY POLICIES */}
       {activeTab === 'SECURITY_POLICIES' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Lock className="w-4 h-4 text-sky-600" />
-            <span>Configurable Offline Security Policies</span>
-          </h3>
-
-          <form onSubmit={handleSavePolicy} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-slate-500 font-semibold mb-1">
-                Max Offline Working Window (Hours)
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={168}
-                value={offlinePolicy.maxOfflineHours}
-                onChange={(e) =>
-                  setOfflinePolicy({ ...offlinePolicy, maxOfflineHours: parseInt(e.target.value) || 72 })
-                }
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
-              />
-              <span className="text-[10px] text-slate-400">
-                Clinical and IT staff can operate disconnected up to this threshold (default 72h).
+        <div className="space-y-6">
+          {/* SUPER ADMIN TERMINAL CONTROLS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Super Administrator Terminal Controls</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Authority reserved for Super Administrator Courage Kay. Manage terminal access security and demo profiles.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                Super Admin: Courage Kay
               </span>
             </div>
 
-            <div className="space-y-3 pt-2">
-              <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={offlinePolicy.allowOfflineLogin}
-                  onChange={(e) =>
-                    setOfflinePolicy({ ...offlinePolicy, allowOfflineLogin: e.target.checked })
-                  }
-                  className="w-4 h-4 text-sky-600 rounded"
-                />
-                <span>Allow Offline Hospital Staff Sign-In</span>
-              </label>
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-xs text-slate-900 dark:text-white">
+                    Quick Terminal Profiles (Demo Login Section)
+                  </span>
+                  {settings.disableDemoLogin ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      DISABLED / HIDDEN
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      ACTIVE / VISIBLE
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 max-w-xl">
+                  Courage Kay can disable the quick demo login profile buttons on the login modal to prevent unauthorized one-click terminal entry during live hospital production.
+                </p>
+              </div>
 
-              <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={offlinePolicy.allowOfflineTicketCreation}
-                  onChange={(e) =>
-                    setOfflinePolicy({ ...offlinePolicy, allowOfflineTicketCreation: e.target.checked })
-                  }
-                  className="w-4 h-4 text-sky-600 rounded"
-                />
-                <span>Permit Ticket Logging During Starlink Outage</span>
-              </label>
+              <button
+                type="button"
+                onClick={handleToggleDemoLogin}
+                disabled={!isSuperAdmin}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                  !isSuperAdmin
+                    ? 'opacity-50 cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-500'
+                    : settings.disableDemoLogin
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
+                }`}
+              >
+                {settings.disableDemoLogin ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Re-enable Quick Demo Login</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Disable Quick Demo Login</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
 
-              <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={offlinePolicy.allowOfflineAssetModification}
-                  onChange={(e) =>
-                    setOfflinePolicy({ ...offlinePolicy, allowOfflineAssetModification: e.target.checked })
-                  }
-                  className="w-4 h-4 text-sky-600 rounded"
-                />
-                <span>Permit Asset Location & Condition Updates Offline</span>
-              </label>
+          {/* SYSTEM NOTIFICATION RING ENGINE */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-sky-600" />
+                  <span>System Notification Ring Engine (Alerts & Tickets)</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Notification ring for alerts and tickets even if the app or browser tab is closed.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleToggleAudioMute}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition ${
+                    isAudioMuted
+                      ? 'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {isAudioMuted ? (
+                    <>
+                      <VolumeX className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Audio Muted</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Audio Active</span>
+                    </>
+                  )}
+                </button>
 
-              <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={offlinePolicy.allowOfflineInventoryTx}
-                  onChange={(e) =>
-                    setOfflinePolicy({ ...offlinePolicy, allowOfflineInventoryTx: e.target.checked })
-                  }
-                  className="w-4 h-4 text-sky-600 rounded"
-                />
-                <span>Permit Consumables Stock Issuing to Hospital Wards Offline</span>
-              </label>
+                <button
+                  type="button"
+                  onClick={handleTestSystemRing}
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Test Notification Ring</span>
+                </button>
+              </div>
             </div>
 
-            <div className="col-span-full pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              {saveSuccess ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1.5">
+            {ringTestSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>Ring tone sounded and OS system notification dispatched! Works even when the app is minimized or closed.</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                <div className="font-bold text-slate-900 dark:text-white mb-1">Background Delivery</div>
+                <p className="text-slate-500 text-[11px]">
+                  Registered with Service Worker so critical hospital IT alerts ring through OS notification center.
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                <div className="font-bold text-slate-900 dark:text-white mb-1">30-Min Recurring Bell</div>
+                <p className="text-slate-500 text-[11px]">
+                  Unresolved tickets past 30 minutes trigger recurring reminder rings until acknowledged.
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                <div className="font-bold text-slate-900 dark:text-white mb-1">Emergency Hospital Siren</div>
+                <p className="text-slate-500 text-[11px]">
+                  Immediate siren alert for Code Blue IT or Code Red Starlink system failures across all hospital terminals.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* OFFLINE POLICIES FORM */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Lock className="w-4 h-4 text-sky-600" />
+              <span>Configurable Offline Security Policies</span>
+            </h3>
+
+            <form onSubmit={handleSavePolicy} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">
+                  Max Offline Working Window (Hours)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={offlinePolicy.maxOfflineHours}
+                  onChange={(e) =>
+                    setOfflinePolicy({ ...offlinePolicy, maxOfflineHours: parseInt(e.target.value) || 72 })
+                  }
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-400">
+                  Clinical and IT staff can operate disconnected up to this threshold (default 72h).
+                </span>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={offlinePolicy.allowOfflineLogin}
+                    onChange={(e) =>
+                      setOfflinePolicy({ ...offlinePolicy, allowOfflineLogin: e.target.checked })
+                    }
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <span>Allow Offline Hospital Staff Sign-In</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={offlinePolicy.allowOfflineTicketCreation}
+                    onChange={(e) =>
+                      setOfflinePolicy({ ...offlinePolicy, allowOfflineTicketCreation: e.target.checked })
+                    }
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <span>Permit Ticket Logging During Starlink Outage</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={offlinePolicy.allowOfflineAssetModification}
+                    onChange={(e) =>
+                      setOfflinePolicy({ ...offlinePolicy, allowOfflineAssetModification: e.target.checked })
+                    }
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <span>Permit Asset Location & Condition Updates Offline</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={offlinePolicy.allowOfflineInventoryTx}
+                    onChange={(e) =>
+                      setOfflinePolicy({ ...offlinePolicy, allowOfflineInventoryTx: e.target.checked })
+                    }
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <span>Permit Consumables Stock Issuing to Hospital Wards Offline</span>
+                </label>
+              </div>
+
+              <div className="col-span-full pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                {saveSuccess ? (
+                  <span className="text-emerald-600 font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Offline security policy saved to local storage!</span>
+                  </span>
+                ) : <span />}
+
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Policy Settings</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: MONTHLY OFFICER SPECIALTIES & AUTO-ASSIGNMENT ROSTER */}
+      {activeTab === 'OFFICER_SPECIALTIES' && (
+        <div className="space-y-6">
+          {/* Header & Month Selector */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-sky-600" />
+                  <span>Monthly Officer Specialties & Ticket Auto-Assignment</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Automatically assign tickets to IT officers according to their monthly specialties (e.g. Officer 1 specialty is Networking → any networking issue is automatically assigned to him).
+                </p>
+              </div>
+
+              {/* Month Selector Buttons */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-500">Roster Month:</span>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                >
+                  <option value="2026-09">September 2026 (Current)</option>
+                  <option value="2026-10">October 2026</option>
+                  <option value="2026-11">November 2026</option>
+                  <option value="2026-12">December 2026</option>
+                  <option value="2027-01">January 2027</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Interactive Simulation & Verification Card */}
+            <div className="p-4 rounded-xl border border-sky-100 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-sky-600" />
+                  <span className="font-bold text-xs text-sky-900 dark:text-sky-200">
+                    Live Auto-Assignment Simulation for {formatMonthName(selectedMonth)}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-600 dark:text-slate-300 font-mono">
+                  {simulationResult}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Test Category:</span>
+                <select
+                  value={simulatedCategory}
+                  onChange={(e) => setSimulatedCategory(e.target.value as TicketCategory)}
+                  className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-800 rounded-xl focus:outline-none text-sky-800 dark:text-sky-300"
+                >
+                  {ALL_SPECIALTY_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat} Issue
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Officers Table */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  IT Officers Rotation Roster — {formatMonthName(selectedMonth)}
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Click category tags to assign or unassign specialties to each officer.
+                </p>
+              </div>
+
+              {/* Add Officer Dropdown */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedOfficerForAdd}
+                  onChange={(e) => setSelectedOfficerForAdd(e.target.value)}
+                  className="px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200"
+                >
+                  <option value="">-- Add Officer to Roster --</option>
+                  {allUsers
+                    .filter((u) => !monthlySpecialties.some((s) => s.userId === u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} ({u.jobTitle || u.role})
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddOfficerToMonth}
+                  disabled={!selectedOfficerForAdd}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Add</span>
+                </button>
+              </div>
+            </div>
+
+            {monthlySpecialties.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">
+                No officer specialties configured for this month. Click &quot;Add Officer to Roster&quot; above to begin.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {monthlySpecialties.map((officer) => (
+                  <div
+                    key={officer.userId}
+                    className={`p-4 rounded-xl border transition ${
+                      officer.isActive
+                        ? 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 opacity-60'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold text-xs flex items-center justify-center">
+                          {officer.userName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>{officer.userName}</span>
+                            {officer.userName.toLowerCase().includes('courage') && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                                Super Admin
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={officer.notes || ''}
+                            onChange={(e) => handleUpdateOfficerNotes(officer.userId, e.target.value)}
+                            placeholder="Add duty notes (e.g. Lead Network Technician)"
+                            className="text-[11px] text-slate-500 bg-transparent border-b border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:border-sky-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleOfficerActive(officer.userId)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition cursor-pointer ${
+                            officer.isActive
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          {officer.isActive ? 'Active on Rotation' : 'Off-Duty / Leave'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Category Specialties Selector */}
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Assigned Ticket Specialties for {formatMonthName(selectedMonth)}:
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ALL_SPECIALTY_CATEGORIES.map((cat) => {
+                          const isAssigned = officer.specialties.includes(cat);
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => handleToggleSpecialtyCategory(officer.userId, cat)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                                isAssigned
+                                  ? 'bg-sky-600 text-white shadow-2xs'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              }`}
+                            >
+                              {isAssigned && <CheckCircle2 className="w-3 h-3 text-sky-200" />}
+                              <span>{cat}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Save Button */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              {specialtySaveSuccess ? (
+                <span className="text-emerald-600 font-bold flex items-center gap-1.5 text-xs">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Offline security policy saved to local storage!</span>
+                  <span>Monthly specialties roster saved and active for auto-assignment!</span>
                 </span>
               ) : <span />}
 
               <button
-                type="submit"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+                type="button"
+                onClick={handleSaveMonthlySpecialties}
+                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md cursor-pointer flex items-center gap-2"
               >
                 <Save className="w-4 h-4" />
-                <span>Save Policy Settings</span>
+                <span>Save Monthly Specialties Roster</span>
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
 
@@ -1018,6 +1761,28 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         onClose={() => setIsBulkModalOpen(false)}
         currentUser={currentUser}
         onSuccess={onRefresh}
+      />
+
+      {/* MODAL 3: USER PROFILE EDIT, PROVISIONING, SUSPENSION & DELETION */}
+      <UserEditModal
+        isOpen={isUserEditModalOpen}
+        onClose={() => setIsUserEditModalOpen(false)}
+        userToEdit={userToEdit}
+        currentUser={currentUser}
+        onUserSaved={onRefresh}
+        onUserDeleted={onRefresh}
+      />
+
+      {/* MODAL 4: LETTERHEAD UPLOAD & CUSTOMIZATION */}
+      <LetterheadUploadModal
+        isOpen={isLetterheadModalOpen}
+        onClose={() => setIsLetterheadModalOpen(false)}
+        systemSettings={settings}
+        currentUser={currentUser}
+        onSettingsSaved={(newSettings) => {
+          setSettings(newSettings);
+          onRefresh();
+        }}
       />
     </div>
   );

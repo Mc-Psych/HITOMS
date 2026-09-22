@@ -309,7 +309,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           <Key className="w-4 h-4" />
           <span>Software Licenses & Subscriptions</span>
           <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300 font-bold">
-            M365 / Antivirus / LHIMS
+        
           </span>
         </button>
       </div>

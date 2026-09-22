@@ -600,8 +600,13 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 </div>
                 <div>
                   <span className="text-[11px] text-slate-400">Assigned Technician</span>
-                  <div className="font-semibold text-sky-600 mt-0.5">
-                    {selectedTicket.assignedTo ? selectedTicket.assignedTo.name : 'Unassigned'}
+                  <div className="font-semibold text-sky-600 mt-0.5 flex flex-wrap items-center gap-1.5">
+                    <span>{selectedTicket.assignedTo ? selectedTicket.assignedTo.name : 'Unassigned'}</span>
+                    {selectedTicket.assignedTo?.autoAssignedBySpecialty && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-300 dark:border-sky-800">
+                        Monthly Specialty: {selectedTicket.assignedTo.specialtyMatched || selectedTicket.category}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

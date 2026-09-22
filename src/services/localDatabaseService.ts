@@ -21,10 +21,11 @@ import {
   type SyncConflict,
   type SystemSettings,
   type SoftwareSubscription,
+  type HospitalMemo,
 } from '../types';
 
 const DB_NAME = 'HITOMS_Local_Database_v2';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORE_NAMES = {
   users: 'users',
@@ -50,6 +51,7 @@ export const STORE_NAMES = {
   syncConflicts: 'syncConflicts',
   settings: 'settings',
   emergencyBroadcasts: 'emergencyBroadcasts',
+  memos: 'memos',
 } as const;
 
 export type StoreName = keyof typeof STORE_NAMES;
@@ -181,6 +183,13 @@ export function getDB(): Promise<IDBDatabase> {
           s.createIndex('codeType', 'codeType', { unique: false });
           s.createIndex('severity', 'severity', { unique: false });
           s.createIndex('isActive', 'isActive', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.memos)) {
+          const s = db.createObjectStore(STORE_NAMES.memos, { keyPath: 'id' });
+          s.createIndex('memoNumber', 'memoNumber', { unique: true });
+          s.createIndex('memoType', 'memoType', { unique: false });
+          s.createIndex('status', 'status', { unique: false });
+          s.createIndex('createdAt', 'createdAt', { unique: false });
         }
       };
 
