@@ -24,7 +24,7 @@ import {
 } from '../types';
 
 const DB_NAME = 'HITOMS_Local_Database_v2';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORE_NAMES = {
   users: 'users',
@@ -176,6 +176,12 @@ export function getDB(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
           db.createObjectStore(STORE_NAMES.settings, { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains(STORE_NAMES.emergencyBroadcasts)) {
+          const s = db.createObjectStore(STORE_NAMES.emergencyBroadcasts, { keyPath: 'id' });
+          s.createIndex('codeType', 'codeType', { unique: false });
+          s.createIndex('severity', 'severity', { unique: false });
+          s.createIndex('isActive', 'isActive', { unique: false });
+        }
       };
 
       request.onsuccess = (event) => {
@@ -193,6 +199,10 @@ export function getDB(): Promise<IDBDatabase> {
 // Generic CRUD operations
 export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    console.warn(`[localDatabaseService] Object store '${storeName}' does not exist.`);
+    return [];
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -204,6 +214,10 @@ export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
 
 export async function getFromStore<T>(storeName: StoreName, key: string): Promise<T | null> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    console.warn(`[localDatabaseService] Object store '${storeName}' does not exist.`);
+    return null;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -218,6 +232,10 @@ export async function putToStore<T extends { id?: string; operationId?: string }
   value: T
 ): Promise<T> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring put.`);
+    return value;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
@@ -229,6 +247,10 @@ export async function putToStore<T extends { id?: string; operationId?: string }
 
 export async function putBatchToStore<T>(storeName: StoreName, values: T[]): Promise<void> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring putBatch.`);
+    return;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
@@ -242,6 +264,10 @@ export async function putBatchToStore<T>(storeName: StoreName, values: T[]): Pro
 
 export async function deleteFromStore(storeName: StoreName, key: string): Promise<void> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring delete.`);
+    return;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
@@ -253,6 +279,9 @@ export async function deleteFromStore(storeName: StoreName, key: string): Promis
 
 export async function countStore(storeName: StoreName): Promise<number> {
   const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    return 0;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
