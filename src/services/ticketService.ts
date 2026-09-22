@@ -21,6 +21,7 @@ import {
 import { auditService } from './auditService';
 import { notificationService } from './notificationService';
 import { syncService } from './syncService';
+import { ticketSoundService } from './ticketSoundService';
 
 class TicketService {
   public async getTickets(): Promise<Ticket[]> {
@@ -123,6 +124,13 @@ class TicketService {
 
     // Enqueue for cloud sync
     await syncService.enqueueOperation('tickets', id, 'CREATE', newTicket);
+
+    // Trigger phone/PC notification bell ring for IT Unit & Super Admin
+    try {
+      await ticketSoundService.ringNewTicketAlert(newTicket, user);
+    } catch (err) {
+      console.warn('[TicketService] Failed to trigger sound alert:', err);
+    }
 
     return newTicket;
   }

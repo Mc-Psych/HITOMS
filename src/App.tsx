@@ -37,6 +37,7 @@ import { inventoryService } from './services/inventoryService';
 import { networkService } from './services/networkService';
 import { auditService } from './services/auditService';
 import { emergencyService } from './services/emergencyService';
+import { ticketSoundService } from './services/ticketSoundService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
 
 // Component Views
@@ -154,6 +155,10 @@ export default function App() {
       const user = authService.getCurrentUser();
       if (user) {
         setCurrentUser(user);
+        // Check for 30-minute recurring ticket bell alerts for IT / Super Admin
+        ticketSoundService.evaluateRecurring30MinAlerts(user).catch((e) => {
+          console.warn('[App] Error evaluating ticket bell alerts:', e);
+        });
       }
     } catch (err) {
       console.error('Failed to load local hospital data:', err);
@@ -179,6 +184,12 @@ export default function App() {
 
     bootApp();
 
+    // Start background 30-minute recurring ticket bell monitor for IT / Super Admin
+    ticketSoundService.startRecurringBellMonitor(
+      () => authService.getCurrentUser(),
+      refreshAllData
+    );
+
     const unsubSync = syncService.subscribe((stats) => {
       setSyncStats(stats);
       // Auto-refresh queue count when sync runs
@@ -187,6 +198,7 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      ticketSoundService.stopRecurringBellMonitor();
       unsubSync();
     };
   }, [refreshAllData]);
