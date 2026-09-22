@@ -15,6 +15,7 @@ import {
   LogOut,
   KeyRound,
   QrCode,
+  ShieldAlert,
 } from 'lucide-react';
 import { syncService, type SyncStats } from '../services/syncService';
 import { authService, getUserInitials } from '../services/authService';
@@ -31,6 +32,7 @@ interface HeaderProps {
   onOpenLoginModal?: () => void;
   onLogout?: () => void;
   onOpenScanQrReport?: () => void;
+  onOpenEmergencyCenter?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLoginModal,
   onLogout,
   onOpenScanQrReport,
+  onOpenEmergencyCenter,
 }) => {
   const [syncStats, setSyncStats] = useState<SyncStats>(syncService.getStats());
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -184,8 +187,8 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* PWA Install Button (desktop / tablet) */}
-          <div className="hidden md:block">
+          {/* PWA Install Button */}
+          <div className="shrink-0">
             <PWAInstallButton />
           </div>
 
@@ -199,6 +202,19 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <QrCode className="w-4 h-4 text-white" />
               <span className="hidden md:inline">Scan QR</span>
+            </button>
+          )}
+
+          {/* Emergency IT Protocol Center Button */}
+          {onOpenEmergencyCenter && (
+            <button
+              id="emergency-center-btn"
+              onClick={onOpenEmergencyCenter}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition cursor-pointer shadow-sm hover:shadow border border-rose-500/50"
+              title="Hospital IT Emergency Protocols & Broadcasts"
+            >
+              <ShieldAlert className="w-4 h-4 text-white animate-pulse" />
+              <span className="hidden lg:inline">Emergency IT</span>
             </button>
           )}
 

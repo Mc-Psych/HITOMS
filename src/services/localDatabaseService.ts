@@ -49,6 +49,7 @@ export const STORE_NAMES = {
   syncQueue: 'syncQueue',
   syncConflicts: 'syncConflicts',
   settings: 'settings',
+  emergencyBroadcasts: 'emergencyBroadcasts',
 } as const;
 
 export type StoreName = keyof typeof STORE_NAMES;

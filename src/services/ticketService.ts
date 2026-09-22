@@ -7,6 +7,7 @@ import {
   type TicketResolution,
   type Attachment,
   type User,
+  type AiTriageResult,
 } from '../types';
 import {
   getAllFromStore,
@@ -43,6 +44,7 @@ class TicketService {
       assetId?: string | null;
       attachments?: Attachment[];
       isGeneralIssue?: boolean;
+      aiTriage?: AiTriageResult | null;
     },
     user: User
   ): Promise<Ticket> {
@@ -86,6 +88,7 @@ class TicketService {
       comments: [],
       resolution: null,
       confirmationRating: null,
+      aiTriage: data.aiTriage || null,
       sla: {
         responseDue,
         resolutionDue,

@@ -20,6 +20,10 @@ import {
   Star,
   QrCode,
   HardDrive,
+  Bot,
+  Sparkles,
+  BrainCircuit,
+  Check,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -29,8 +33,10 @@ import {
   type User as UserType,
   type Attachment,
   type Asset,
+  type AiTriageResult,
 } from '../types';
 import { ticketService } from '../services/ticketService';
+import { aiTriageService } from '../services/aiTriageService';
 import { ScanQrToReportModal } from './ScanQrToReportModal';
 
 interface TicketsViewProps {
@@ -114,6 +120,36 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [isGeneralIssue, setIsGeneralIssue] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Attachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // AI Triage states
+  const [aiTriage, setAiTriage] = useState<AiTriageResult | null>(null);
+  const [isAnalyzingAi, setIsAnalyzingAi] = useState(false);
+
+  const handleRunAiTriage = async () => {
+    if (!title.trim() && !description.trim()) return;
+    setIsAnalyzingAi(true);
+    try {
+      const result = await aiTriageService.analyzeTicket({
+        title,
+        description,
+        category,
+        department,
+        location,
+        assetTag: linkedAsset?.assetTag,
+      });
+      setAiTriage(result);
+    } catch (err) {
+      console.error('AI Triage error:', err);
+    } finally {
+      setIsAnalyzingAi(false);
+    }
+  };
+
+  const handleApplyAiRecommendations = () => {
+    if (!aiTriage) return;
+    setPriority(aiTriage.recommendedPriority);
+    setCategory(aiTriage.suggestedCategory);
+  };
 
   // Detail view interaction states
   const [commentText, setCommentText] = useState('');
@@ -208,6 +244,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
           isGeneralIssue,
           attachments: attachedFiles,
           assetId: linkedAsset?.id || null,
+          aiTriage: aiTriage,
         },
         currentUser
       );
@@ -218,6 +255,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
       setIsGeneralIssue(false);
       setAttachedFiles([]);
       setLinkedAsset(null);
+      setAiTriage(null);
       handleCloseCreateModal();
       onRefresh();
     } catch (err) {
@@ -567,6 +605,77 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* AI Triage Card in Ticket Details */}
+              {selectedTicket.aiTriage ? (
+                <div className="p-4 rounded-xl bg-indigo-950/20 dark:bg-indigo-950/40 border border-indigo-500/40 space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-indigo-400 font-bold">
+                    <div className="flex items-center gap-2">
+                      <BrainCircuit className="w-4 h-4 text-indigo-400" />
+                      <span>AI Triage & Clinical Root Cause Analysis</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      Analyzed {new Date(selectedTicket.aiTriage.analyzedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-slate-400">Assessed Priority:</span>{' '}
+                      <strong className="text-indigo-300">{selectedTicket.aiTriage.recommendedPriority}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Suggested Category:</span>{' '}
+                      <strong className="text-indigo-300">{selectedTicket.aiTriage.suggestedCategory}</strong>
+                    </div>
+                  </div>
+
+                  <p className="text-slate-300 text-[11px]">
+                    <strong>Patient Care Impact:</strong> {selectedTicket.aiTriage.patientCareImpact}
+                  </p>
+
+                  <p className="text-slate-300 text-[11px]">
+                    <strong>Technical Root Cause Hypothesis:</strong> {selectedTicket.aiTriage.rootCauseHypothesis}
+                  </p>
+
+                  {selectedTicket.aiTriage.immediateActionSteps.length > 0 && (
+                    <div className="pt-2 border-t border-indigo-500/20">
+                      <span className="font-bold text-indigo-300 text-[10px] uppercase">Immediate Troubleshooting SOP Steps:</span>
+                      <ul className="list-disc pl-4 text-[11px] text-slate-300 space-y-0.5 mt-0.5">
+                        {selectedTicket.aiTriage.immediateActionSteps.map((step, i) => (
+                          <li key={i}>{step}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-500 text-xs">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span>Want AI-driven root cause analysis and immediate SOP steps?</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await aiTriageService.analyzeTicket({
+                        title: selectedTicket.title,
+                        description: selectedTicket.description,
+                        category: selectedTicket.category,
+                        department: selectedTicket.department,
+                        location: selectedTicket.location,
+                      });
+                      setSelectedTicket({
+                        ...selectedTicket,
+                        aiTriage: res,
+                      });
+                    }}
+                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg cursor-pointer transition shadow-xs"
+                  >
+                    Run AI Analysis
+                  </button>
+                </div>
+              )}
 
               {/* SLA Banner */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 text-sky-900 dark:text-sky-200">
@@ -1072,7 +1181,18 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-500 font-semibold mb-1">Detailed Description *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-500 font-semibold">Detailed Description *</label>
+                  <button
+                    type="button"
+                    disabled={isAnalyzingAi || (!title.trim() && !description.trim())}
+                    onClick={handleRunAiTriage}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-[11px] cursor-pointer transition shadow-xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>{isAnalyzingAi ? 'Analyzing Clinical Risk...' : 'AI Auto-Triage'}</span>
+                  </button>
+                </div>
                 <textarea
                   rows={3}
                   required
@@ -1082,6 +1202,56 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
                 />
               </div>
+
+              {/* AI Triage Card Result */}
+              {aiTriage && (
+                <div className="p-4 rounded-xl bg-indigo-950/20 dark:bg-indigo-950/40 border border-indigo-500/40 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-indigo-400 font-bold">
+                      <BrainCircuit className="w-4 h-4 text-indigo-400" />
+                      <span>AI Triage & Clinical Assessment</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleApplyAiRecommendations}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Apply Recs ({aiTriage.recommendedPriority} Priority)</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-slate-400">Rec. Priority:</span>{' '}
+                      <strong className="text-indigo-300">{aiTriage.recommendedPriority}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Suggested Category:</span>{' '}
+                      <strong className="text-indigo-300">{aiTriage.suggestedCategory}</strong>
+                    </div>
+                  </div>
+
+                  <p className="text-slate-300 text-[11px]">
+                    <strong>Patient Care Impact:</strong> {aiTriage.patientCareImpact}
+                  </p>
+
+                  <p className="text-slate-300 text-[11px]">
+                    <strong>Root Cause Hypothesis:</strong> {aiTriage.rootCauseHypothesis}
+                  </p>
+
+                  {aiTriage.immediateActionSteps.length > 0 && (
+                    <div className="pt-1 border-t border-indigo-500/20">
+                      <span className="font-bold text-indigo-300 text-[10px] uppercase">Recommended Immediate Action Steps:</span>
+                      <ul className="list-disc pl-4 text-[11px] text-slate-300 space-y-0.5 mt-0.5">
+                        {aiTriage.immediateActionSteps.map((step, i) => (
+                          <li key={i}>{step}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* General Hospital Issue Checkbox */}
               <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">

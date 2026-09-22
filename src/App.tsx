@@ -24,6 +24,7 @@ import {
   type AuditLog,
   type SyncQueueItem,
   type SystemSettings,
+  type EmergencyBroadcastAlert,
 } from './types';
 import { initializeSeedDataIfNeeded } from './services/seedData';
 import { authService } from './services/authService';
@@ -35,6 +36,7 @@ import { incidentService } from './services/incidentService';
 import { inventoryService } from './services/inventoryService';
 import { networkService } from './services/networkService';
 import { auditService } from './services/auditService';
+import { emergencyService } from './services/emergencyService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
 
 // Component Views
@@ -58,6 +60,8 @@ import { AuditLogsView } from './components/AuditLogsView';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { ScanQrToReportModal } from './components/ScanQrToReportModal';
+import { EmergencyBroadcastBanner } from './components/EmergencyBroadcastBanner';
+import { EmergencyProtocolCenterModal } from './components/EmergencyProtocolCenterModal';
 
 export default function App() {
   const [initialized, setInitialized] = useState(false);
@@ -96,6 +100,10 @@ export default function App() {
   const [quickCategory, setQuickCategory] = useState<Ticket['category']>('Hardware');
   const [quickDept, setQuickDept] = useState('Emergency');
 
+  // Emergency state
+  const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyBroadcastAlert[]>([]);
+  const [emergencyModalOpen, setEmergencyModalOpen] = useState(false);
+
   // Load all local data from IndexedDB
   const refreshAllData = useCallback(async () => {
     try {
@@ -112,6 +120,7 @@ export default function App() {
         loadedLogs,
         loadedUsers,
         loadedSettings,
+        loadedEmergency,
       ] = await Promise.all([
         ticketService.getTickets(),
         assetService.getAssets(),
@@ -125,6 +134,7 @@ export default function App() {
         syncService.getSyncLogs(),
         getAllFromStore<User>('users'),
         getFromStore<SystemSettings>('settings', 'main'),
+        emergencyService.getActiveBroadcasts(),
       ]);
 
       setTickets(loadedTickets || []);
@@ -139,6 +149,7 @@ export default function App() {
       setSyncLogs(loadedLogs || []);
       setAllUsers(loadedUsers || []);
       setSystemSettings(loadedSettings || null);
+      setEmergencyAlerts(loadedEmergency || []);
 
       const user = authService.getCurrentUser();
       if (user) {
@@ -280,6 +291,15 @@ export default function App() {
         onOpenLoginModal={() => setLoginModalOpen(true)}
         onLogout={handleLogout}
         onOpenScanQrReport={() => setGlobalScanQrModalOpen(true)}
+        onOpenEmergencyCenter={() => setEmergencyModalOpen(true)}
+      />
+
+      {/* Hospital Emergency Broadcast Banner */}
+      <EmergencyBroadcastBanner
+        alerts={emergencyAlerts}
+        currentUser={currentUser}
+        onRefresh={refreshAllData}
+        onOpenEmergencyCenter={() => setEmergencyModalOpen(true)}
       />
 
       {/* Offline Status Simulation Notice */}
@@ -654,6 +674,19 @@ export default function App() {
         onClose={() => setGlobalScanQrModalOpen(false)}
         assets={assets}
         onReportIssueForAsset={handleReportIssueForAsset}
+      />
+
+      {/* Emergency Protocol Center Modal */}
+      <EmergencyProtocolCenterModal
+        isOpen={emergencyModalOpen || currentView === 'emergency'}
+        onClose={() => {
+          setEmergencyModalOpen(false);
+          if (currentView === 'emergency') setCurrentView('dashboard');
+        }}
+        currentUser={currentUser}
+        alerts={emergencyAlerts}
+        assets={assets}
+        onRefresh={refreshAllData}
       />
     </div>
   );

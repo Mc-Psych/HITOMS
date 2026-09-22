@@ -164,6 +164,15 @@ export interface Ticket extends SyncMetadata {
     };
     confirmedAt: string;
   } | null;
+  aiTriage?: {
+    recommendedPriority: TicketPriority;
+    patientCareImpact: string;
+    suggestedCategory: TicketCategory;
+    rootCauseHypothesis: string;
+    immediateActionSteps: string[];
+    riskSummary: string;
+    analyzedAt: string;
+  } | null;
   sla: SlaInfo;
   createdAt: string;
   updatedAt: string;
@@ -616,4 +625,32 @@ export interface SystemSettings {
   customTexts?: Record<string, string>;
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
+}
+
+export interface AiTriageResult {
+  recommendedPriority: TicketPriority;
+  patientCareImpact: string;
+  suggestedCategory: TicketCategory;
+  rootCauseHypothesis: string;
+  immediateActionSteps: string[];
+  riskSummary: string;
+  analyzedAt: string;
+}
+
+export interface EmergencyBroadcastAlert {
+  id: string;
+  codeType: 'CODE_BLUE_IT' | 'CODE_RED_NETWORK' | 'EHR_DOWNTIME' | 'CYBER_LOCKDOWN' | 'GENERAL_EMERGENCY';
+  title: string;
+  message: string;
+  severity: 'CRITICAL' | 'HIGH' | 'WARNING';
+  targetUnits: string[]; // ['ALL'] or specific departments
+  issuedBy: {
+    uid: string;
+    name: string;
+    role: Role;
+  };
+  isActive: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  acknowledgedByUsers?: string[];
 }

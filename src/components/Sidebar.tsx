@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { type Role, type User, type SystemSettings } from '../types';
 import { authService, getUserInitials } from '../services/authService';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export interface NavItem {
   id: string;
@@ -112,6 +113,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Major Incidents & RCA',
       icon: Flame,
       rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'HOSPITAL_MANAGEMENT', 'AUDITOR'],
+    },
+    {
+      id: 'emergency',
+      label: 'Emergency Protocols & Alerts',
+      icon: ShieldAlert,
     },
     {
       id: 'inventory',
@@ -246,6 +252,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </div>
+
+      {/* PWA Install Banner */}
+      {!isCollapsed && (
+        <div className="px-3 py-2 border-t border-slate-800 bg-slate-900/80">
+          <PWAInstallButton variant="sidebar" />
+        </div>
+      )}
 
       {/* User Status Footer */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/50">
