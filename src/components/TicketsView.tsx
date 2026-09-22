@@ -17,6 +17,7 @@ import {
   X,
   FileText,
   AlertTriangle,
+  Star,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -71,6 +72,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [priority, setPriority] = useState<TicketPriority>('Medium');
   const [department, setDepartment] = useState(currentUser?.department || 'OPD');
   const [location, setLocation] = useState('Block A - Room 102');
+  const [isGeneralIssue, setIsGeneralIssue] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Attachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -83,12 +85,30 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [resolutionWork, setResolutionWork] = useState('');
   const [resolutionRec, setResolutionRec] = useState('');
 
+  // Rating & confirmation states
+  const [ratingScore, setRatingScore] = useState<number>(5);
+  const [ratingFeedback, setRatingFeedback] = useState('');
+  const [isConfirmingRating, setIsConfirmingRating] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
+
   const itStaff = safeAllUsers.filter(
     (u) => u.role === 'IT_OFFICER' || u.role === 'IT_ADMIN' || u.role === 'SUPER_ADMIN'
   );
 
   const canAssign = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
   const canUpdateStatus = currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (resolveModalOpen) setResolveModalOpen(false);
+        else if (isCreateModalOpen) handleCloseCreateModal();
+        else if (selectedTicket) setSelectedTicket(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [resolveModalOpen, isCreateModalOpen, selectedTicket]);
 
   // Filter tickets
   const filteredTickets = safeTickets.filter((t) => {
@@ -146,6 +166,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
           priority,
           department,
           location,
+          isGeneralIssue,
           attachments: attachedFiles,
         },
         currentUser
@@ -154,6 +175,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
       // Reset form
       setTitle('');
       setDescription('');
+      setIsGeneralIssue(false);
       setAttachedFiles([]);
       handleCloseCreateModal();
       onRefresh();
@@ -161,6 +183,27 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
       console.error('Failed to create ticket', err);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmAndClose = async () => {
+    if (!selectedTicket || !currentUser) return;
+    setIsConfirmingRating(true);
+    setRatingError(null);
+    try {
+      const updated = await ticketService.closeTicketWithRating(
+        selectedTicket.id,
+        ratingScore,
+        ratingFeedback.trim(),
+        currentUser
+      );
+      setSelectedTicket(updated);
+      setRatingFeedback('');
+      onRefresh();
+    } catch (err: any) {
+      setRatingError(err.message || 'Failed to confirm resolution and rate IT service.');
+    } finally {
+      setIsConfirmingRating(false);
     }
   };
 
@@ -235,7 +278,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Header & Action */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -246,18 +289,6 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
             Offline-first issue tracking. Tickets are committed locally to IndexedDB and queue automatically.
           </p>
         </div>
-
-        <button
-          id="create-ticket-main-btn"
-          onClick={() => {
-            setSelectedTicket(null);
-            setLocalCreateModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Log IT Ticket</span>
-        </button>
       </div>
 
       {/* Filter Bar */}
@@ -429,8 +460,14 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
       {/* Ticket Detail Drawer / Modal */}
       {selectedTicket && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-3xl max-h-[90vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-800 dark:text-slate-200">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setSelectedTicket(null)}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[90vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-800 dark:text-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
               <div className="flex items-center gap-3">
@@ -523,6 +560,146 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                   )}
                   <div className="text-[10px] text-emerald-600 mt-2">
                     Resolved by {selectedTicket.resolution.resolvedBy} on {new Date(selectedTicket.resolution.resolvedAt).toLocaleString()}
+                  </div>
+                </div>
+              )}
+
+              {/* Unit Confirmation & IT Service Rating Block for Resolved Tickets */}
+              {selectedTicket.status === 'Resolved' && (() => {
+                const isGeneral = Boolean(selectedTicket.isGeneralIssue);
+                const isSameUnit = currentUser?.department?.toLowerCase() === selectedTicket.department?.toLowerCase();
+                const isReporter = currentUser?.id === selectedTicket.reportedBy?.uid;
+                const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+                const canConfirmTicket = isGeneral || isSameUnit || isReporter || isSuperAdmin;
+
+                return (
+                  <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-700/80 bg-amber-50/70 dark:bg-amber-950/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
+                        <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                        <span>Unit Confirmation & IT Performance Rating</span>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100">
+                        {isGeneral ? 'General Hospital Issue (Any Staff May Confirm)' : `Reporting Unit Only: ${selectedTicket.department}`}
+                      </span>
+                    </div>
+
+                    {canConfirmTicket ? (
+                      <div className="space-y-3 pt-1">
+                        <p className="text-slate-700 dark:text-slate-300 text-xs">
+                          The IT team has reported this issue resolved. Please verify functionality in your unit, rate how IT handled the request, and confirm ticket closure.
+                        </p>
+
+                        {ratingError && (
+                          <div className="p-2.5 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            <span>{ratingError}</span>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                            Rate IT Support Quality: <span className="text-amber-600 font-extrabold">{ratingScore} / 5 Stars</span>
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => setRatingScore(star)}
+                                className="p-1 hover:scale-110 transition cursor-pointer"
+                                title={`${star} Star${star > 1 ? 's' : ''}`}
+                              >
+                                <Star
+                                  className={`w-6 h-6 ${
+                                    star <= ratingScore
+                                      ? 'text-amber-500 fill-amber-500'
+                                      : 'text-slate-300 dark:text-slate-600'
+                                  }`}
+                                />
+                              </button>
+                            ))}
+                            <span className="text-xs text-slate-500 font-medium ml-2">
+                              {ratingScore === 5 && 'Outstanding & Quick Resolution'}
+                              {ratingScore === 4 && 'Good Service & Verified Working'}
+                              {ratingScore === 3 && 'Satisfactory Support'}
+                              {ratingScore === 2 && 'Resolved with Delays'}
+                              {ratingScore === 1 && 'Poor Handling / Persistent Issues'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                            Verification Feedback / Notes (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Tested in OPD room, LHIMS network and label printer are operating normally"
+                            value={ratingFeedback}
+                            onChange={(e) => setRatingFeedback(e.target.value)}
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-amber-500 text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={handleConfirmAndClose}
+                            disabled={isConfirmingRating}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{isConfirmingRating ? 'Confirming Closure...' : 'Confirm Resolution & Close Ticket'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="text-xs leading-relaxed">
+                          <strong>Unit Confirmation Required:</strong> Under hospital IT governance, only staff belonging to the reporting department (<strong>{selectedTicket.department}</strong>) can confirm resolution and submit the IT performance rating for this ticket.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Display Confirmed Rating if Closed */}
+              {selectedTicket.status === 'Closed' && selectedTicket.confirmationRating && (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      <span>Unit Verified Resolution & IT Rating</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={`w-3.5 h-3.5 ${
+                            star <= selectedTicket.confirmationRating!.rating
+                              ? 'text-amber-500 fill-amber-500'
+                              : 'text-slate-300 dark:text-slate-600'
+                          }`}
+                        />
+                      ))}
+                      <span className="font-bold text-xs text-amber-600 ml-1">
+                        {selectedTicket.confirmationRating.rating}/5
+                      </span>
+                    </div>
+                  </div>
+                  {selectedTicket.confirmationRating.feedback && (
+                    <p className="text-slate-600 dark:text-slate-300 italic text-xs">
+                      &ldquo;{selectedTicket.confirmationRating.feedback}&rdquo;
+                    </p>
+                  )}
+                  <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
+                    <span>
+                      Confirmed by <strong>{selectedTicket.confirmationRating.confirmedBy.name}</strong> ({selectedTicket.confirmationRating.confirmedBy.department})
+                    </span>
+                    <span>{new Date(selectedTicket.confirmationRating.confirmedAt).toLocaleString()}</span>
                   </div>
                 </div>
               )}
@@ -654,8 +831,14 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
       {/* Resolve Ticket Modal */}
       {resolveModalOpen && selectedTicket && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setResolveModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-600" />
               <span>Resolve Ticket {selectedTicket.ticketNumber}</span>
@@ -719,8 +902,14 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
       {/* Create Ticket Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={handleCloseCreateModal}
+        >
+          <div
+            className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <LifeBuoy className="w-5 h-5 text-sky-600" />
@@ -812,6 +1001,26 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
                 />
+              </div>
+
+              {/* General Hospital Issue Checkbox */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isGeneralIssue}
+                    onChange={(e) => setIsGeneralIssue(e.target.checked)}
+                    className="w-4 h-4 text-sky-600 rounded mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                      General Hospital Issue (Hospital-Wide)
+                    </span>
+                    <span className="text-[11px] text-slate-500 leading-snug block mt-0.5">
+                      Check this if the issue affects the entire hospital (e.g. Starlink internet outage, main LHIMS server unreachable, power generator transfer failure) rather than solely your reporting unit. Any hospital staff member will be authorized to confirm and rate resolution.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               {/* Local File Attachment */}

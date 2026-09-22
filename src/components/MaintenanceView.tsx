@@ -21,6 +21,7 @@ import {
   type User as UserType,
 } from '../types';
 import { maintenanceService } from '../services/maintenanceService';
+import { authService } from '../services/authService';
 
 interface MaintenanceViewProps {
   maintenance?: MaintenanceRecord[];
@@ -61,6 +62,9 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
   const [frequency, setFrequency] = useState<MaintenanceFrequency>('Monthly');
   const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().split('T')[0]);
   const [technicianName, setTechnicianName] = useState(currentUser?.fullName || 'Emmanuel Asante');
+
+  // Permission check: strictly Super Admin and IT Unit staff can add schedules and perform/complete servicing.
+  const canManageMaintenance = authService.canManageMaintenance(currentUser);
 
   const filteredRecords = safeMaintenance.filter((m) => {
     const matchesSearch =
@@ -174,14 +178,20 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
           </p>
         </div>
 
-        <button
-          id="schedule-maintenance-btn"
-          onClick={() => setScheduleModalOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Schedule Maintenance</span>
-        </button>
+        {canManageMaintenance ? (
+          <button
+            id="schedule-maintenance-btn"
+            onClick={() => setScheduleModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Schedule Maintenance</span>
+          </button>
+        ) : (
+          <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+            Auditor / Management View Only
+          </span>
+        )}
       </div>
 
       {/* Tabs & Search */}
@@ -294,13 +304,19 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                 {rec.status !== 'Completed' ? (
-                  <button
-                    onClick={() => handleOpenCompleteModal(rec)}
-                    className="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <FileCheck className="w-4 h-4" />
-                    <span>Perform / Complete Servicing</span>
-                  </button>
+                  canManageMaintenance ? (
+                    <button
+                      onClick={() => handleOpenCompleteModal(rec)}
+                      className="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <FileCheck className="w-4 h-4" />
+                      <span>Perform / Complete Servicing</span>
+                    </button>
+                  ) : (
+                    <div className="w-full py-1.5 text-center text-[11px] text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-medium">
+                      Pending IT Servicing • Read-Only
+                    </div>
+                  )
                 ) : (
                   <div className="text-[11px] text-slate-400 flex items-center justify-between w-full">
                     <span>Serviced by {rec.completedBy}</span>

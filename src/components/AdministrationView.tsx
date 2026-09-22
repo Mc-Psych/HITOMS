@@ -15,13 +15,32 @@ import {
   Server,
   AlertTriangle,
   FileText,
+  Users,
+  Key,
+  FileUp,
+  RotateCcw,
+  Sliders,
+  ShieldCheck,
+  CheckSquare,
+  Square,
+  X,
+  Plus,
+  HelpCircle,
 } from 'lucide-react';
 import {
   type User as UserType,
   type OfflineSecurityPolicy,
   type SystemSettings,
+  type Role,
 } from '../types';
-import { authService } from '../services/authService';
+import {
+  authService,
+  type Permission,
+  type PermissionDefinition,
+  PERMISSION_DEFINITIONS,
+  ROLE_DESCRIPTIONS,
+  ROLE_PERMISSIONS,
+} from '../services/authService';
 import { settingsService, DEFAULT_SYSTEM_SETTINGS } from '../services/settingsService';
 
 interface AdministrationViewProps {
@@ -31,6 +50,17 @@ interface AdministrationViewProps {
   onRefresh: () => void;
 }
 
+const ALL_ROLES: Role[] = [
+  'SUPER_ADMIN',
+  'IT_ADMIN',
+  'IT_OFFICER',
+  'HOSPITAL_MANAGEMENT',
+  'DEPARTMENT_HEAD',
+  'STAFF_USER',
+  'PROCUREMENT_OFFICER',
+  'AUDITOR',
+];
+
 export const AdministrationView: React.FC<AdministrationViewProps> = ({
   currentUser,
   allUsers,
@@ -38,15 +68,39 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onRefresh,
 }) => {
   const [activeTab, setActiveTab] = useState<'FACILITY' | 'RBAC' | 'SECURITY_POLICIES'>('FACILITY');
+  const [rbacSubTab, setRbacSubTab] = useState<'STAFF_DIRECTORY' | 'ROLE_MATRIX' | 'USER_OVERRIDES'>('STAFF_DIRECTORY');
+  
   const [offlinePolicy, setOfflinePolicy] = useState<OfflineSecurityPolicy>(authService.getOfflinePolicy());
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveFacilitySuccess, setSaveFacilitySuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string>('');
+
+  // Permission Matrix states
+  const [selectedRoleForMatrix, setSelectedRoleForMatrix] = useState<Role>('IT_OFFICER');
+  const [rolePermissions, setRolePermissions] = useState<Permission[]>([]);
+  const [matrixSaveSuccess, setMatrixSaveSuccess] = useState(false);
+
+  // Individual User Override states
+  const [selectedUserForOverride, setSelectedUserForOverride] = useState<UserType | null>(null);
+  const [userGrantedPerms, setUserGrantedPerms] = useState<Permission[]>([]);
+  const [userRevokedPerms, setUserRevokedPerms] = useState<Permission[]>([]);
+  const [userOverrideSaveSuccess, setUserOverrideSaveSuccess] = useState(false);
+
+  // Bulk Staff Upload states
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkInputText, setBulkInputText] = useState('');
+  const [mandatoryPasswordChange, setMandatoryPasswordChange] = useState(true);
+  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    created: number;
+    skipped: number;
+    accounts: Array<{ fullName: string; username: string; defaultPassword: string; role: Role; department: string }>;
+  } | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   useEffect(() => {
@@ -60,6 +114,35 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     loadSettings();
   }, []);
 
+  // Load permissions for selected role
+  useEffect(() => {
+    const perms = authService.getRolePermissions(selectedRoleForMatrix);
+    setRolePermissions(perms);
+    setMatrixSaveSuccess(false);
+  }, [selectedRoleForMatrix]);
+
+  // Load overrides when selected user changes
+  useEffect(() => {
+    if (selectedUserForOverride) {
+      const overrides = authService.getUserPermissionOverrides(selectedUserForOverride.id);
+      setUserGrantedPerms(overrides.granted || []);
+      setUserRevokedPerms(overrides.revoked || []);
+      setUserOverrideSaveSuccess(false);
+    }
+  }, [selectedUserForOverride]);
+
+  // Global ESC key to close open modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isBulkModalOpen) setIsBulkModalOpen(false);
+        if (selectedUserForOverride) setSelectedUserForOverride(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBulkModalOpen, selectedUserForOverride]);
+
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -69,7 +152,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
       return;
     }
 
-    // Limit to 2MB for storage performance in IndexedDB
     if (file.size > 2 * 1024 * 1024) {
       setErrorMessage('Image size exceeds 2MB limit. Please choose a smaller logo.');
       return;
@@ -112,91 +194,233 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     e.preventDefault();
     authService.setOfflinePolicy(offlinePolicy);
     setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2500);
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
+
+  // Toggle role permission
+  const handleToggleRolePermission = (permKey: Permission) => {
+    if (!isSuperAdmin) return;
+    setRolePermissions((prev) =>
+      prev.includes(permKey) ? prev.filter((p) => p !== permKey) : [...prev, permKey]
+    );
+  };
+
+  // Save role permissions
+  const handleSaveRolePermissions = async () => {
+    if (!currentUser || !isSuperAdmin) return;
+    try {
+      await authService.updateRolePermissions(selectedRoleForMatrix, rolePermissions, currentUser);
+      setMatrixSaveSuccess(true);
+      setTimeout(() => setMatrixSaveSuccess(false), 3000);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Reset all role permissions
+  const handleResetRolePermissions = async () => {
+    if (!currentUser || !isSuperAdmin) return;
+    if (!window.confirm('Reset all role permissions to system defaults?')) return;
+    await authService.resetPermissionsToDefault(currentUser);
+    setRolePermissions(authService.getRolePermissions(selectedRoleForMatrix));
+    setMatrixSaveSuccess(true);
+    setTimeout(() => setMatrixSaveSuccess(false), 3000);
+    onRefresh();
+  };
+
+  // User override toggles
+  const handleToggleUserOverride = (permKey: Permission, defaultRoleHas: boolean) => {
+    if (defaultRoleHas) {
+      // If role already has it by default, toggling off adds it to revoked
+      if (userRevokedPerms.includes(permKey)) {
+        setUserRevokedPerms(userRevokedPerms.filter((p) => p !== permKey));
+      } else {
+        setUserRevokedPerms([...userRevokedPerms, permKey]);
+      }
+    } else {
+      // If role does not have it by default, toggling on adds it to granted
+      if (userGrantedPerms.includes(permKey)) {
+        setUserGrantedPerms(userGrantedPerms.filter((p) => p !== permKey));
+      } else {
+        setUserGrantedPerms([...userGrantedPerms, permKey]);
+      }
+    }
+  };
+
+  // Save user overrides
+  const handleSaveUserOverrides = async () => {
+    if (!selectedUserForOverride || !currentUser || !isSuperAdmin) return;
+    try {
+      await authService.updateUserPermissionOverrides(
+        selectedUserForOverride.id,
+        { granted: userGrantedPerms, revoked: userRevokedPerms },
+        currentUser
+      );
+      setUserOverrideSaveSuccess(true);
+      setTimeout(() => setUserOverrideSaveSuccess(false), 3000);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Handle Bulk Staff Upload
+  const handleExecuteBulkUpload = async () => {
+    if (!currentUser || !isSuperAdmin) return;
+    if (!bulkInputText.trim()) {
+      setBulkError('Please enter or paste at least one line of staff data.');
+      return;
+    }
+
+    setIsProcessingBulk(true);
+    setBulkError(null);
+
+    try {
+      // Parse CSV / TSV lines: Full Name, Department, Role, Phone, Email
+      const lines = bulkInputText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const parsedStaff: Array<{
+        fullName: string;
+        department: string;
+        role: Role;
+        phone?: string;
+        email?: string;
+      }> = [];
+
+      for (const line of lines) {
+        // Skip header lines
+        if (line.toLowerCase().startsWith('full name') || line.toLowerCase().startsWith('name,')) {
+          continue;
+        }
+
+        const cols = line.split(/[,;\t]/).map((c) => c.trim());
+        if (cols.length < 1 || !cols[0]) continue;
+
+        const fullName = cols[0];
+        const department = cols[1] || 'General Clinical';
+        let role: Role = 'STAFF_USER';
+
+        if (cols[2]) {
+          const rStr = cols[2].toUpperCase().replace(/\s+/g, '_');
+          if (ALL_ROLES.includes(rStr as Role)) {
+            role = rStr as Role;
+          }
+        }
+
+        const phone = cols[3] || '+233 24 000 0000';
+        const email = cols[4] || undefined;
+
+        parsedStaff.push({ fullName, department, role, phone, email });
+      }
+
+      if (parsedStaff.length === 0) {
+        throw new Error('Could not parse any valid staff records. Please check the format.');
+      }
+
+      const res = await authService.bulkCreateStaff(parsedStaff, mandatoryPasswordChange, currentUser);
+      setBulkResult(res);
+      setBulkInputText('');
+      onRefresh();
+    } catch (err: any) {
+      setBulkError(err.message || 'Failed to process bulk upload.');
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  };
+
+  const handleInsertSampleBulkData = () => {
+    setBulkInputText(
+`Dr. Kwame Mensah, OPD, CLINICAL_LEAD, +233 24 111 2222, mensah@hospital.local
+Sister Beatrice Osei, Maternity, STAFF_USER, +233 24 333 4444, osei@hospital.local
+Emmanuel Owusu, IT Department, IT_OFFICER, +233 24 555 6666, owusu@hospital.local
+Dr. Abigail Boateng, Pharmacy, CLINICAL_LEAD, +233 24 777 8888, boateng@hospital.local
+Frank Kwarteng, Stores, PROCUREMENT_OFFICER, +233 24 999 0000, kwarteng@hospital.local`
+    );
+  };
+
+  // Group permission definitions by category
+  const permissionsByCategory = PERMISSION_DEFINITIONS.reduce((acc, p) => {
+    if (!acc[p.category]) acc[p.category] = [];
+    acc[p.category].push(p);
+    return acc;
+  }, {} as Record<string, PermissionDefinition[]>);
 
   return (
     <div className="space-y-6">
       {/* View Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
             <Shield className="w-5 h-5 text-sky-600" />
-            <span>Hospital Administration & System Settings</span>
+            <span>Hospital Administration & Governance</span>
           </h1>
           <p className="text-xs text-slate-500">
-            Configure hospital facility details, upload facility logo, manage offline security policies, and inspect staff RBAC.
+            Offline-first hospital facility configuration, RBAC permissions matrix, and compliance rules.
           </p>
         </div>
 
-        {/* Tab Selector */}
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
           <button
             onClick={() => setActiveTab('FACILITY')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'FACILITY'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Building2 className="w-4 h-4" />
-            <span>Facility & Logo</span>
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Facility & Branding</span>
           </button>
+
           <button
             onClick={() => setActiveTab('RBAC')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'RBAC'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            <span>Staff & Roles</span>
+            <Users className="w-3.5 h-3.5" />
+            <span>Staff & Permission Matrix</span>
           </button>
+
           <button
             onClick={() => setActiveTab('SECURITY_POLICIES')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'SECURITY_POLICIES'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Lock className="w-4 h-4" />
+            <Lock className="w-3.5 h-3.5" />
             <span>Offline Policies</span>
           </button>
         </div>
       </div>
 
-      {errorMessage && (
-        <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-
-      {/* TAB 1: FACILITY & LOGO CONFIGURATION */}
+      {/* TAB 1: FACILITY PROFILE & EMBLEM */}
       {activeTab === 'FACILITY' && (
         <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xs space-y-6">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-sky-600" />
-                  <span>Hospital Facility Information & Custom Logo</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Update facility name, contact extensions, and upload the official hospital logo shown in headers and printable reports.
-                </p>
-              </div>
-
-              {!isSuperAdmin && (
-                <span className="text-[11px] bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-2.5 py-1 rounded-lg font-semibold">
-                  Read-Only (Requires Super Admin Role)
-                </span>
-              )}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-5">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-sky-600" />
+                <span>Hospital Facility Profile & Emblem</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Configure your hospital identity, emblem, contact channels, and offline LHIMS server URLs.
+              </p>
             </div>
 
-            <form onSubmit={handleSaveFacility} className="space-y-6">
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveFacility} className="space-y-5">
               {/* Logo Upload Section */}
               <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4">
                 <div className="flex items-center gap-2">
@@ -207,7 +431,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-                  {/* Current Logo / Preview Box */}
                   <div className="w-24 h-24 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 flex flex-col items-center justify-center overflow-hidden shadow-inner p-2 relative group">
                     {logoPreview ? (
                       <img
@@ -224,7 +447,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     )}
                   </div>
 
-                  {/* Upload Controls */}
                   <div className="space-y-2 flex-1">
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       Upload a square or wide logo (PNG, JPG, SVG, WebP). Max size: 2MB. Stored directly in the offline-first IndexedDB storage.
@@ -374,108 +596,269 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: STAFF PERSONA SWITCHER & USER DIRECTORY */}
+      {/* TAB 2: STAFF DIRECTORY & PERMISSION MATRIX */}
       {activeTab === 'RBAC' && (
         <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Switch Active Hospital Persona (Offline RBAC Simulation)</span>
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Select any hospital staff profile to test role boundaries, ticket resolution permissions, and offline actions.
+          {/* Sub-tabs for RBAC */}
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setRbacSubTab('STAFF_DIRECTORY')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  rbacSubTab === 'STAFF_DIRECTORY'
+                    ? 'bg-sky-600 text-white shadow-2xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Staff Directory & Bulk Upload</span>
+              </button>
+
+              <button
+                onClick={() => setRbacSubTab('ROLE_MATRIX')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  rbacSubTab === 'ROLE_MATRIX'
+                    ? 'bg-sky-600 text-white shadow-2xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Role Permission Matrix</span>
+              </button>
+            </div>
+
+            {isSuperAdmin && rbacSubTab === 'STAFF_DIRECTORY' && (
+              <button
+                onClick={() => {
+                  setBulkResult(null);
+                  setBulkError(null);
+                  setIsBulkModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+              >
+                <FileUp className="w-4 h-4" />
+                <span>Bulk Upload Staff</span>
+              </button>
+            )}
+          </div>
+
+          {/* SUB-VIEW 1: STAFF DIRECTORY */}
+          {rbacSubTab === 'STAFF_DIRECTORY' && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Hospital Staff Directory ({allUsers.length})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Username convention: Surname in lowercase. Default initial password: last 4 letters of surname.
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase font-semibold">
+                    <tr>
+                      <th className="px-4 py-3">Full Name</th>
+                      <th className="px-4 py-3">Username</th>
+                      <th className="px-4 py-3">Assigned Role</th>
+                      <th className="px-4 py-3">Department</th>
+                      <th className="px-4 py-3">Password Change Status</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {allUsers.map((u) => {
+                      const overrides = authService.getUserPermissionOverrides(u.id);
+                      const hasOverrides = overrides.granted.length > 0 || overrides.revoked.length > 0;
+
+                      return (
+                        <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                            <div>{u.fullName}</div>
+                            <div className="text-[11px] text-slate-400 font-normal">{u.email}</div>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-sky-600 font-bold">
+                            @{u.username}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                            {u.department}
+                          </td>
+                          <td className="px-4 py-3">
+                            {u.mustChangePasswordOnFirstLogin ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                Mandatory on 1st Login
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                Verified Active
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right space-x-2">
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => setSelectedUserForOverride(u)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                  hasOverrides
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-200'
+                                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200'
+                                }`}
+                                title="Customize permissions for this individual user"
+                              >
+                                {hasOverrides ? 'Custom Permissions*' : 'Permissions'}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => onUserSwitch(u)}
+                              className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-semibold cursor-pointer"
+                            >
+                              Assume
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-VIEW 2: ROLE PERMISSION MATRIX */}
+          {rbacSubTab === 'ROLE_MATRIX' && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-sky-600" />
+                    <span>Role-Based Access Control (RBAC) Permission Matrix</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Super Admin authority: Define and customize operational capabilities for each hospital user role.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedRoleForMatrix}
+                    onChange={(e) => setSelectedRoleForMatrix(e.target.value as Role)}
+                    className="px-3 py-1.5 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  >
+                    {ALL_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {ROLE_DESCRIPTIONS[r].title} ({r})
+                      </option>
+                    ))}
+                  </select>
+
+                  {isSuperAdmin && (
+                    <button
+                      onClick={handleResetRolePermissions}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
+                      title="Reset all roles to defaults"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset Defaults</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Role Summary Banner */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-slate-900 dark:text-white">
+                    {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title}
+                  </span>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                    Active Permissions: {rolePermissions.length} / {PERMISSION_DEFINITIONS.length}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  {ROLE_DESCRIPTIONS[selectedRoleForMatrix].description}
                 </p>
               </div>
-              <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
-                Active: <strong className="text-sky-600">{currentUser?.fullName} ({currentUser?.role})</strong>
-              </span>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-              {allUsers.map((u) => {
-                const isActive = currentUser?.id === u.id;
-                return (
+              {/* Permission Categories Grid */}
+              <div className="space-y-4">
+                {Object.entries(permissionsByCategory).map(([category, perms]) => (
                   <div
-                    key={u.id}
-                    onClick={() => onUserSwitch(u)}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer text-xs flex items-center justify-between ${
-                      isActive
-                        ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500 shadow-2xs'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                    }`}
+                    key={category}
+                    className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
                   >
-                    <div>
-                      <div className="font-bold text-slate-900 dark:text-white">{u.fullName}</div>
-                      <div className="text-[11px] text-slate-500">{u.department}</div>
-                      <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-mono text-[10px] font-semibold text-sky-600">
-                        {u.role}
+                    <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <span className="font-bold text-xs text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                        {category} ({perms.filter((p) => rolePermissions.includes(p.key)).length}/{perms.length})
                       </span>
                     </div>
-                    {isActive && <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0" />}
+
+                    <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                      {perms.map((p) => {
+                        const isGranted = rolePermissions.includes(p.key);
+                        return (
+                          <div
+                            key={p.key}
+                            onClick={() => handleToggleRolePermission(p.key)}
+                            className={`p-2.5 rounded-lg border transition flex items-start gap-2.5 ${
+                              isSuperAdmin ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'
+                            } ${
+                              isGranted
+                                ? 'bg-sky-50/50 dark:bg-sky-950/20 border-sky-300 dark:border-sky-800'
+                                : 'border-slate-200 dark:border-slate-800/80 opacity-60'
+                            }`}
+                          >
+                            <div className="mt-0.5">
+                              {isGranted ? (
+                                <CheckSquare className="w-4 h-4 text-sky-600 shrink-0" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                              )}
+                            </div>
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                <span>{p.label}</span>
+                                <span className="font-mono text-[10px] text-slate-400 font-normal">({p.key})</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                ))}
+              </div>
 
-          {/* Staff Registry Table */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                Hospital Staff Directory ({allUsers.length})
-              </h3>
-            </div>
+              {/* Save Role Permissions Footer */}
+              {isSuperAdmin && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  {matrixSaveSuccess ? (
+                    <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Role permissions updated successfully!</span>
+                    </span>
+                  ) : <span />}
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase font-semibold">
-                  <tr>
-                    <th className="px-4 py-3">Full Name</th>
-                    <th className="px-4 py-3">Username</th>
-                    <th className="px-4 py-3">Assigned Role</th>
-                    <th className="px-4 py-3">Department</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Switch Active</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {allUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                        {u.fullName}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-slate-500">
-                        @{u.username}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                        {u.department}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                          {u.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => onUserSwitch(u)}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
-                        >
-                          Assume Identity
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  <button
+                    type="button"
+                    onClick={handleSaveRolePermissions}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md cursor-pointer transition"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title} Permissions</span>
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -574,6 +957,278 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* MODAL 1: INDIVIDUAL USER PERMISSIONS OVERRIDE (Click outside to close) */}
+      {selectedUserForOverride && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setSelectedUserForOverride(null)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs text-slate-800 dark:text-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-sky-600" />
+                  <span>Customize Permissions: {selectedUserForOverride.fullName}</span>
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Role: <strong>{selectedUserForOverride.role}</strong> ({selectedUserForOverride.department}) | Username: @{selectedUserForOverride.username}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedUserForOverride(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 text-xs text-sky-900 dark:text-sky-200">
+                You can grant extra capabilities beyond this user&apos;s base role, or revoke specific permissions that their role typically allows.
+              </div>
+
+              {Object.entries(permissionsByCategory).map(([category, perms]) => {
+                const baseRolePerms = authService.getRolePermissions(selectedUserForOverride.role);
+
+                return (
+                  <div key={category} className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 space-y-2">
+                    <span className="font-bold text-xs uppercase tracking-wider text-slate-500">
+                      {category}
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {perms.map((p) => {
+                        const defaultInRole = baseRolePerms.includes(p.key);
+                        const isRevoked = userRevokedPerms.includes(p.key);
+                        const isExplicitlyGranted = userGrantedPerms.includes(p.key);
+                        const effectiveHas = (defaultInRole && !isRevoked) || isExplicitlyGranted;
+
+                        return (
+                          <div
+                            key={p.key}
+                            onClick={() => handleToggleUserOverride(p.key, defaultInRole)}
+                            className={`p-2 rounded-lg border flex items-start gap-2 cursor-pointer transition ${
+                              effectiveHas
+                                ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-300 dark:border-sky-800'
+                                : 'border-slate-200 dark:border-slate-800 opacity-60'
+                            }`}
+                          >
+                            <div className="mt-0.5">
+                              {effectiveHas ? (
+                                <CheckSquare className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                              ) : (
+                                <Square className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              )}
+                            </div>
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                                <span>{p.label}</span>
+                                {isExplicitlyGranted && (
+                                  <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1 rounded">
+                                    +Granted
+                                  </span>
+                                )}
+                                {isRevoked && (
+                                  <span className="text-[9px] bg-rose-100 text-rose-800 font-bold px-1 rounded">
+                                    -Revoked
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-500">{p.description}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/30">
+              {userOverrideSaveSuccess ? (
+                <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Custom user permissions saved!</span>
+                </span>
+              ) : <span />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedUserForOverride(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveUserOverrides}
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold"
+                >
+                  Save Overrides
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: BULK UPLOAD STAFF (Click outside to close) */}
+      {isBulkModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setIsBulkModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs text-slate-800 dark:text-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <FileUp className="w-5 h-5 text-emerald-600" />
+                <span>Bulk Provision Hospital Staff Accounts</span>
+              </h3>
+              <button
+                onClick={() => setIsBulkModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              {bulkError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{bulkError}</span>
+                </div>
+              )}
+
+              {/* Automatic Credentials Rule Explanation */}
+              <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 space-y-2 text-emerald-900 dark:text-emerald-200">
+                <div className="font-bold flex items-center gap-1.5">
+                  <Key className="w-4 h-4 text-emerald-600" />
+                  <span>Automated Credential Generation Rules:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700 dark:text-slate-300">
+                  <li><strong>Username:</strong> Staff member&apos;s surname converted to lowercase (e.g., <em>Dr. Kwame Mensah</em> &rarr; <code className="text-sky-600 font-bold font-mono">mensah</code>).</li>
+                  <li><strong>Initial Password:</strong> Last 4 alphabets of surname (e.g., <em>Mensah</em> &rarr; <code className="text-emerald-600 font-bold font-mono">nsah</code>; <em>Boateng</em> &rarr; <code className="text-emerald-600 font-bold font-mono">teng</code>).</li>
+                  <li><strong>Offline Storage:</strong> Committed securely directly to local browser storage (IndexedDB).</li>
+                </ul>
+              </div>
+
+              {/* Mandatory Password Change Toggle */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={mandatoryPasswordChange}
+                    onChange={(e) => setMandatoryPasswordChange(e.target.checked)}
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <div>
+                    <span className="font-bold text-slate-900 dark:text-white block">
+                      Enforce Mandatory Password Change on First Login
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      When enabled, users logging in with their initial password must set a new confidential password before accessing hospital data.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* CSV Input Area */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">
+                    Staff Data (Comma or Tab separated)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleInsertSampleBulkData}
+                    className="text-sky-600 hover:text-sky-500 font-bold text-[11px] cursor-pointer"
+                  >
+                    Paste Sample Template
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-1">
+                  Format per line: <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">Full Name, Department, Role, Phone, Email</code>
+                </p>
+                <textarea
+                  rows={6}
+                  value={bulkInputText}
+                  onChange={(e) => setBulkInputText(e.target.value)}
+                  placeholder="e.g. Dr. Kwame Mensah, OPD, CLINICAL_LEAD, +233 24 111 2222, mensah@hospital.local"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              {/* Bulk Results Table if completed */}
+              {bulkResult && (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white">
+                    <span>Provisioning Outcome</span>
+                    <span className="text-emerald-600">
+                      Created: {bulkResult.created} | Skipped: {bulkResult.skipped}
+                    </span>
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                        <tr>
+                          <th className="p-2">Full Name</th>
+                          <th className="p-2">Username</th>
+                          <th className="p-2">Initial Password</th>
+                          <th className="p-2">Department</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {bulkResult.accounts.map((acc, i) => (
+                          <tr key={i}>
+                            <td className="p-2 font-medium">{acc.fullName}</td>
+                            <td className="p-2 font-mono font-bold text-sky-600">@{acc.username}</td>
+                            <td className="p-2 font-mono font-bold text-emerald-600">{acc.defaultPassword}</td>
+                            <td className="p-2 text-slate-500">{acc.department}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50 dark:bg-slate-800/30">
+              <button
+                type="button"
+                onClick={() => setIsBulkModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
+              >
+                {bulkResult ? 'Close' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBulkUpload}
+                disabled={isProcessingBulk || !bulkInputText.trim()}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-50 cursor-pointer"
+              >
+                {isProcessingBulk ? 'Provisioning...' : 'Provision Staff Accounts'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

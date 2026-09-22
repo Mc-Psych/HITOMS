@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Activity,
   Wifi,
@@ -13,9 +13,12 @@ import {
   ShieldCheck,
   Building,
   HelpCircle,
+  LogIn,
+  LogOut,
+  KeyRound,
 } from 'lucide-react';
 import { syncService, type SyncStats } from '../services/syncService';
-import { authService } from '../services/authService';
+import { authService, getUserInitials } from '../services/authService';
 import { notificationService } from '../services/notificationService';
 import { type User, type AppNotification, type SystemSettings } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -26,6 +29,8 @@ interface HeaderProps {
   systemSettings?: SystemSettings | null;
   onSwitchUser: (userId: string) => void;
   onNavigate: (view: string) => void;
+  onOpenLoginModal?: () => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -34,11 +39,16 @@ export const Header: React.FC<HeaderProps> = ({
   systemSettings,
   onSwitchUser,
   onNavigate,
+  onOpenLoginModal,
+  onLogout,
 }) => {
   const [syncStats, setSyncStats] = useState<SyncStats>(syncService.getStats());
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifs, setShowNotifs] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
+
+  const notifsRef = useRef<HTMLDivElement>(null);
+  const roleMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const unsub = syncService.subscribe((stats) => {
@@ -53,6 +63,32 @@ export const Header: React.FC<HeaderProps> = ({
 
     return () => unsub();
   }, [currentUser]);
+
+  // Click outside to close notifications and role menu dropdowns
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifsRef.current && !notifsRef.current.contains(e.target as Node)) {
+        setShowNotifs(false);
+      }
+      if (roleMenuRef.current && !roleMenuRef.current.contains(e.target as Node)) {
+        setShowRoleMenu(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowNotifs(false);
+        setShowRoleMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const unreadCount = (notifications || []).filter((n) => !n.isRead).length;
 
@@ -182,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
           <PWAInstallButton />
 
           {/* Notifications Center */}
-          <div className="relative">
+          <div className="relative" ref={notifsRef}>
             <button
               id="notifications-toggle-btn"
               onClick={() => setShowNotifs(!showNotifs)}
@@ -251,14 +287,14 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Quick User & Role Switcher for QA & Testing */}
-          <div className="relative">
+          <div className="relative" ref={roleMenuRef}>
             <button
               id="user-role-switcher-btn"
               onClick={() => setShowRoleMenu(!showRoleMenu)}
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer"
             >
-              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs">
-                {currentUser?.fullName.charAt(0) || 'U'}
+              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider">
+                {getUserInitials(currentUser?.fullName || '')}
               </div>
               <div className="hidden sm:block text-xs">
                 <div className="font-semibold text-white leading-tight">{currentUser?.fullName}</div>
@@ -269,11 +305,14 @@ export const Header: React.FC<HeaderProps> = ({
 
             {showRoleMenu && (
               <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50">
-                <div className="px-3 py-2 border-b border-slate-800">
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Switch Hospital Role</p>
-                  <p className="text-[11px] text-slate-500">Test multi-role permissions & workflows</p>
+                <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Switch Hospital Role</p>
+                    <p className="text-[10px] text-slate-500">Fast role switching for QA & operations</p>
+                  </div>
                 </div>
-                <div className="mt-1 max-h-72 overflow-y-auto space-y-1">
+
+                <div className="mt-1 max-h-56 overflow-y-auto space-y-1">
                   {allUsers.map((u) => (
                     <button
                       key={u.id}
@@ -294,6 +333,35 @@ export const Header: React.FC<HeaderProps> = ({
                       {currentUser?.id === u.id && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
                     </button>
                   ))}
+                </div>
+
+                {/* Login Portal & Sign Out Footer */}
+                <div className="pt-2 mt-2 border-t border-slate-800 space-y-1">
+                  {onOpenLoginModal && (
+                    <button
+                      onClick={() => {
+                        setShowRoleMenu(false);
+                        onOpenLoginModal();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-sky-300 hover:bg-sky-950/60 hover:text-sky-200 transition cursor-pointer"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Open Staff Login Portal</span>
+                    </button>
+                  )}
+
+                  {onLogout && (
+                    <button
+                      onClick={() => {
+                        setShowRoleMenu(false);
+                        onLogout();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Lock & Sign Out</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}

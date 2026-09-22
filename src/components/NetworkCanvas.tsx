@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import {
   Radio,
   Network,
@@ -35,9 +37,19 @@ import {
   Info,
   Hand,
   Compass,
+  Laptop,
+  Monitor,
+  Printer,
+  Save,
+  Download,
+  HelpCircle,
+  CheckCircle2,
+  FileText,
+  Image,
 } from 'lucide-react';
 import {
   type NetworkDevice,
+  type NetworkDeviceType,
   type NetworkConnectionType,
   type User as UserType,
 } from '../types';
@@ -181,9 +193,10 @@ function computeHierarchicalOrder(devs: NetworkDevice[]): Record<string, Point> 
     if (!depthMap.has(d.id)) {
       if (d.deviceType === 'Starlink Terminal') depthMap.set(d.id, 0);
       else if (d.deviceType === 'Router' || d.deviceType === 'Firewall') depthMap.set(d.id, 1);
-      else if (['Core Switch', 'Switch', 'Server'].includes(d.deviceType)) depthMap.set(d.id, 2);
+      else if (['Core Switch', 'Server'].includes(d.deviceType)) depthMap.set(d.id, 2);
       else if (d.deviceType === 'Distribution Switch') depthMap.set(d.id, 3);
-      else depthMap.set(d.id, 4);
+      else if (['Switch', 'Access Point'].includes(d.deviceType)) depthMap.set(d.id, 4);
+      else depthMap.set(d.id, 5); // Tier 5: Endpoints (Workstations, Laptops, Computers, Printers)
     }
   });
 
@@ -228,6 +241,40 @@ function computeHierarchicalOrder(devs: NetworkDevice[]): Record<string, Point> 
   });
 
   return posMap;
+}
+
+export function getDeviceTierInfo(type: NetworkDeviceType): {
+  tier: number;
+  name: string;
+  badge: string;
+  bg: string;
+} {
+  switch (type) {
+    case 'Starlink Terminal':
+      return { tier: 1, name: 'Tier 1: WAN Gateway', badge: 'Tier 1 • WAN', bg: 'bg-amber-950/80 text-amber-300 border-amber-700/60' };
+    case 'Router':
+      return { tier: 1, name: 'Tier 1: Edge Router', badge: 'Tier 1 • Router', bg: 'bg-sky-950/80 text-sky-300 border-sky-700/60' };
+    case 'Firewall':
+      return { tier: 1, name: 'Tier 1: Security Firewall', badge: 'Tier 1 • Firewall', bg: 'bg-rose-950/80 text-rose-300 border-rose-700/60' };
+    case 'Core Switch':
+      return { tier: 2, name: 'Tier 2: Core Switch', badge: 'Tier 2 • Core Backbone', bg: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60' };
+    case 'Server':
+      return { tier: 2, name: 'Tier 2: Edge Server', badge: 'Tier 2 • Server', bg: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60' };
+    case 'Distribution Switch':
+      return { tier: 3, name: 'Tier 3: Distribution Switch', badge: 'Tier 3 • Dist Switch', bg: 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60' };
+    case 'Switch':
+      return { tier: 4, name: 'Tier 4: Access Switch', badge: 'Tier 4 • Access Switch', bg: 'bg-purple-950/80 text-purple-300 border-purple-700/60' };
+    case 'Access Point':
+      return { tier: 4, name: 'Tier 4: Wireless AP', badge: 'Tier 4 • Wi-Fi AP', bg: 'bg-purple-950/80 text-purple-300 border-purple-700/60' };
+    case 'Workstation':
+      return { tier: 5, name: 'Tier 5: Endpoint Workstation', badge: 'Tier 5 • Computer / PC', bg: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60' };
+    case 'Laptop':
+      return { tier: 5, name: 'Tier 5: Endpoint Laptop', badge: 'Tier 5 • Laptop', bg: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60' };
+    case 'Printer':
+      return { tier: 5, name: 'Tier 5: Endpoint Printer', badge: 'Tier 5 • Printer', bg: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60' };
+    default:
+      return { tier: 5, name: 'Tier 5: Endpoint', badge: 'Tier 5 • Endpoint', bg: 'bg-slate-800 text-slate-300 border-slate-700' };
+  }
 }
 
 interface AnchorPoint extends Point {
@@ -359,8 +406,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   });
   const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
 
-  // Tool Mode: 'pointer' (drag nodes or drag background to pan), 'pan' (hand tool), 'marquee' (box select)
-  const [activeTool, setActiveTool] = useState<'pointer' | 'pan' | 'marquee'>('pointer');
+  // Tool Mode: 'pointer' (drag nodes or drag background to pan), 'pan' (hand tool), 'wire' (cable connection), 'marquee' (box select)
+  const [activeTool, setActiveTool] = useState<'pointer' | 'pan' | 'wire' | 'marquee'>('pointer');
 
   // Multi-Selection Marquee State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
@@ -396,8 +443,13 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     speed?: string;
   } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSavingTopology, setIsSavingTopology] = useState(false);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'jpeg' | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [showTierGuide, setShowTierGuide] = useState(false);
 
-  const canManage = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
+  const canManage = Boolean(currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'SYSTEM_ADMIN'].includes(currentUser.role));
 
   // Spacebar listener for temporary Hand Pan tool
   useEffect(() => {
@@ -517,15 +569,18 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (isConnecting) return;
 
-    // Check if clicked directly on canvas background
+    // Check if clicked directly on canvas background (not on an interactive node, button, input, or badge)
     const target = e.target as HTMLElement;
-    const isBackground =
-      target === containerRef.current ||
-      target.tagName === 'svg' ||
-      target.getAttribute('data-canvas-bg') === 'true' ||
-      target.closest('.canvas-background');
+    const isInteractive = Boolean(
+      target.closest('[data-node-id="true"]') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('[data-interactive="true"]') ||
+      target.closest('[data-cable-badge="true"]')
+    );
 
-    if (isBackground) {
+    if (!isInteractive) {
       const isMarquee = activeTool === 'marquee' || e.shiftKey || e.metaKey || e.ctrlKey;
 
       if (isMarquee) {
@@ -538,7 +593,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
           setSelectedDeviceIds(new Set());
         }
       } else {
-        // Default: Drag canvas to pan in any direction (left, right, top, bottom)
+        // Drag canvas to pan in all directions (left, right, top, bottom)
+        isPanningRef.current = true;
         setIsPanning(true);
         panStartRef.current = {
           clientX: e.clientX,
@@ -557,6 +613,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
     // If Hand tool or Spacebar is active, delegate to canvas panning
     if (activeTool === 'pan' || isSpacePressed) {
+      isPanningRef.current = true;
       setIsPanning(true);
       panStartRef.current = {
         clientX: e.clientX,
@@ -669,6 +726,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         deltaY = Math.round(deltaY / 20) * 20;
       }
 
+      setHasUnsavedChanges(true);
       setPositions((prev) => {
         const next = { ...prev };
         const targetIds = selectedDeviceIds.size > 0 ? selectedDeviceIds : new Set([dragAnchorId]);
@@ -687,6 +745,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const handleCanvasMouseUp = async () => {
     // Finalize Panning
     if (isPanningRef.current) {
+      isPanningRef.current = false;
       setIsPanning(false);
     }
 
@@ -721,6 +780,9 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
         if (updatesToSave.length > 0) {
           await networkService.updatePositions(updatesToSave);
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSavedAt(timeStr);
+          setHasUnsavedChanges(false);
           onRefresh();
           showToast(`Saved new layout position for ${updatesToSave.length} device(s)`);
         }
@@ -728,16 +790,31 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     }
   };
 
-  // Global window listeners for drag/pan release to ensure smooth drops
+  // Global window listeners for drag/pan movement and release
   useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (isPanningRef.current && containerRef.current) {
+        const dx = e.clientX - panStartRef.current.clientX;
+        const dy = e.clientY - panStartRef.current.clientY;
+        containerRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+        containerRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+      }
+    };
+
     const handleGlobalMouseUp = () => {
-      if (isDraggingGroupRef.current || isMarqueeDragging || isPanningRef.current) {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        setIsPanning(false);
+      }
+      if (isDraggingGroupRef.current || isMarqueeDragging) {
         handleCanvasMouseUp();
       }
     };
 
+    window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
   }, [isMarqueeDragging]);
@@ -893,6 +970,173 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   const handleClearSelection = () => {
     setSelectedDeviceIds(new Set());
+  };
+
+  // Explicit Manual Save of Entire Topology Layout
+  const handleManualSaveTopology = async () => {
+    try {
+      setIsSavingTopology(true);
+      const updates = devices.map((d) => ({
+        id: d.id,
+        canvasX: positions[d.id]?.x ?? d.canvasX ?? 100,
+        canvasY: positions[d.id]?.y ?? d.canvasY ?? 100,
+      }));
+      await networkService.updatePositions(updates);
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSavedAt(timeStr);
+      showToast(`Topology layout saved successfully at ${timeStr}`);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to save topology layout');
+    } finally {
+      setIsSavingTopology(false);
+    }
+  };
+
+  // Export Topology snapshot as JSON
+  const handleExportTopologyJson = () => {
+    const exportData = {
+      hospital: 'Hospital IT Operations & Maintenance System',
+      exportedAt: new Date().toISOString(),
+      topologyVersion: '1.0',
+      totalDevices: devices.length,
+      devices: devices.map((d) => ({
+        id: d.id,
+        deviceName: d.deviceName,
+        deviceType: d.deviceType,
+        ipAddress: d.ipAddress,
+        macAddress: d.macAddress,
+        location: d.location,
+        status: d.status,
+        predecessorId: d.predecessorId || d.uplinkDeviceId || null,
+        successorIds: d.successorIds || [],
+        connectionType: d.connectionType || 'Ethernet Cat6',
+        portSpeed: d.portSpeed || '1 Gbps',
+        canvasCoordinates: positions[d.id] || { x: d.canvasX, y: d.canvasY },
+      })),
+    };
+
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `hospital-network-topology-${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast('Topology configuration JSON snapshot exported');
+  };
+
+  // Export Topology as PDF Document (Super Admin / IT Unit)
+  const handleExportPDF = async () => {
+    if (!containerRef.current) return;
+    setIsExporting('pdf');
+    showToast('Generating Network Topology High-Resolution PDF...');
+    try {
+      const canvas = await html2canvas(containerRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#020617',
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      // Executive Header Bar
+      pdf.setFillColor(15, 23, 42); // slate-900
+      pdf.rect(0, 0, pdfWidth, 18, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(11);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('HOSPITAL IT OPERATIONS & NETWORK TOPOLOGY DIAGRAM', 10, 11);
+
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(148, 163, 184); // slate-400
+      const dateStr = new Date().toLocaleString();
+      pdf.text(
+        `Generated: ${dateStr} | Total Nodes: ${devices.length} | Exported by: ${currentUser?.fullName || 'Super Admin'}`,
+        pdfWidth - 10,
+        11,
+        { align: 'right' }
+      );
+
+      // Embedded High-Res Diagram Canvas
+      const margin = 8;
+      const availableW = pdfWidth - margin * 2;
+      const availableH = pdfHeight - 24 - margin;
+      const canvasRatio = canvas.width / canvas.height;
+      let renderW = availableW;
+      let renderH = availableW / canvasRatio;
+
+      if (renderH > availableH) {
+        renderH = availableH;
+        renderW = availableH * canvasRatio;
+      }
+
+      const xOffset = margin + (availableW - renderW) / 2;
+      const yOffset = 22 + (availableH - renderH) / 2;
+
+      pdf.addImage(imgData, 'JPEG', xOffset, yOffset, renderW, renderH);
+
+      // Security & Compliance Footer
+      pdf.setFontSize(7);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(
+        'CONFIDENTIAL & PROPRIETARY — Hospital Infrastructure & Telemetry Management System (HITOMS) Offline-First Architecture',
+        10,
+        pdfHeight - 4
+      );
+
+      const fileName = `hospital-network-topology-${new Date().toISOString().slice(0, 10)}.pdf`;
+      pdf.save(fileName);
+      showToast('Topology successfully downloaded as PDF document');
+    } catch (err: any) {
+      console.error('Failed to export topology PDF:', err);
+      showToast('Failed to export PDF: ' + (err?.message || 'Error generating document'));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  // Export Topology as High-Resolution JPEG Image (Super Admin / IT Unit)
+  const handleExportJPEG = async () => {
+    if (!containerRef.current) return;
+    setIsExporting('jpeg');
+    showToast('Generating Network Topology JPEG image...');
+    try {
+      const canvas = await html2canvas(containerRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#020617',
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', imgData);
+      downloadAnchor.setAttribute(
+        'download',
+        `hospital-network-topology-${new Date().toISOString().slice(0, 10)}.jpeg`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('Topology successfully downloaded as JPEG image');
+    } catch (err: any) {
+      console.error('Failed to export topology JPEG:', err);
+      showToast('Failed to export JPEG: ' + (err?.message || 'Error generating image'));
+    } finally {
+      setIsExporting(null);
+    }
   };
 
   // Interactive Cable Connection Workflow
@@ -1053,6 +1297,12 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         return <Wifi className={className} />;
       case 'Firewall':
         return <Shield className={className} />;
+      case 'Workstation':
+        return <Monitor className={className} />;
+      case 'Laptop':
+        return <Laptop className={className} />;
+      case 'Printer':
+        return <Printer className={className} />;
       default:
         return <Cpu className={className} />;
     }
@@ -1073,7 +1323,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       {/* Canvas Action Bar */}
       <div className="flex flex-wrap items-center justify-between p-3.5 bg-slate-900/90 border-b border-slate-800 gap-3 z-30">
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Tool Mode Selector: Pointer / Move & Pan, Hand Pan, Marquee Selection */}
+          {/* Tool Mode Selector: Pointer / Move & Pan, Hand Pan, Wire Cable, Marquee Selection */}
           <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700">
             <button
               onClick={() => setActiveTool('pointer')}
@@ -1098,6 +1348,25 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             >
               <Hand className="w-3.5 h-3.5" />
               <span>Pan Canvas</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTool('wire');
+                if (!isConnecting && selectedDeviceIds.size === 1) {
+                  const firstId = Array.from(selectedDeviceIds)[0];
+                  setConnectingSourceId(firstId);
+                  setIsConnecting(true);
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeTool === 'wire' || isConnecting
+                  ? 'bg-amber-600 text-white shadow-xs animate-pulse'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Wire Tool: Click any part of Device A, then click any part of Device B to connect"
+            >
+              <Cable className="w-3.5 h-3.5" />
+              <span>Wire Tool</span>
             </button>
             <button
               onClick={() => setActiveTool('marquee')}
@@ -1171,6 +1440,88 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
               )}
             </div>
           )}
+
+          {/* Save Topology & Export Controls */}
+          {canManage && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleManualSaveTopology}
+                disabled={isSavingTopology}
+                title="Save current layout positions and topology configuration to database"
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50 ${
+                  hasUnsavedChanges
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
+                    : lastSavedAt
+                    ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-800'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                }`}
+              >
+                {isSavingTopology ? (
+                  <Activity className="w-3.5 h-3.5 animate-spin" />
+                ) : hasUnsavedChanges ? (
+                  <Save className="w-3.5 h-3.5 animate-bounce" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span>
+                  {isSavingTopology
+                    ? 'Saving...'
+                    : hasUnsavedChanges
+                    ? 'Save Topology (Unsaved)'
+                    : lastSavedAt
+                    ? `Topology Saved • ${lastSavedAt}`
+                    : 'Save Topology'}
+                </span>
+              </button>
+
+              <button
+                onClick={handleExportPDF}
+                disabled={isExporting !== null}
+                title="Download Network Topology as High-Resolution PDF Document"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-700/80 text-rose-200 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-50"
+              >
+                {isExporting === 'pdf' ? (
+                  <Activity className="w-3.5 h-3.5 animate-spin text-rose-300" />
+                ) : (
+                  <FileText className="w-3.5 h-3.5 text-rose-400" />
+                )}
+                <span>{isExporting === 'pdf' ? 'Generating PDF...' : 'Download PDF'}</span>
+              </button>
+
+              <button
+                onClick={handleExportJPEG}
+                disabled={isExporting !== null}
+                title="Download Network Topology as High-Resolution JPEG Image"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-700/80 text-amber-200 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-50"
+              >
+                {isExporting === 'jpeg' ? (
+                  <Activity className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                ) : (
+                  <Image className="w-3.5 h-3.5 text-amber-400" />
+                )}
+                <span>{isExporting === 'jpeg' ? 'Generating JPEG...' : 'Download JPEG'}</span>
+              </button>
+
+              <button
+                onClick={handleExportTopologyJson}
+                title="Export Topology Snapshot (JSON)"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden md:inline">Export JSON</span>
+              </button>
+            </div>
+          )}
+
+          {/* Tier Architecture Guide Button */}
+          <button
+            onClick={() => setShowTierGuide(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 hover:text-indigo-200 rounded-xl text-xs font-bold transition cursor-pointer"
+            title="View Tier Guide (Where Computers, Laptops, Switches & Routers Belong)"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Tier Guide</span>
+          </button>
 
           {/* Center Viewport Button */}
           <button
@@ -1254,6 +1605,40 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         </div>
       </div>
 
+      {/* Tier 5 Architecture & Real-Time Hint Banner */}
+      <div className="flex flex-wrap items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800 text-xs z-20 gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-950/90 border border-emerald-600/70 text-emerald-300 font-bold text-[11px]">
+            <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Tier 5 Endpoints</span>
+          </span>
+          <span className="text-slate-300 text-xs">
+            Computers, Laptops & Printers connect into <strong>Tier 4 Access Switches</strong> or <strong>Wi-Fi APs</strong>.
+          </span>
+          <button
+            onClick={() => setShowTierGuide(true)}
+            className="text-emerald-400 hover:text-emerald-300 hover:underline font-bold text-[11px] cursor-pointer ml-1"
+          >
+            Tier Reference Guide →
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 text-slate-400 text-xs">
+          {hasUnsavedChanges && (
+            <span className="flex items-center gap-1 text-amber-300 font-bold px-2 py-0.5 bg-amber-950/80 border border-amber-700 rounded-lg animate-pulse text-[11px]">
+              <Save className="w-3 h-3 text-amber-400" />
+              <span>Unsaved layout changes</span>
+            </span>
+          )}
+          {lastSavedAt && !hasUnsavedChanges && (
+            <span className="flex items-center gap-1 text-emerald-400 font-semibold px-2 py-0.5 bg-emerald-950/60 border border-emerald-800 rounded-lg text-[11px]">
+              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span>Saved at {lastSavedAt}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Interactive Cable Legend Bar & Selection Hints */}
       <div className="flex flex-wrap items-center justify-between px-4 py-2 bg-slate-900/60 border-b border-slate-800 text-[11px] z-20 gap-2">
         <div className="flex flex-wrap items-center gap-3">
@@ -1275,7 +1660,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
         <div className="text-slate-400 text-[11px] flex items-center gap-3">
           <span>
-            💡 <strong>Drag canvas background</strong> to pan (left/right/up/down) • <strong>Click any part of device or ports</strong> to connect
+            💡 <strong>Drag canvas</strong> to pan in all directions (left, right, top, bottom) • <strong>Click any part of device</strong> to wire
           </span>
           {selectedDeviceIds.size < devices.length && (
             <button
@@ -1302,6 +1687,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             ? 'cursor-grab'
             : activeTool === 'marquee' || isMarqueeDragging
             ? 'cursor-crosshair'
+            : activeTool === 'wire'
+            ? 'cursor-crosshair'
             : 'cursor-grab'
         }`}
         style={{
@@ -1314,8 +1701,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
           data-canvas-bg="true"
           className="relative origin-top-left"
           style={{
-            width: '2400px',
-            height: '1800px',
+            width: '3200px',
+            height: '2400px',
             transform: `scale(${zoomLevel})`,
           }}
         >
@@ -1323,7 +1710,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
           <svg
             data-canvas-bg="true"
             className="absolute inset-0 pointer-events-none w-full h-full z-10"
-            style={{ width: '2400px', height: '1800px' }}
+            style={{ width: '3200px', height: '2400px' }}
           >
             <defs>
               {/* Dynamic Arrow Markers */}
@@ -1506,10 +1893,12 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             const isDraggingThis = isDraggingGroup && isSelected;
             const isSourceForWiring = connectingSourceId === device.id;
             const pred = device.predecessorId ? deviceMap.get(device.predecessorId) : null;
+            const tierInfo = getDeviceTierInfo(device.deviceType);
 
             return (
               <div
                 key={device.id}
+                data-node-id="true"
                 onMouseDown={(e) => handleNodeMouseDown(e, device.id)}
                 onClick={(e) => {
                   if (isDragMovedRef.current) {
@@ -1519,6 +1908,9 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                   if (isConnecting) {
                     // ANY part of device can be clicked to complete connection
                     handleTargetConnect(e, device.id);
+                  } else if (activeTool === 'wire' || e.altKey) {
+                    // In Wire Tool mode or with Alt-click, ANY part of device starts connection
+                    handleStartConnect(e, device.id);
                   } else {
                     // Select node on canvas without opening modal dialog
                     if (e.shiftKey || e.metaKey || e.ctrlKey) {
@@ -1636,6 +2028,11 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                       <div className="text-[10px] font-mono text-sky-400 font-semibold truncate">
                         {device.ipAddress}
                       </div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${tierInfo.bg}`}>
+                          {tierInfo.badge}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1655,7 +2052,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                 </div>
 
                 {/* Node Metadata Badges */}
-                <div className="mt-2.5 flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-slate-800/80">
+                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-slate-800/80">
                   <span className="truncate max-w-[130px]" title={device.location}>
                     {device.location}
                   </span>
@@ -1681,6 +2078,18 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
                     <div className="flex items-center gap-1">
                       <button
+                        title="Wire / Connect Cable to another node"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isConnecting) handleTargetConnect(e, device.id);
+                          else handleStartConnect(e, device.id);
+                        }}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-300 hover:text-white hover:bg-amber-600/40 transition cursor-pointer"
+                      >
+                        <Cable className="w-3 h-3 text-amber-400" />
+                        <span>Wire</span>
+                      </button>
+                      <button
                         title="Inspect Device Details"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1689,16 +2098,6 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                         className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-slate-800 cursor-pointer"
                       >
                         <Info className="w-3 h-3" />
-                      </button>
-                      <button
-                        title="Wire / Connect Cable to another node"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartConnect(e, device.id);
-                        }}
-                        className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-amber-950/60 cursor-pointer"
-                      >
-                        <Link2 className="w-3 h-3" />
                       </button>
                       <button
                         title="Edit Node Settings"
@@ -1799,6 +2198,148 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         <div className="absolute bottom-4 right-4 bg-slate-800 border border-slate-700 text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold flex items-center gap-2 z-50 animate-fade-in">
           <Activity className="w-4 h-4 text-sky-400 animate-spin" />
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Network Tier Architecture Guide Modal */}
+      {showTierGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 text-xs text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-indigo-950/80 border border-indigo-700 text-indigo-400">
+                  <Layers className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>Hospital Network Tier Architecture Guide</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Hierarchical structure explaining node classification and tier placement.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTierGuide(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Answer to User Query Highlight Box */}
+            <div className="p-3.5 bg-emerald-950/60 border border-emerald-700/80 rounded-xl space-y-1">
+              <div className="flex items-center gap-2 font-bold text-emerald-300 text-sm">
+                <Monitor className="w-4 h-4 text-emerald-400" />
+                <Laptop className="w-4 h-4 text-emerald-400" />
+                <span>Where are Computers & Laptops positioned?</span>
+              </div>
+              <p className="text-slate-300 text-xs leading-relaxed">
+                Computers, Desktops, Laptops, Nurse Stations, Point-of-Care Handhelds, and Network Printers belong in <strong className="text-emerald-300">Tier 5 (Endpoint & User Station Layer)</strong>. They connect as <strong className="text-white">successor nodes</strong> to <strong className="text-sky-300">Tier 4 Access Switches</strong> (via Ethernet Cat6) or <strong className="text-purple-300">Wireless Access Points</strong> (via 5GHz/6GHz Wi-Fi).
+              </p>
+            </div>
+
+            {/* 5-Tier Breakdown */}
+            <div className="space-y-2.5">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Hospital Network 5-Tier Breakdown
+              </h4>
+
+              {/* Tier 1 */}
+              <div className="p-3 rounded-xl border border-amber-900/60 bg-amber-950/20 space-y-1">
+                <div className="flex items-center justify-between font-bold text-amber-300">
+                  <span className="flex items-center gap-1.5">
+                    <Radio className="w-4 h-4 text-amber-400" />
+                    <span>Tier 1: Perimeter & WAN Gateway Layer</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-900/40 rounded">Top / Ingress</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Hardware:</strong> Starlink Satellite Terminals, ISP Fiber Gateways, Perimeter Firewalls, Core Routers.
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Provides internet breakout and WAN routing for the hospital campus.
+                </p>
+              </div>
+
+              {/* Tier 2 */}
+              <div className="p-3 rounded-xl border border-indigo-900/60 bg-indigo-950/20 space-y-1">
+                <div className="flex items-center justify-between font-bold text-indigo-300">
+                  <span className="flex items-center gap-1.5">
+                    <Server className="w-4 h-4 text-indigo-400" />
+                    <span>Tier 2: Core Network & Data Center Layer</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-900/40 rounded">High-Speed Core</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Hardware:</strong> Core 10G/40G Switches, LHIMS Hospital Servers, PACS Medical Imaging Servers, File & Backup Servers.
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  High-speed switching backbone with redundant fiber links and mission-critical hospital databases.
+                </p>
+              </div>
+
+              {/* Tier 3 */}
+              <div className="p-3 rounded-xl border border-sky-900/60 bg-sky-950/20 space-y-1">
+                <div className="flex items-center justify-between font-bold text-sky-300">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-sky-400" />
+                    <span>Tier 3: Distribution / Aggregation Layer</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-sky-900/40 rounded">Building Backbones</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Hardware:</strong> Distribution Switches (Admin Block, Maternity Ward, Surgical Center, Outpatient Block).
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Aggregates traffic from floor switches before trunking to the Core Switch via fiber or 10G SFP+.
+                </p>
+              </div>
+
+              {/* Tier 4 */}
+              <div className="p-3 rounded-xl border border-purple-900/60 bg-purple-950/20 space-y-1">
+                <div className="flex items-center justify-between font-bold text-purple-300">
+                  <span className="flex items-center gap-1.5">
+                    <Wifi className="w-4 h-4 text-purple-400" />
+                    <span>Tier 4: Access & PoE Layer</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/40 rounded">Department Ports</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Hardware:</strong> Managed Access Switches (24/48 port PoE), Wireless Access Points (AP - OPD, AP - Emergency, AP - Wards).
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Provides physical Ethernet wall jacks and Wi-Fi coverage for end devices.
+                </p>
+              </div>
+
+              {/* Tier 5 */}
+              <div className="p-3 rounded-xl border border-emerald-900/60 bg-emerald-950/20 space-y-1">
+                <div className="flex items-center justify-between font-bold text-emerald-300">
+                  <span className="flex items-center gap-1.5">
+                    <Monitor className="w-4 h-4 text-emerald-400" />
+                    <span>Tier 5: Endpoints & User Stations (Computers & Laptops)</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-900/40 rounded">User Edge</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  <strong>Hardware:</strong> Desktop PCs, Laptops, Nurses Station Terminals, Doctor Workstations, Clinical Diagnostic Monitors, Printers.
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Direct end-user devices where hospital staff log into LHIMS, EHR, email, and diagnostic systems.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setShowTierGuide(false)}
+                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

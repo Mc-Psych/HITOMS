@@ -31,6 +31,9 @@ import {
   Copy,
   Move,
   Sparkles,
+  Monitor,
+  Laptop,
+  Printer,
 } from 'lucide-react';
 import {
   type NetworkDevice,
@@ -40,6 +43,7 @@ import {
 } from '../types';
 import { networkService } from '../services/networkService';
 import { NetworkCanvas } from './NetworkCanvas';
+import { authService } from '../services/authService';
 
 interface NetworkViewProps {
   devices: NetworkDevice[];
@@ -119,7 +123,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   const [pingingId, setPingingId] = useState<string | null>(null);
   const [pingResult, setPingResult] = useState<{ id: string; ms: number; status: string } | null>(null);
 
-  const canManageNetwork = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
+  const isAuthorized = authService.canAccessNetwork(currentUser);
+  const canManageNetwork = isAuthorized;
+  const canPing = authService.canRunPingTest(currentUser);
 
   // Map of device by ID for instant O(1) lookups
   const deviceMap = useMemo(() => {
@@ -375,6 +381,12 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
         return <Wifi className={className} />;
       case 'Firewall':
         return <Shield className={className} />;
+      case 'Workstation':
+        return <Monitor className={className} />;
+      case 'Laptop':
+        return <Laptop className={className} />;
+      case 'Printer':
+        return <Printer className={className} />;
       default:
         return <Cpu className={className} />;
     }
@@ -394,7 +406,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   }, [devices]);
 
   const layer4Endpoints = useMemo(() => {
-    return devices.filter((d) => ['Access Point', 'Server', 'Workstation'].includes(d.deviceType));
+    return devices.filter((d) => ['Access Point', 'Server', 'Workstation', 'Laptop', 'Printer'].includes(d.deviceType));
   }, [devices]);
 
   // Highlight check helper
@@ -424,6 +436,21 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
         d.deviceType.toLowerCase().includes(q)
     );
   }, [devices, searchQuery]);
+
+  if (!isAuthorized) {
+    return (
+      <div className="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 p-8 text-center my-8 max-w-xl mx-auto shadow-sm">
+        <Shield className="w-12 h-12 text-rose-500 mx-auto mb-3" />
+        <h2 className="text-lg font-bold text-rose-900 dark:text-rose-200">Access Restricted: Network & Topology</h2>
+        <p className="text-sm text-rose-700 dark:text-rose-300 mt-2 leading-relaxed">
+          Active network topology, Starlink failover nodes, and infrastructure wiring controls are strictly restricted to Super Administrators and IT Unit Staff members.
+        </p>
+        <div className="mt-4 text-xs text-rose-600 dark:text-rose-400 font-medium">
+          If you require network diagram audit access, please contact the Hospital Super Administrator or IT Operations Unit.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1795,6 +1822,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     <option value="Server">Local Server</option>
                     <option value="Firewall">Hardware Firewall</option>
                     <option value="Starlink Terminal">Starlink Terminal</option>
+                    <option value="Workstation">Desktop Computer / Workstation</option>
+                    <option value="Laptop">Laptop / Portable Computer</option>
+                    <option value="Printer">Network Printer / Scanner</option>
                   </select>
                 </div>
 
@@ -2052,6 +2082,9 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     <option value="Server">Local Server</option>
                     <option value="Firewall">Hardware Firewall</option>
                     <option value="Starlink Terminal">Starlink Terminal</option>
+                    <option value="Workstation">Desktop Computer / Workstation</option>
+                    <option value="Laptop">Laptop / Portable Computer</option>
+                    <option value="Printer">Network Printer / Scanner</option>
                   </select>
                 </div>
 

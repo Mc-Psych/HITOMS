@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import {
   HardDrive,
   Plus,
@@ -16,6 +17,15 @@ import {
   Printer,
   ChevronRight,
   User,
+  Key,
+  CheckSquare,
+  Square,
+  FileText,
+  Tag,
+  Camera,
+  Upload,
+  Download,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   type Asset,
@@ -25,6 +35,14 @@ import {
   type User as UserType,
 } from '../types';
 import { assetService } from '../services/assetService';
+import { authService } from '../services/authService';
+import {
+  generateAssetQrMetadataPayload,
+  downloadAssetQrJpeg,
+} from '../utils/qrLabelGenerator';
+import { SoftwareSubscriptionsTab } from './SoftwareSubscriptionsTab';
+import { AssetQRLabelModal } from './AssetQRLabelModal';
+import { AssetBulkUploadModal } from './AssetBulkUploadModal';
 
 interface AssetsViewProps {
   assets: Asset[];
@@ -39,6 +57,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   currentUser,
   onRefresh,
 }) => {
+  const [activeTab, setActiveTab] = useState<'HARDWARE' | 'SUBSCRIPTIONS'>('HARDWARE');
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -58,6 +77,9 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   // Create Asset Modal state
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newAssetType, setNewAssetType] = useState<string>('Desktop');
+
+  // Permission check: strictly Super Admin and IT unit staff can edit/add assets. Auditor and Management are read-only.
+  const canManageAssets = authService.canManageAssets(currentUser);
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
@@ -71,6 +93,16 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   // QR Scanner modal
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [scannedTagInput, setScannedTagInput] = useState('');
+  const [scannedAssetFound, setScannedAssetFound] = useState<Asset | null>(null);
+
+  // Bulk Upload Modal state
+  const [bulkUploadModalOpen, setBulkUploadModalOpen] = useState(false);
+
+  // QR Label Print Modal states
+  const [qrLabelAsset, setQrLabelAsset] = useState<Asset | null>(null);
+  const [batchQRModalOpen, setBatchQRModalOpen] = useState(false);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [detailQrCodeDataUrl, setDetailQrCodeDataUrl] = useState<string>('');
 
   const filteredAssets = assets.filter((a) => {
     const matchesSearch =
@@ -87,6 +119,48 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
     return matchesSearch && matchesType && matchesStatus && matchesDept;
   });
+
+  // Generate rich QR code data URL whenever selectedAsset changes (encodes Name, Serial, Dept, etc.)
+  useEffect(() => {
+    if (!selectedAsset) {
+      setDetailQrCodeDataUrl('');
+      return;
+    }
+    const payload = generateAssetQrMetadataPayload(selectedAsset);
+    QRCode.toDataURL(payload, {
+      width: 280,
+      margin: 1,
+      errorCorrectionLevel: 'H',
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+    })
+      .then((url) => setDetailQrCodeDataUrl(url))
+      .catch((err) => console.error('Failed to generate detail QR:', err));
+  }, [selectedAsset]);
+
+  // Selection toggle helpers
+  const toggleSelectAsset = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    if (selectedAssetIds.size === filteredAssets.length && filteredAssets.length > 0) {
+      setSelectedAssetIds(new Set());
+    } else {
+      setSelectedAssetIds(new Set(filteredAssets.map((a) => a.id)));
+    }
+  };
 
   const handleSelectAsset = async (asset: Asset) => {
     setSelectedAsset(asset);
@@ -164,15 +238,39 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     }
   };
 
-  const handleScanTag = async () => {
-    if (!scannedTagInput.trim()) return;
-    const found = await assetService.getAssetByTag(scannedTagInput.trim());
+  const handleScanTag = async (overrideValue?: string) => {
+    const raw = (overrideValue !== undefined ? overrideValue : scannedTagInput).trim();
+    if (!raw) return;
+
+    // Check if input is a rich formatted QR string (e.g. from mobile camera or barcode scanner)
+    const tagMatch = raw.match(/TAG[:\s]+([A-Za-z0-9-_]+)/i);
+    const snMatch = raw.match(/S\/N[:\s]+([A-Za-z0-9-_]+)/i);
+    let searchTerm = raw;
+
+    if (tagMatch && tagMatch[1]) {
+      searchTerm = tagMatch[1];
+    } else if (raw.startsWith('HITOMS-ASSET:')) {
+      searchTerm = raw.replace('HITOMS-ASSET:', '');
+    } else if (snMatch && snMatch[1]) {
+      searchTerm = snMatch[1];
+    }
+
+    let found = await assetService.getAssetByTag(searchTerm);
+    if (!found) {
+      // Check if matches serial number or id directly
+      found = assets.find(
+        (a) =>
+          a.serialNumber.toLowerCase() === searchTerm.toLowerCase() ||
+          a.assetTag.toLowerCase() === searchTerm.toLowerCase() ||
+          a.id === searchTerm
+      ) || null;
+    }
+
     if (found) {
+      setScannedAssetFound(found);
       handleSelectAsset(found);
-      setQrModalOpen(false);
-      setScannedTagInput('');
     } else {
-      alert(`Asset with tag "${scannedTagInput}" not found in local database.`);
+      alert(`Asset matching "${searchTerm}" not found in local database.`);
     }
   };
 
@@ -180,38 +278,112 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-            <HardDrive className="w-5 h-5 text-sky-600" />
-            <span>IT Asset Management & Registry</span>
-          </h1>
-          <p className="text-xs text-slate-500">
-            Offline hardware & software inventory with immutable transfer history and QR code tagging.
-          </p>
-        </div>
+      {/* Top Asset Module Navigation Tabs */}
+      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2">
+        <button
+          onClick={() => setActiveTab('HARDWARE')}
+          className={`flex items-center gap-2 px-4 py-2.5 font-bold text-xs border-b-2 transition cursor-pointer ${
+            activeTab === 'HARDWARE'
+              ? 'border-sky-600 text-sky-600 dark:text-sky-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <HardDrive className="w-4 h-4" />
+          <span>Hardware Registry ({assets.length})</span>
+        </button>
 
-        <div className="flex items-center gap-2">
-          <button
-            id="scan-qr-btn"
-            onClick={() => setQrModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition cursor-pointer"
-          >
-            <QrCode className="w-4 h-4 text-sky-400" />
-            <span>Scan QR Tag</span>
-          </button>
-
-          <button
-            id="register-asset-btn"
-            onClick={() => setCreateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Register Asset</span>
-          </button>
-        </div>
+        <button
+          onClick={() => setActiveTab('SUBSCRIPTIONS')}
+          className={`flex items-center gap-2 px-4 py-2.5 font-bold text-xs border-b-2 transition cursor-pointer ${
+            activeTab === 'SUBSCRIPTIONS'
+              ? 'border-sky-600 text-sky-600 dark:text-sky-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <Key className="w-4 h-4" />
+          <span>Software Licenses & Subscriptions</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300 font-bold">
+            M365 / Antivirus / LHIMS
+          </span>
+        </button>
       </div>
+
+      {activeTab === 'SUBSCRIPTIONS' ? (
+        <SoftwareSubscriptionsTab
+          currentUser={currentUser}
+          onRefreshParent={onRefresh}
+        />
+      ) : (
+        <>
+          {/* Header & Controls */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <HardDrive className="w-5 h-5 text-sky-600" />
+                <span>IT Hardware Asset Registry</span>
+              </h1>
+              <p className="text-xs text-slate-500">
+                Offline clinical hardware inventory with immutable transfer history, custodian tracking, and QR code tagging.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                id="scan-qr-btn"
+                onClick={() => {
+                  setScannedAssetFound(null);
+                  setScannedTagInput('');
+                  setQrModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition cursor-pointer"
+                title="Scan or lookup QR code data / hardware serial number"
+              >
+                <QrCode className="w-4 h-4 text-sky-400" />
+                <span>Scan / Lookup QR</span>
+              </button>
+
+              <button
+                id="batch-print-qr-btn"
+                onClick={() => setBatchQRModalOpen(true)}
+                title="Print batch QR code labels for physical equipment tracking"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 font-semibold text-xs border border-indigo-700/80 transition cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-indigo-400" />
+                <span>
+                  {selectedAssetIds.size > 0
+                    ? `Print ${selectedAssetIds.size} Selected QR Labels`
+                    : `Print QR Labels (${filteredAssets.length})`}
+                </span>
+              </button>
+
+              {canManageAssets && (
+                <button
+                  id="bulk-upload-assets-btn"
+                  onClick={() => setBulkUploadModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+                  title="Bulk upload multiple IT assets via CSV / Excel template"
+                >
+                  <Upload className="w-4 h-4 text-emerald-200" />
+                  <span>Bulk Upload (CSV)</span>
+                </button>
+              )}
+
+              {canManageAssets ? (
+                <button
+                  id="register-asset-btn"
+                  onClick={() => setCreateModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register Asset</span>
+                </button>
+              ) : (
+                <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+                  Audit / Management View Only
+                </span>
+              )}
+            </div>
+          </div>
 
       {/* Filter Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs space-y-3">
@@ -270,6 +442,34 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             ))}
           </select>
         </div>
+
+        {/* Multi-Select Floating Notification / Action Strip */}
+        {selectedAssetIds.size > 0 && (
+          <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/80 text-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-indigo-900 dark:text-indigo-200">
+                {selectedAssetIds.size} of {filteredAssets.length} assets selected
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBatchQRModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-xs shadow-xs transition cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print {selectedAssetIds.size} Labels</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedAssetIds(new Set())}
+                className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium px-2 py-1"
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Asset Table */}
@@ -278,6 +478,20 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold">
               <tr>
+                <th className="px-3 py-3 w-10 text-center">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllFiltered}
+                    className="text-slate-500 hover:text-sky-600 transition"
+                    title={selectedAssetIds.size === filteredAssets.length ? 'Deselect All' : 'Select All Filtered'}
+                  >
+                    {filteredAssets.length > 0 && selectedAssetIds.size === filteredAssets.length ? (
+                      <CheckSquare className="w-4 h-4 text-sky-600" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                </th>
                 <th className="px-4 py-3">Asset Tag</th>
                 <th className="px-4 py-3">Equipment / Specs</th>
                 <th className="px-4 py-3">Serial Number</th>
@@ -285,78 +499,125 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 <th className="px-4 py-3">Assigned User</th>
                 <th className="px-4 py-3">Condition</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Action</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredAssets.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-8 text-slate-400">
+                  <td colSpan={9} className="text-center py-8 text-slate-400">
                     No assets found in local registry.
                   </td>
                 </tr>
               ) : (
-                filteredAssets.map((asset) => (
-                  <tr
-                    key={asset.id}
-                    onClick={() => handleSelectAsset(asset)}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition cursor-pointer"
-                  >
-                    <td className="px-4 py-3 font-mono font-bold text-sky-600">
-                      {asset.assetTag}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900 dark:text-white">
-                        {asset.manufacturer} {asset.model}
-                      </div>
-                      <div className="text-[10px] text-slate-400">{asset.assetType} - {asset.operatingSystem || 'Hardware'}</div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-slate-500">
-                      {asset.serialNumber}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      <div className="font-medium">{asset.department}</div>
-                      <div className="text-[10px] text-slate-400">{asset.location}</div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {asset.assignedUser || <span className="text-slate-400 italic">Department shared</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          asset.condition === 'Excellent' || asset.condition === 'Good'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
-                        }`}
-                      >
-                        {asset.condition}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          asset.status === 'Active'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        {asset.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectAsset(asset);
-                        }}
-                        className="text-sky-600 hover:text-sky-700 font-semibold text-xs flex items-center justify-end gap-1 ml-auto"
-                      >
-                        <span>Details</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredAssets.map((asset) => {
+                  const isSelected = selectedAssetIds.has(asset.id);
+                  return (
+                    <tr
+                      key={asset.id}
+                      onClick={() => handleSelectAsset(asset)}
+                      className={`transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <td className="px-3 py-3 text-center" onClick={(e) => toggleSelectAsset(asset.id, e)}>
+                        <button
+                          type="button"
+                          className="text-slate-400 hover:text-sky-600 transition"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 font-mono font-bold text-sky-600">
+                        {asset.assetTag}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900 dark:text-white">
+                          {asset.manufacturer} {asset.model}
+                        </div>
+                        <div className="text-[10px] text-slate-400">{asset.assetType} - {asset.operatingSystem || 'Hardware'}</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-500">
+                        {asset.serialNumber}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        <div className="font-medium">{asset.department}</div>
+                        <div className="text-[10px] text-slate-400">{asset.location}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {asset.assignedUser || <span className="text-slate-400 italic">Department shared</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            asset.condition === 'Excellent' || asset.condition === 'Good'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                              : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
+                          }`}
+                        >
+                          {asset.condition}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            asset.status === 'Active'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {asset.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            title="Download scannable QR Code as JPEG image with Name, Serial Number, and Department details rendered below"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await downloadAssetQrJpeg(asset);
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold transition cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>QR JPEG</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            title="Generate & Print Physical QR Code Tag Label"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQrLabelAsset(asset);
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-sky-950/60 text-slate-700 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 border border-slate-200 dark:border-slate-700 font-semibold transition cursor-pointer"
+                          >
+                            <QrCode className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                            <span>Print Label</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectAsset(asset);
+                            }}
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -388,9 +649,18 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               {/* Asset QR Tag & Quick Barcode Preview */}
               <div className="flex flex-col sm:flex-row items-center justify-between p-4 rounded-xl bg-slate-900 text-white gap-4">
                 <div className="flex items-center gap-4">
-                  {/* Simulated High-Res QR code box */}
-                  <div className="w-20 h-20 bg-white p-2 rounded-xl flex items-center justify-center text-slate-950 shadow-inner">
-                    <QrCode className="w-16 h-16 text-slate-900" />
+                  {/* Generated Scannable High-Res QR code box */}
+                  <div className="w-20 h-20 bg-white p-1 rounded-xl flex items-center justify-center text-slate-950 shadow-inner overflow-hidden">
+                    {detailQrCodeDataUrl ? (
+                      <img
+                        src={detailQrCodeDataUrl}
+                        alt={`QR Code for ${selectedAsset.assetTag}`}
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <QrCode className="w-14 h-14 text-slate-900 animate-pulse" />
+                    )}
                   </div>
                   <div>
                     <div className="font-mono text-base font-black text-sky-400">{selectedAsset.assetTag}</div>
@@ -399,19 +669,42 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => {
-                      setNewDepartment(selectedAsset.department);
-                      setNewLocation(selectedAsset.location);
-                      setNewAssignedUser(selectedAsset.assignedUser || '');
-                      setTransferModalOpen(true);
+                    type="button"
+                    onClick={async () => {
+                      if (selectedAsset) await downloadAssetQrJpeg(selectedAsset);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer shadow-sm transition"
+                    title="Download QR code as JPEG image with Name, Serial Number, and Assigned Department rendered below the QR code image"
                   >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    <span>Transfer / Reassign</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download QR (JPEG)</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setQrLabelAsset(selectedAsset)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer shadow-sm transition"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print QR Label</span>
+                  </button>
+
+                  {canManageAssets && (
+                    <button
+                      onClick={() => {
+                        setNewDepartment(selectedAsset.department);
+                        setNewLocation(selectedAsset.location);
+                        setNewAssignedUser(selectedAsset.assignedUser || '');
+                        setTransferModalOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold cursor-pointer transition"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Transfer / Reassign</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -561,7 +854,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
       {/* QR Code Tag Scanner / Lookup Modal */}
       {qrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <QrCode className="w-5 h-5 text-sky-600" />
@@ -573,26 +866,34 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             </div>
 
             <p className="text-slate-500">
-              Enter or scan the hospital asset barcode (e.g. <strong>HIT-AST-000101</strong>) to retrieve instant offline records.
+              Paste or scan barcode/QR code data (or enter an Asset Tag / Serial Number like <strong>HIT-AST-000101</strong>) to retrieve instant offline hardware specifications.
             </p>
 
             <div className="space-y-2">
-              <input
-                type="text"
-                placeholder="HIT-AST-XXXXXX"
+              <textarea
+                rows={3}
+                placeholder="Scan or paste QR code content or Asset Tag..."
                 value={scannedTagInput}
                 onChange={(e) => setScannedTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleScanTag()}
-                className="w-full px-3 py-2 text-center text-sm font-mono font-bold uppercase bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleScanTag();
+                  }
+                }}
+                className="w-full px-3 py-2 text-xs font-mono font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
               />
 
-              <div className="flex flex-wrap gap-1 justify-center pt-2">
+              <div className="flex flex-wrap gap-1 justify-center pt-1">
                 <span className="text-[10px] text-slate-400">Quick Samples:</span>
-                {assets.slice(0, 3).map((a) => (
+                {assets.slice(0, 4).map((a) => (
                   <button
                     key={a.id}
-                    onClick={() => setScannedTagInput(a.assetTag)}
-                    className="text-[10px] font-mono bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded cursor-pointer hover:bg-sky-100"
+                    onClick={() => {
+                      setScannedTagInput(a.assetTag);
+                      handleScanTag(a.assetTag);
+                    }}
+                    className="text-[10px] font-mono bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800 px-1.5 py-0.5 rounded cursor-pointer hover:bg-sky-100"
                   >
                     {a.assetTag}
                   </button>
@@ -601,11 +902,68 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             </div>
 
             <button
-              onClick={handleScanTag}
-              className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+              onClick={() => handleScanTag()}
+              className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs cursor-pointer shadow-sm transition"
             >
               Search Asset Record
             </button>
+
+            {scannedAssetFound && (
+              <div className="mt-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 text-xs">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Hardware Record Verified</span>
+                  </div>
+                  <span className="font-mono text-xs font-black text-emerald-700 dark:text-emerald-400">
+                    {scannedAssetFound.assetTag}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Model:</span>
+                    <span className="font-semibold">{scannedAssetFound.manufacturer} {scannedAssetFound.model}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Serial (S/N):</span>
+                    <span className="font-mono">{scannedAssetFound.serialNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Location:</span>
+                    <span>{scannedAssetFound.department} ({scannedAssetFound.location})</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Custodian:</span>
+                    <span>{scannedAssetFound.assignedUser || 'Shared Ward Device'}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/60">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQrLabelAsset(scannedAssetFound);
+                      setQrModalOpen(false);
+                    }}
+                    className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print QR Label / Download JPEG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectAsset(scannedAssetFound);
+                      setQrModalOpen(false);
+                    }}
+                    className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-[11px] cursor-pointer"
+                  >
+                    View Details
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -775,6 +1133,48 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* QR Code Physical Label Modal (Single Asset) */}
+      {qrLabelAsset && (
+        <AssetQRLabelModal
+          isOpen={true}
+          onClose={() => setQrLabelAsset(null)}
+          asset={qrLabelAsset}
+          hospitalName="REGIONAL HOSPITAL IT UNIT"
+        />
+      )}
+
+      {/* QR Code Physical Labels Batch Modal (Multi-Asset) */}
+      {batchQRModalOpen && (
+        <AssetQRLabelModal
+          isOpen={true}
+          onClose={() => setBatchQRModalOpen(false)}
+          asset={null}
+          selectedAssets={
+            selectedAssetIds.size > 0
+              ? assets.filter((a) => selectedAssetIds.has(a.id))
+              : filteredAssets
+          }
+          hospitalName="REGIONAL HOSPITAL IT UNIT"
+        />
+      )}
+
+      {/* Bulk Upload IT Assets Modal (CSV / Excel template) */}
+      <AssetBulkUploadModal
+        isOpen={bulkUploadModalOpen}
+        onClose={() => setBulkUploadModalOpen(false)}
+        currentUser={currentUser}
+        existingAssets={assets}
+        onSuccess={(created) => {
+          onRefresh();
+        }}
+        onOpenQRBatchPrint={(created) => {
+          setSelectedAssetIds(new Set(created.map((a) => a.id)));
+          setBatchQRModalOpen(true);
+        }}
+      />
+        </>
       )}
     </div>
   );

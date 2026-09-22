@@ -14,6 +14,7 @@ import { type ProcurementRequest, type User as UserType } from '../types';
 import { getAllFromStore, putToStore, generateUUID, getDeviceId } from '../services/localDatabaseService';
 import { auditService } from '../services/auditService';
 import { syncService } from '../services/syncService';
+import { authService } from '../services/authService';
 
 interface ProcurementViewProps {
   currentUser: UserType | null;
@@ -22,6 +23,11 @@ interface ProcurementViewProps {
 export const ProcurementView: React.FC<ProcurementViewProps> = ({ currentUser }) => {
   const [requests, setRequests] = useState<ProcurementRequest[]>([]);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  // Permission check: strictly Super Admin, IT staff, Procurement Officer & Department Heads can submit/approve
+  // Auditor and Hospital Management are read-only
+  const canManageProcurement = authService.canManageProcurement(currentUser);
+  const isReadOnly = authService.isReadOnlyAuditorOrManagement(currentUser);
 
   // Form state
   const [itemName, setItemName] = useState('');
@@ -107,13 +113,19 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({ currentUser })
           </p>
         </div>
 
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Requisition</span>
-        </button>
+        {!isReadOnly ? (
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Requisition</span>
+          </button>
+        ) : (
+          <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+            Auditor / Management View Only
+          </span>
+        )}
       </div>
 
       {/* Requests Grid */}
@@ -165,20 +177,28 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({ currentUser })
             {/* Approval Controls */}
             {req.status === 'Submitted' && (
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
-                <button
-                  onClick={() => handleUpdateStatus(req, 'Ordered')}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Approve & Order</span>
-                </button>
-                <button
-                  onClick={() => handleUpdateStatus(req, 'Rejected')}
-                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
-                >
-                  <XCircle className="w-3.5 h-3.5" />
-                  <span>Reject</span>
-                </button>
+                {canManageProcurement ? (
+                  <>
+                    <button
+                      onClick={() => handleUpdateStatus(req, 'Ordered')}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Approve & Order</span>
+                    </button>
+                    <button
+                      onClick={() => handleUpdateStatus(req, 'Rejected')}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Reject</span>
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                    Pending Procurement / IT Approval
+                  </span>
+                )}
               </div>
             )}
           </div>

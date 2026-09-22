@@ -19,6 +19,7 @@ import {
   type User as UserType,
 } from '../types';
 import { incidentService } from '../services/incidentService';
+import { authService } from '../services/authService';
 
 interface IncidentsViewProps {
   incidents?: Incident[];
@@ -34,6 +35,9 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [timelineUpdate, setTimelineUpdate] = useState('');
+
+  // Permission check: strictly Super Admin and IT unit staff can declare incidents and post updates/RCA
+  const canManageIncidents = authService.canManageIncidents(currentUser);
 
   // Declare modal state
   const [declareModalOpen, setDeclareModalOpen] = useState(false);
@@ -150,13 +154,19 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => setDeclareModalOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Declare Major Incident</span>
-        </button>
+        {canManageIncidents ? (
+          <button
+            onClick={() => setDeclareModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Declare Major Incident</span>
+          </button>
+        ) : (
+          <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+            Auditor / Management View Only
+          </span>
+        )}
       </div>
 
       {/* Incidents Grid */}
@@ -282,12 +292,18 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                   <span className="text-amber-800 dark:text-amber-200 font-medium">
                     Incident is currently ongoing. Coordinate recovery with team.
                   </span>
-                  <button
-                    onClick={() => setResolveModalOpen(true)}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
-                  >
-                    Resolve & Conduct RCA
-                  </button>
+                  {canManageIncidents ? (
+                    <button
+                      onClick={() => setResolveModalOpen(true)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                    >
+                      Resolve & Conduct RCA
+                    </button>
+                  ) : (
+                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                      Ongoing • IT Action Required
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -311,23 +327,29 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                 </div>
 
                 {/* Add Timeline Entry */}
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="text"
-                    placeholder="Broadcast an update on cable check, switch reboot, or status..."
-                    value={timelineUpdate}
-                    onChange={(e) => setTimelineUpdate(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTimeline()}
-                    className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500"
-                  />
-                  <button
-                    onClick={handleAddTimeline}
-                    disabled={!timelineUpdate.trim()}
-                    className="p-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 cursor-pointer"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
+                {canManageIncidents ? (
+                  <div className="flex items-center gap-2 pt-2">
+                    <input
+                      type="text"
+                      placeholder="Broadcast an update on cable check, switch reboot, or status..."
+                      value={timelineUpdate}
+                      onChange={(e) => setTimelineUpdate(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddTimeline()}
+                      className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500"
+                    />
+                    <button
+                      onClick={handleAddTimeline}
+                      disabled={!timelineUpdate.trim()}
+                      className="p-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 cursor-pointer"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-[11px] text-slate-500 text-center border border-slate-200 dark:border-slate-800">
+                    Live timeline broadcasts restricted to IT Response Engineers & Super Admin.
+                  </div>
+                )}
               </div>
             </div>
           </div>

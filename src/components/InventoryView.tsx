@@ -17,6 +17,7 @@ import {
   type User as UserType,
 } from '../types';
 import { inventoryService } from '../services/inventoryService';
+import { authService } from '../services/authService';
 
 interface InventoryViewProps {
   inventory?: InventoryItem[];
@@ -35,6 +36,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [activeTab, setActiveTab] = useState<'STOCK' | 'TRANSACTIONS'>('STOCK');
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Permission check: strictly Super Admin and IT staff (or Procurement) can manage stock; Auditor/Management are read-only
+  const canManageInventory = authService.canManageInventory(currentUser);
 
   // Transaction modal state
   const [txModalOpen, setTxModalOpen] = useState(false);
@@ -166,13 +170,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={() => setAddItemModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Catalog Item</span>
-          </button>
+          {canManageInventory ? (
+            <button
+              onClick={() => setAddItemModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Catalog Item</span>
+            </button>
+          ) : (
+            <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+              Auditor / Management View Only
+            </span>
+          )}
         </div>
       </div>
 
@@ -238,20 +248,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           {item.location}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => handleOpenTx(item, 'Stock Issued')}
-                              className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 text-sky-700 dark:text-sky-300 font-semibold cursor-pointer"
-                            >
-                              Issue to Ward
-                            </button>
-                            <button
-                              onClick={() => handleOpenTx(item, 'Stock Received')}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 font-semibold cursor-pointer"
-                            >
-                              Receive
-                            </button>
-                          </div>
+                          {canManageInventory ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenTx(item, 'Stock Issued')}
+                                className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 text-sky-700 dark:text-sky-300 font-semibold cursor-pointer"
+                              >
+                                Issue to Ward
+                              </button>
+                              <button
+                                onClick={() => handleOpenTx(item, 'Stock Received')}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 font-semibold cursor-pointer"
+                              >
+                                Receive
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 font-medium text-[11px]">
+                              Stock Managed by IT/Stores
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );

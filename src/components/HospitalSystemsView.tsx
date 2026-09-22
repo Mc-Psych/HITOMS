@@ -13,21 +13,28 @@ import {
   Clock,
   Wifi,
 } from 'lucide-react';
-import { type HospitalSystem } from '../types';
+import { type HospitalSystem, type User } from '../types';
 import { putToStore } from '../services/localDatabaseService';
+import { authService } from '../services/authService';
 
 interface HospitalSystemsViewProps {
   systems: HospitalSystem[];
+  currentUser?: User | null;
   onRefresh: () => void;
 }
 
 export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
   systems,
+  currentUser,
   onRefresh,
 }) => {
   const [testingId, setTestingId] = useState<string | null>(null);
 
+  // Strictly only Super Admin and IT unit staff can run ping tests
+  const canPing = authService.canRunPingTest(currentUser);
+
   const handleTestSystem = async (sys: HospitalSystem) => {
+    if (!canPing) return;
     setTestingId(sys.id);
     await new Promise((r) => setTimeout(r, 500));
 
@@ -46,6 +53,7 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
   };
 
   const handleTestAll = async () => {
+    if (!canPing) return;
     for (const sys of systems) {
       await handleTestSystem(sys);
     }
@@ -64,13 +72,16 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleTestAll}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition cursor-pointer"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Ping All Endpoints</span>
-        </button>
+        {canPing && (
+          <button
+            id="ping-all-endpoints-btn"
+            onClick={handleTestAll}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Ping All Endpoints</span>
+          </button>
+        )}
       </div>
 
       {/* Systems Grid */}
@@ -134,14 +145,20 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
               </div>
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => handleTestSystem(sys)}
-                  disabled={testingId === sys.id}
-                  className="w-full py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${testingId === sys.id ? 'animate-spin' : ''}`} />
-                  <span>{testingId === sys.id ? 'Checking Ping & Port...' : 'Run Local Ping Test'}</span>
-                </button>
+                {canPing ? (
+                  <button
+                    onClick={() => handleTestSystem(sys)}
+                    disabled={testingId === sys.id}
+                    className="w-full py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${testingId === sys.id ? 'animate-spin' : ''}`} />
+                    <span>{testingId === sys.id ? 'Checking Ping & Port...' : 'Run Local Ping Test'}</span>
+                  </button>
+                ) : (
+                  <div className="text-[11px] text-slate-400 py-1.5 px-2 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-center font-medium">
+                    Telemetry Active • IT Managed
+                  </div>
+                )}
               </div>
             </div>
           );

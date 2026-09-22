@@ -23,6 +23,7 @@ export interface SyncMetadata {
 export interface User extends SyncMetadata {
   id: string; // UUID or Firebase UID
   fullName: string;
+  username?: string; // Surname or custom handle
   email: string;
   phone: string;
   photoURL?: string;
@@ -34,8 +35,11 @@ export interface User extends SyncMetadata {
   updatedAt: string;
   lastLoginAt: string;
   offlineAccessAllowed?: boolean;
+  password?: string; // Direct password or initial default password
   passwordHash?: string; // Salted SHA-256 for offline auth
   passwordSalt?: string;
+  mustChangePasswordOnFirstLogin?: boolean;
+  lastPasswordChangeAt?: string;
 }
 
 export interface Department extends SyncMetadata {
@@ -149,6 +153,17 @@ export interface Ticket extends SyncMetadata {
   attachments: Attachment[];
   comments: TicketComment[];
   resolution?: TicketResolution | null;
+  isGeneralIssue?: boolean; // General hospital-wide issue reportable and confirmable by any staff
+  confirmationRating?: {
+    rating: number; // 1 to 5 satisfaction rating
+    feedback?: string;
+    confirmedBy: {
+      uid: string;
+      name: string;
+      department: string;
+    };
+    confirmedAt: string;
+  } | null;
   sla: SlaInfo;
   createdAt: string;
   updatedAt: string;
@@ -201,6 +216,42 @@ export interface Asset extends SyncMetadata {
   macAddress?: string;
   specifications: string;
   qrCodeData: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SubscriptionCategory =
+  | 'Antivirus & Endpoint Security'
+  | 'Office & Productivity'
+  | 'Hospital & Clinical (LHIMS)'
+  | 'Network & Satellite (Starlink)'
+  | 'Operating System & Server'
+  | 'Backup & Cloud'
+  | 'Communication & VoIP';
+
+export type SubscriptionBillingCycle = 'Monthly' | 'Quarterly' | 'Annual' | 'Perpetual / One-Time';
+export type SubscriptionStatus = 'Active' | 'Expiring Soon' | 'Expired' | 'Pending Renewal' | 'Cancelled';
+
+export interface SoftwareSubscription extends SyncMetadata {
+  id: string;
+  subscriptionCode: string; // e.g. SUB-2026-001
+  softwareName: string; // e.g. Kaspersky Endpoint Security, Microsoft 365 Business Standard
+  category: SubscriptionCategory;
+  vendor: string; // e.g. Kaspersky, Microsoft, Starlink, VMware
+  licenseKey?: string;
+  licenseType: 'Per User / Seat' | 'Per Device' | 'Site License (Unlimited)' | 'Server Core';
+  totalSeats: number;
+  allocatedSeats: number;
+  purchaseDate: string;
+  renewalDate: string;
+  cost: number;
+  currency: string;
+  billingCycle: SubscriptionBillingCycle;
+  status: SubscriptionStatus;
+  autoRenew: boolean;
+  assignedDepartment?: string;
+  primaryAdminContact?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -314,10 +365,23 @@ export interface HospitalSystem extends SyncMetadata {
 
 export type NetworkConnectionType = 'Fiber' | 'Ethernet Cat6' | 'Wireless 5GHz/6GHz' | 'Satellite RF' | 'SFP+ 10G';
 
+export type NetworkDeviceType =
+  | 'Starlink Terminal'
+  | 'Router'
+  | 'Firewall'
+  | 'Core Switch'
+  | 'Distribution Switch'
+  | 'Switch'
+  | 'Access Point'
+  | 'Server'
+  | 'Workstation'
+  | 'Laptop'
+  | 'Printer';
+
 export interface NetworkDevice extends SyncMetadata {
   id: string;
   deviceName: string;
-  deviceType: 'Router' | 'Core Switch' | 'Distribution Switch' | 'Access Point' | 'Server' | 'Firewall' | 'Starlink Terminal' | 'Switch' | 'Workstation';
+  deviceType: NetworkDeviceType;
   manufacturer: string;
   model: string;
   serialNumber: string;
@@ -456,7 +520,11 @@ export interface KnowledgeArticle extends SyncMetadata {
 
 export interface AppNotification {
   id: string;
-  userId: string; // 'ALL' or specific uid
+  userId: string; // 'ALL' or specific uid or 'DEPT:DeptName'
+  targetType?: 'ALL' | 'UNIT' | 'USER';
+  targetUnit?: string;
+  senderName?: string;
+  senderRole?: string;
   title: string;
   message: string;
   type: 'info' | 'warning' | 'error' | 'success';
@@ -544,4 +612,8 @@ export interface SystemSettings {
   offlinePolicy: OfflineSecurityPolicy;
   slaRules: Record<TicketPriority, SlaRule>;
   lastSuccessfulSync: string | null;
+  mandatoryPasswordChangeOnFirstLogin?: boolean;
+  customTexts?: Record<string, string>;
+  rolePermissionsOverrides?: Record<string, string[]>;
+  userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
 }

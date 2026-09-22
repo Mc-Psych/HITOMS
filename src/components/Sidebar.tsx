@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   LifeBuoy,
@@ -17,9 +17,13 @@ import {
   RefreshCw,
   Menu,
   X,
+  ChevronsLeft,
+  ChevronsRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { type Role, type User, type SystemSettings } from '../types';
-import { authService } from '../services/authService';
+import { authService, getUserInitials } from '../services/authService';
 
 export interface NavItem {
   id: string;
@@ -38,6 +42,8 @@ interface SidebarProps {
   openTicketCount?: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -49,7 +55,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   openTicketCount = 0,
   mobileOpen,
   onCloseMobile,
+  isCollapsed: externalIsCollapsed,
+  onToggleCollapse,
 }) => {
+  const [internalIsCollapsed, setInternalIsCollapsed] = useState(false);
+  const isCollapsed = externalIsCollapsed !== undefined ? externalIsCollapsed : internalIsCollapsed;
+
+  const handleToggle = () => {
+    if (onToggleCollapse) {
+      onToggleCollapse();
+    } else {
+      setInternalIsCollapsed(!internalIsCollapsed);
+    }
+  };
+
   const role = currentUser?.role || 'STAFF_USER';
 
   // Navigation Items mapped to roles
@@ -86,7 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'network',
       label: 'Network & Topology',
       icon: Network,
-      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'HOSPITAL_MANAGEMENT', 'AUDITOR'],
+      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'],
     },
     {
       id: 'incidents',
@@ -104,7 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'procurement',
       label: 'IT Procurement',
       icon: ShoppingCart,
-      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'HOSPITAL_MANAGEMENT', 'DEPARTMENT_HEAD', 'PROCUREMENT_OFFICER', 'AUDITOR'],
+      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'HOSPITAL_MANAGEMENT', 'DEPARTMENT_HEAD', 'PROCUREMENT_OFFICER', 'AUDITOR'],
     },
     {
       id: 'knowledge',
@@ -150,31 +169,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const content = (
-    <div className="flex flex-col h-full bg-slate-900 border-r border-slate-800 w-64 text-slate-300">
-      {/* Hospital Identity Header inside Sidebar */}
-      <div className="p-4 border-b border-slate-800 flex items-center gap-3">
-        {systemSettings?.hospitalLogo ? (
-          <img
-            src={systemSettings.hospitalLogo}
-            alt="Hospital Logo"
-            referrerPolicy="no-referrer"
-            className="w-8 h-8 rounded-lg object-contain bg-white p-0.5 border border-slate-700 shrink-0"
-          />
-        ) : (
-          <div className="w-8 h-8 rounded-lg bg-sky-600 flex items-center justify-center text-white font-black text-sm shrink-0">
-            H
-          </div>
+    <div
+      className={`flex flex-col h-full bg-slate-900 border-r border-slate-800 text-slate-300 transition-all duration-200 select-none ${
+        isCollapsed ? 'w-16' : 'w-64'
+      }`}
+    >
+      {/* Top Collapse / Expand Header Bar */}
+      <div className="p-2.5 border-b border-slate-800 flex items-center justify-between">
+        {!isCollapsed && (
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 pl-2">
+            Navigation
+          </span>
         )}
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Hospital Facility</div>
-          <div className="text-xs font-extrabold text-white mt-0.5 truncate">
-            {systemSettings?.hospitalName || 'St. Jude General Hospital'}
-          </div>
-          <div className="text-[10px] text-sky-400 mt-0.5 flex items-center gap-1.5 font-medium truncate">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block shrink-0"></span>
-            <span className="truncate">{systemSettings?.regionOrDistrict || 'Local Node: HITOMS-01'}</span>
-          </div>
-        </div>
+        <button
+          onClick={handleToggle}
+          className={`p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer ${
+            isCollapsed ? 'mx-auto' : ''
+          }`}
+          title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+        >
+          {isCollapsed ? (
+            <ChevronsRight className="w-4 h-4 text-sky-400" />
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white">
+              <ChevronsLeft className="w-4 h-4" />
+            </div>
+          )}
+        </button>
       </div>
 
       {/* Nav List */}
@@ -186,30 +207,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               id={`nav-item-${item.id}`}
+              title={isCollapsed ? item.label : undefined}
               onClick={() => {
                 onNavigate(item.id);
                 onCloseMobile();
               }}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+              className={`w-full flex items-center rounded-xl text-xs font-medium transition cursor-pointer relative ${
+                isCollapsed
+                  ? 'justify-center p-2.5'
+                  : 'justify-between px-3 py-2.5'
+              } ${
                 isActive
                   ? 'bg-sky-600 text-white shadow-sm font-semibold'
                   : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <div className="flex items-center gap-2.5">
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
+              <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5'}`}>
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                {!isCollapsed && <span className="truncate">{item.label}</span>}
               </div>
+
               {item.badgeCount !== undefined && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    isActive
-                      ? 'bg-white text-sky-700'
-                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}
-                >
-                  {item.badgeCount}
-                </span>
+                isCollapsed ? (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-900" />
+                ) : (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                      isActive
+                        ? 'bg-white text-sky-700'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    }`}
+                  >
+                    {item.badgeCount}
+                  </span>
+                )
               )}
             </button>
           );
@@ -217,10 +248,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* User Status Footer */}
-      <div className="p-3 border-t border-slate-800 text-[11px] bg-slate-950/50">
-        <div className="text-slate-400">Signed In As</div>
-        <div className="font-semibold text-slate-200 truncate">{currentUser?.fullName}</div>
-        <div className="text-sky-400 font-mono text-[10px] mt-0.5">{currentUser?.department}</div>
+      <div className="p-3 border-t border-slate-800 bg-slate-950/50">
+        {isCollapsed ? (
+          <div
+            className="w-8 h-8 mx-auto rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider cursor-default shadow-sm"
+            title={`${currentUser?.fullName} (${currentUser?.role}) - ${currentUser?.department}`}
+          >
+            {getUserInitials(currentUser?.fullName || '')}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs shrink-0 tracking-wider">
+              {getUserInitials(currentUser?.fullName || '')}
+            </div>
+            <div className="min-w-0 flex-1 text-[11px]">
+              <div className="font-semibold text-slate-200 truncate">{currentUser?.fullName}</div>
+              <div className="text-sky-400 font-mono text-[10px] truncate">{currentUser?.department}</div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

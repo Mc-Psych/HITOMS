@@ -55,6 +55,8 @@ import { BackupsView } from './components/BackupsView';
 import { SyncDashboardView, type SyncLog } from './components/SyncDashboardView';
 import { AdministrationView } from './components/AdministrationView';
 import { AuditLogsView } from './components/AuditLogsView';
+import { LoginModal } from './components/LoginModal';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 
 export default function App() {
   const [initialized, setInitialized] = useState(false);
@@ -62,6 +64,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+  const [passwordChangeUser, setPasswordChangeUser] = useState<User | null>(null);
 
   // Core Data States
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -179,6 +184,22 @@ export default function App() {
     }
   };
 
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentUser(null);
+    setLoginModalOpen(true);
+  };
+
+  const handleLoginSuccess = async (user: User, mustChangePassword: boolean) => {
+    setCurrentUser(user);
+    setLoginModalOpen(false);
+    await refreshAllData();
+    if (mustChangePassword) {
+      setPasswordChangeUser(user);
+      setChangePasswordModalOpen(true);
+    }
+  };
+
   // Quick ticket creation
   const handleQuickCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +226,16 @@ export default function App() {
       console.error(err);
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (quickTicketOpen) setQuickTicketOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [quickTicketOpen]);
 
   if (!initialized) {
     return (
@@ -233,6 +264,8 @@ export default function App() {
         systemSettings={systemSettings}
         onSwitchUser={handleSwitchUser}
         onNavigate={setCurrentView}
+        onOpenLoginModal={() => setLoginModalOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Offline Status Simulation Notice */}
@@ -450,8 +483,14 @@ export default function App() {
 
       {/* Quick Ticket Modal */}
       {quickTicketOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setQuickTicketOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white text-base">
                 <LifeBuoy className="w-5 h-5 text-sky-600" />
@@ -557,6 +596,34 @@ export default function App() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Hospital Staff Login Screen Modal */}
+      <LoginModal
+        isOpen={loginModalOpen || currentUser === null}
+        onClose={() => {
+          if (currentUser !== null) {
+            setLoginModalOpen(false);
+          }
+        }}
+        onLoginSuccess={handleLoginSuccess}
+        allUsers={allUsers}
+        systemSettings={systemSettings}
+        allowClose={currentUser !== null}
+      />
+
+      {/* Mandatory / Self-Service Change Password Modal */}
+      {passwordChangeUser && (
+        <ChangePasswordModal
+          isOpen={changePasswordModalOpen}
+          user={passwordChangeUser}
+          onClose={() => setChangePasswordModalOpen(false)}
+          onSuccess={() => {
+            setChangePasswordModalOpen(false);
+            refreshAllData();
+          }}
+          systemSettings={systemSettings}
+        />
       )}
     </div>
   );

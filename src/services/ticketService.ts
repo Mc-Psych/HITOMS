@@ -42,6 +42,7 @@ class TicketService {
       location: string;
       assetId?: string | null;
       attachments?: Attachment[];
+      isGeneralIssue?: boolean;
     },
     user: User
   ): Promise<Ticket> {
@@ -71,6 +72,7 @@ class TicketService {
       status: 'New',
       department: data.department,
       location: data.location,
+      isGeneralIssue: Boolean(data.isGeneralIssue),
       reportedBy: {
         uid: user.id,
         name: user.fullName,
@@ -83,6 +85,7 @@ class TicketService {
       attachments: data.attachments || [],
       comments: [],
       resolution: null,
+      confirmationRating: null,
       sla: {
         responseDue,
         resolutionDue,
@@ -245,6 +248,68 @@ class TicketService {
       ticket.reportedBy.uid,
       ticket.id
     );
+
+    await syncService.enqueueOperation('tickets', ticket.id, 'UPDATE', ticket);
+    return ticket;
+  }
+
+  public async closeTicketWithRating(
+    ticketId: string,
+    rating: number,
+    feedback: string,
+    actor: User
+  ): Promise<Ticket> {
+    const ticket = await this.getTicketById(ticketId);
+    if (!ticket) throw new Error('Ticket not found');
+
+    const isGeneral = Boolean(ticket.isGeneralIssue);
+    const isSameDept = actor.department.toLowerCase() === ticket.department.toLowerCase();
+    const isReporter = actor.id === ticket.reportedBy.uid;
+    const isSuper = actor.role === 'SUPER_ADMIN';
+
+    if (!isGeneral && !isSameDept && !isReporter && !isSuper) {
+      throw new Error(
+        `Access Denied: Only staff from the reporting unit (${ticket.department}) can confirm this resolution and rate IT service.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    ticket.status = 'Closed';
+    ticket.closedAt = now;
+    ticket.updatedAt = now;
+    ticket.confirmationRating = {
+      rating,
+      feedback: feedback || '',
+      confirmedBy: {
+        uid: actor.id,
+        name: actor.fullName,
+        department: actor.department,
+      },
+      confirmedAt: now,
+    };
+    ticket._syncStatus = 'PENDING_SYNC';
+    ticket._syncVersion = (ticket._syncVersion || 1) + 1;
+
+    await putToStore('tickets', ticket);
+
+    await auditService.logAction('CONFIRM_AND_CLOSE_TICKET', 'Tickets', ticket.id, null, {
+      rating,
+      feedback,
+      confirmedBy: actor.fullName,
+      department: actor.department,
+      isGeneralIssue: ticket.isGeneralIssue,
+    });
+
+    if (ticket.assignedTo) {
+      await notificationService.notify(
+        `Ticket Closed & Rated: ${ticket.ticketNumber}`,
+        `Rated ${rating}/5 by ${actor.fullName} (${actor.department}). Feedback: ${feedback || 'Resolution confirmed.'}`,
+        'info',
+        'Tickets',
+        ticket.assignedTo.uid,
+        ticket.id
+      );
+    }
 
     await syncService.enqueueOperation('tickets', ticket.id, 'UPDATE', ticket);
     return ticket;

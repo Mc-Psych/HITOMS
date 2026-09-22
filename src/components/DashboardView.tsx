@@ -79,23 +79,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Welcome Banner & Quick Action */}
+      {/* Welcome Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 border border-slate-800 rounded-2xl p-5 text-white shadow-sm">
         <div>
           <h1 className="text-xl sm:text-2xl font-black tracking-tight">Hospital IT Operations Center</h1>
           <p className="text-xs sm:text-sm text-slate-300 mt-1">
             Real-time local node telemetry for St. Jude Hospital. All services operating locally on LAN.
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            id="dash-create-ticket-btn"
-            onClick={onOpenCreateTicket}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Report IT Issue</span>
-          </button>
         </div>
       </div>
 

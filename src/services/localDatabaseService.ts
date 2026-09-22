@@ -20,9 +20,10 @@ import {
   type SyncQueueItem,
   type SyncConflict,
   type SystemSettings,
+  type SoftwareSubscription,
 } from '../types';
 
-const DB_NAME = 'HITOMS_Local_Database_v1';
+const DB_NAME = 'HITOMS_Local_Database_v2';
 const DB_VERSION = 1;
 
 export const STORE_NAMES = {
@@ -31,6 +32,7 @@ export const STORE_NAMES = {
   locations: 'locations',
   tickets: 'tickets',
   assets: 'assets',
+  subscriptions: 'subscriptions',
   assetHistory: 'assetHistory',
   maintenance: 'maintenance',
   incidents: 'incidents',
@@ -105,6 +107,12 @@ export function getDB(): Promise<IDBDatabase> {
           s.createIndex('assetTag', 'assetTag', { unique: true });
           s.createIndex('status', 'status', { unique: false });
           s.createIndex('department', 'department', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.subscriptions)) {
+          const s = db.createObjectStore(STORE_NAMES.subscriptions, { keyPath: 'id' });
+          s.createIndex('subscriptionCode', 'subscriptionCode', { unique: true });
+          s.createIndex('category', 'category', { unique: false });
+          s.createIndex('status', 'status', { unique: false });
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.assetHistory)) {
           const s = db.createObjectStore(STORE_NAMES.assetHistory, { keyPath: 'id' });
