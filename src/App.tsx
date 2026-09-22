@@ -289,6 +289,22 @@ export default function App() {
     );
   }
 
+  // Default page on load: Hospital Staff Login Screen when unauthenticated
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-900 dark:bg-slate-950 text-slate-100 flex items-center justify-center p-4 antialiased">
+        <LoginModal
+          isOpen={true}
+          onClose={() => {}}
+          onLoginSuccess={handleLoginSuccess}
+          allUsers={allUsers}
+          systemSettings={systemSettings}
+          allowClose={false}
+        />
+      </div>
+    );
+  }
+
   const openTicketsCount = (tickets || []).filter((t) => t.status !== 'Closed' && t.status !== 'Resolved').length;
 
   return (

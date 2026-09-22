@@ -296,13 +296,10 @@ class AuthService {
       }
     }
 
-    // Default to Super Admin for seamless development / QA access
-    const users = await getAllFromStore<User>('users');
-    const admin = users.find((u) => u.role === 'SUPER_ADMIN') || users[0] || null;
-    if (admin) {
-      await this.loginAs(admin.id);
-    }
-    return this.currentUser;
+    // Default to null so the Login Screen is always presented as the default page on app launch
+    this.currentUser = null;
+    this.notify();
+    return null;
   }
 
   public subscribe(listener: (user: User | null) => void): () => void {

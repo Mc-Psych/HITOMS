@@ -33,6 +33,84 @@ class TicketService {
     return getFromStore<Ticket>('tickets', id);
   }
 
+  /**
+   * Determine the appropriate IT technician or IT Unit team to automatically assign an incoming ticket
+   * based on ticket category and specialist role mapping.
+   */
+  public async determineAutoAssignee(
+    category: TicketCategory,
+    department?: string
+  ): Promise<{ uid: string; name: string; email: string }> {
+    try {
+      const allUsers = await getAllFromStore<User>('users');
+      const itUsers = allUsers.filter(
+        (u) =>
+          u.status === 'Active' &&
+          (u.role === 'SUPER_ADMIN' ||
+            u.role === 'IT_ADMIN' ||
+            u.role === 'IT_OFFICER' ||
+            (u.department && u.department.toLowerCase().includes('it')))
+      );
+
+      if (itUsers.length > 0) {
+        let selectedTech: User | undefined;
+
+        switch (category) {
+          case 'Network':
+          case 'Internet':
+            // Route to Network Administrator or Senior IT Admin
+            selectedTech =
+              itUsers.find((u) => u.jobTitle.toLowerCase().includes('network')) ||
+              itUsers.find((u) => u.role === 'IT_ADMIN') ||
+              itUsers.find((u) => u.jobTitle.toLowerCase().includes('infrastructure'));
+            break;
+
+          case 'Server':
+          case 'Hospital System':
+          case 'Security':
+          case 'Email':
+            // Route to IT Systems Lead, Systems Admin, or Super Admin
+            selectedTech =
+              itUsers.find((u) => u.jobTitle.toLowerCase().includes('systems') || u.jobTitle.toLowerCase().includes('head')) ||
+              itUsers.find((u) => u.role === 'SUPER_ADMIN') ||
+              itUsers.find((u) => u.role === 'IT_ADMIN');
+            break;
+
+          case 'Hardware':
+          case 'Printer':
+          case 'Software':
+          case 'Account/Login':
+            // Route to IT Support Officer / Field Technician
+            selectedTech =
+              itUsers.find((u) => u.role === 'IT_OFFICER') ||
+              itUsers.find((u) => u.jobTitle.toLowerCase().includes('technician') || u.jobTitle.toLowerCase().includes('support'));
+            break;
+
+          default:
+            selectedTech = itUsers[0];
+            break;
+        }
+
+        if (selectedTech) {
+          return {
+            uid: selectedTech.id,
+            name: `${selectedTech.fullName} (${selectedTech.jobTitle || 'IT Unit'})`,
+            email: selectedTech.email,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[TicketService] Could not resolve user list for auto-assignment, using default IT Unit team:', err);
+    }
+
+    // Default Fallback
+    return {
+      uid: 'it-unit-team',
+      name: 'IT Operations Unit',
+      email: 'it-unit@hospital.local',
+    };
+  }
+
   public async createTicket(
     data: {
       title: string;
@@ -64,6 +142,9 @@ class TicketService {
     const responseDue = new Date(Date.now() + hours.response * 60 * 60 * 1000).toISOString();
     const resolutionDue = new Date(Date.now() + hours.resolution * 60 * 60 * 1000).toISOString();
 
+    // Automatically assign incoming ticket based on ticket category
+    const autoAssignee = await this.determineAutoAssignee(data.category, data.department);
+
     const newTicket: Ticket = {
       id,
       ticketNumber,
@@ -72,7 +153,7 @@ class TicketService {
       category: data.category,
       subcategory: data.subcategory,
       priority: data.priority,
-      status: 'New',
+      status: autoAssignee ? 'Assigned' : 'New',
       department: data.department,
       location: data.location,
       isGeneralIssue: Boolean(data.isGeneralIssue),
@@ -83,7 +164,8 @@ class TicketService {
         phone: user.phone,
         department: user.department,
       },
-      assignedTo: null,
+      assignedTo: autoAssignee,
+      assignedAt: autoAssignee ? now : undefined,
       assetId: data.assetId || null,
       attachments: data.attachments || [],
       comments: [],
@@ -111,11 +193,12 @@ class TicketService {
       title: data.title,
       priority: data.priority,
       department: data.department,
+      assignedTo: autoAssignee?.name,
     });
 
     await notificationService.notify(
-      `New Ticket: ${ticketNumber}`,
-      `[${data.priority}] ${data.title} reported by ${user.fullName} (${data.department})`,
+      `New Ticket #${ticketNumber} Auto-Assigned`,
+      `[${data.priority}] ${data.title} (${data.category}) automatically assigned to ${autoAssignee.name}`,
       data.priority === 'Critical' ? 'error' : 'info',
       'Tickets',
       'ALL',
