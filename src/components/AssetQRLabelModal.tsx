@@ -107,20 +107,21 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
 
   if (!isOpen || activeAssets.length === 0) return null;
 
-  // Render high-resolution JPEG data URL with details (Name, Serial, Assigned Department) below the QR image
+  // Render high-resolution JPEG data URL matching the exact print preview design
   const generateLabelJpegDataUrl = async (targetAsset: Asset): Promise<string> => {
     return renderAssetQrJpegDataUrl(targetAsset, {
       hospitalName,
+      labelSize,
       includeHospitalHeader,
       includeSerial,
       includeDeptLocation,
       includeCustodian,
       includeSecurityNotice,
-      scale: 2,
+      scale: 3,
     });
   };
 
-  // Download high-resolution JPEG Label for an asset
+  // Download high-resolution JPEG Label for an asset (Exact match to preview)
   const handleDownloadJPEG = async (targetAsset: Asset) => {
     setIsGeneratingJpeg(true);
     try {
@@ -138,7 +139,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
     }
   };
 
-  // Batch download all JPEG labels sequentially
+  // Batch download all JPEG labels sequentially (Exact match to preview)
   const handleDownloadAllJPEGs = async () => {
     setIsGeneratingJpeg(true);
     try {
@@ -188,7 +189,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
     window.print();
   };
 
-  // Generate & Download PDF Labels (Single or Multi-Asset Sheet)
+  // Generate & Download PDF Labels (Exact match to preview design for single & batch sheets)
   const handleDownloadPDF = async () => {
     setIsGeneratingPdf(true);
     try {
@@ -202,90 +203,26 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
       const pageHeight = pdf.internal.pageSize.getHeight();
 
       if (!isBatch && asset) {
-        // Single formatted printable badge page
-        const payload = asset.qrCodeData || `HITOMS-ASSET:${asset.assetTag}`;
-        const qrUrl = await QRCode.toDataURL(payload, { width: 400, margin: 1, errorCorrectionLevel: 'H' });
+        // Single formatted printable badge page matching exact preview
+        const labelDataUrl = await generateLabelJpegDataUrl(asset);
 
-        // Outer label border
-        const labelW = labelSize === 'compact' ? 70 : labelSize === 'large' ? 140 : 95;
-        const labelH = labelSize === 'compact' ? 36 : labelSize === 'large' ? 85 : 55;
+        const labelW = labelSize === 'compact' ? 80 : labelSize === 'large' ? 140 : 105;
+        // Maintain aspect ratio: Compact 2:1, Standard 1.82:1, Large 1.71:1
+        const labelH = labelSize === 'compact' ? 40 : labelSize === 'large' ? 82 : 58;
         const startX = (pageWidth - labelW) / 2;
-        const startY = 30;
+        const startY = (pageHeight - labelH) / 3;
 
-        // Badge Box
-        pdf.setDrawColor(15, 23, 42); // slate-900
-        pdf.setLineWidth(0.8);
-        pdf.roundedRect(startX, startY, labelW, labelH, 2, 2, 'S');
-
-        // Header
-        pdf.setFillColor(15, 23, 42);
-        pdf.rect(startX, startY, labelW, 8, 'F');
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(7.5);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(hospitalName.toUpperCase(), startX + labelW / 2, startY + 5.5, { align: 'center' });
-
-        // QR Code
-        const qrSize = labelSize === 'compact' ? 24 : labelSize === 'large' ? 45 : 36;
-        pdf.addImage(qrUrl, 'PNG', startX + 3, startY + 10, qrSize, qrSize);
-
-        // Details
-        const textX = startX + qrSize + 6;
-        let curY = startY + 14;
-
-        pdf.setTextColor(2, 132, 199); // sky-600
-        pdf.setFontSize(labelSize === 'compact' ? 10 : 13);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(asset.assetTag, textX, curY);
-
-        curY += 5;
-        pdf.setTextColor(15, 23, 42);
-        pdf.setFontSize(labelSize === 'compact' ? 7.5 : 8.5);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(`${asset.manufacturer} ${asset.model}`.substring(0, 24), textX, curY);
-
-        if (includeSerial && asset.serialNumber) {
-          curY += 4;
-          pdf.setFont('helvetica', 'normal');
-          pdf.setFontSize(7);
-          pdf.setTextColor(71, 85, 105);
-          pdf.text(`S/N: ${asset.serialNumber}`, textX, curY);
-        }
-
-        if (includeDeptLocation) {
-          curY += 4;
-          pdf.setFont('helvetica', 'normal');
-          pdf.setFontSize(7);
-          pdf.setTextColor(71, 85, 105);
-          pdf.text(`Dept: ${asset.department} - ${asset.location}`.substring(0, 26), textX, curY);
-        }
-
-        if (includeCustodian && asset.assignedUser) {
-          curY += 4;
-          pdf.setFont('helvetica', 'normal');
-          pdf.setFontSize(7);
-          pdf.setTextColor(71, 85, 105);
-          pdf.text(`User: ${asset.assignedUser}`.substring(0, 24), textX, curY);
-        }
-
-        if (includeSecurityNotice) {
-          pdf.setFontSize(5.5);
-          pdf.setTextColor(148, 163, 184);
-          pdf.text('PROPERTY OF HOSPITAL IT - DO NOT REMOVE', startX + labelW / 2, startY + labelH - 2, {
-            align: 'center',
-          });
-        }
-
+        pdf.addImage(labelDataUrl, 'JPEG', startX, startY, labelW, labelH);
         pdf.save(`ASSET-QR-${asset.assetTag}.pdf`);
       } else {
-        // Multi-Asset Batch Sheet (2 Columns x 5 Rows per page = 10 labels / page)
+        // Multi-Asset Batch Sheet (2 Columns x 4 or 5 Rows per page)
         const cols = 2;
-        const rows = 5;
-        const labelW = 90;
-        const labelH = 50;
+        const rows = labelSize === 'compact' ? 6 : labelSize === 'large' ? 3 : 5;
+        const labelW = labelSize === 'compact' ? 90 : labelSize === 'large' ? 90 : 92;
+        const labelH = labelSize === 'compact' ? 42 : labelSize === 'large' ? 52 : 50.5;
         const marginX = (pageWidth - cols * labelW) / 3;
-        const marginY = 15;
-        const gapY = 6;
+        const marginY = 12;
+        const gapY = 5;
 
         let index = 0;
         while (index < activeAssets.length) {
@@ -301,77 +238,9 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
           const x = marginX + col * (labelW + marginX);
           const y = marginY + row * (labelH + gapY);
 
-          // Outer Box
-          pdf.setDrawColor(203, 213, 225); // slate-300
-          pdf.setLineWidth(0.4);
-          pdf.roundedRect(x, y, labelW, labelH, 2, 2, 'S');
-
-          // Header
-          if (includeHospitalHeader) {
-            pdf.setFillColor(15, 23, 42);
-            pdf.rect(x, y, labelW, 7, 'F');
-            pdf.setTextColor(255, 255, 255);
-            pdf.setFontSize(6.5);
-            pdf.setFont('helvetica', 'bold');
-            pdf.text(hospitalName.toUpperCase(), x + labelW / 2, y + 4.8, { align: 'center' });
-          }
-
-          // Generate QR code
-          const payload = curAsset.qrCodeData || `HITOMS-ASSET:${curAsset.assetTag}`;
-          const qrUrl =
-            batchQrCodes[curAsset.assetTag] ||
-            (await QRCode.toDataURL(payload, { width: 260, margin: 1, errorCorrectionLevel: 'M' }));
-
-          const qrSize = 32;
-          const qrY = includeHospitalHeader ? y + 9 : y + 4;
-          pdf.addImage(qrUrl, 'PNG', x + 3, qrY, qrSize, qrSize);
-
-          // Details Column
-          const textX = x + qrSize + 6;
-          let textY = qrY + 5;
-
-          pdf.setTextColor(2, 132, 199);
-          pdf.setFontSize(10.5);
-          pdf.setFont('helvetica', 'bold');
-          pdf.text(curAsset.assetTag, textX, textY);
-
-          textY += 4.5;
-          pdf.setTextColor(15, 23, 42);
-          pdf.setFontSize(7.5);
-          pdf.setFont('helvetica', 'bold');
-          pdf.text(`${curAsset.manufacturer} ${curAsset.model}`.substring(0, 22), textX, textY);
-
-          if (includeSerial && curAsset.serialNumber) {
-            textY += 3.8;
-            pdf.setFont('helvetica', 'normal');
-            pdf.setFontSize(6.5);
-            pdf.setTextColor(71, 85, 105);
-            pdf.text(`S/N: ${curAsset.serialNumber}`.substring(0, 24), textX, textY);
-          }
-
-          if (includeDeptLocation) {
-            textY += 3.8;
-            pdf.setFont('helvetica', 'normal');
-            pdf.setFontSize(6.5);
-            pdf.setTextColor(71, 85, 105);
-            pdf.text(`Dept: ${curAsset.department}`.substring(0, 24), textX, textY);
-          }
-
-          if (includeCustodian && curAsset.assignedUser) {
-            textY += 3.8;
-            pdf.setFont('helvetica', 'normal');
-            pdf.setFontSize(6.5);
-            pdf.setTextColor(71, 85, 105);
-            pdf.text(`User: ${curAsset.assignedUser}`.substring(0, 22), textX, textY);
-          }
-
-          if (includeSecurityNotice) {
-            pdf.setFontSize(5);
-            pdf.setTextColor(148, 163, 184);
-            pdf.text('PROPERTY OF HOSPITAL IT - DO NOT REMOVE', x + labelW / 2, y + labelH - 1.5, {
-              align: 'center',
-            });
-          }
+          // Render exact matching label image
+          const labelDataUrl = await generateLabelJpegDataUrl(curAsset);
+          pdf.addImage(labelDataUrl, 'JPEG', x, y, labelW, labelH);
 
           index++;
         }

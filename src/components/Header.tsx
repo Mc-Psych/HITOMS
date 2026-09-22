@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Activity,
-  Wifi,
-  WifiOff,
   RefreshCw,
   AlertCircle,
   Bell,
@@ -92,87 +90,82 @@ export const Header: React.FC<HeaderProps> = ({
 
   const unreadCount = (notifications || []).filter((n) => !n.isRead).length;
 
-  const handleToggleOfflineSimulation = () => {
-    syncService.toggleSimulatedOffline();
-  };
-
   const handleSyncNow = async () => {
     await syncService.runAutomaticSync();
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md">
-      <div className="flex items-center justify-between px-4 py-2.5 sm:px-6">
+    <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md w-full max-w-full overflow-hidden">
+      <div className="flex items-center justify-between px-2.5 sm:px-4 md:px-6 py-2 gap-2 sm:gap-4 w-full">
         {/* Left: Brand + Hospital LAN Info */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink">
           {systemSettings?.hospitalLogo ? (
             <img
               src={systemSettings.hospitalLogo}
               alt="Facility Logo"
               referrerPolicy="no-referrer"
-              className="w-9 h-9 rounded-xl object-contain bg-white p-0.5 shadow-sm border border-slate-700"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-contain bg-white p-0.5 shadow-sm border border-slate-700 shrink-0"
             />
           ) : (
-            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-sky-600 text-white font-black text-base shadow-sm">
+            <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-sky-600 text-white font-black text-sm sm:text-base shadow-sm shrink-0">
               H
             </div>
           )}
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-sm sm:text-base tracking-wide text-white">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-extrabold text-xs sm:text-sm md:text-base tracking-wide text-white truncate max-w-[120px] xs:max-w-[160px] sm:max-w-none">
                 {systemSettings?.hospitalName ? systemSettings.hospitalName : 'HITOMS'}
               </span>
-              <span className="hidden md:inline-block text-[10px] font-semibold uppercase tracking-wider bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded-full">
-                Offline-First Hospital Ops
+              <span className="hidden lg:inline-block text-[10px] font-semibold uppercase tracking-wider bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded-full shrink-0">
+                Offline-First Ops
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-              <Server className="w-3 h-3 text-emerald-400" />
-              <span className="font-mono text-emerald-300">http://hitoms.local</span>
+            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400 truncate">
+              <Server className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span className="font-mono text-emerald-300 text-[10px] sm:text-[11px]">hitoms.local</span>
               <span className="text-slate-600">|</span>
-              <span className="hidden sm:inline">
+              <span className="hidden md:inline truncate">
                 {systemSettings?.regionOrDistrict ? `${systemSettings.regionOrDistrict} Facility` : 'Hospital LAN Active'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Center/Right: Connectivity Indicator (Section 18) + Mode Toggle */}
-        <div className="flex items-center gap-2 sm:gap-4">
-          {/* Permanent Connectivity Status Bar */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs">
+        {/* Right: Connectivity Indicator + Notifications + User Profile */}
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          {/* Connectivity Status Bar */}
+          <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs shrink-0">
             {syncStats.connectionState === 'ONLINE' && (
               <div className="flex items-center gap-1.5 text-emerald-400">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-semibold">Online</span>
-                <span className="hidden lg:inline text-slate-400">| Cloud Synced</span>
+                <span className="font-semibold text-[11px] sm:text-xs">Online</span>
+                <span className="hidden xl:inline text-slate-400">| Synced</span>
               </div>
             )}
 
             {syncStats.connectionState === 'OFFLINE' && (
               <div className="flex items-center gap-1.5 text-amber-400">
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
-                <span className="font-semibold">Offline</span>
-                <span className="text-xs text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/60">
-                  {syncStats.pendingCount} pending sync
-                </span>
+                <span className="font-semibold text-[11px] sm:text-xs">Offline</span>
+                {syncStats.pendingCount > 0 && (
+                  <span className="text-[10px] text-amber-300 bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-800/60">
+                    {syncStats.pendingCount}
+                  </span>
+                )}
               </div>
             )}
 
             {syncStats.connectionState === 'SYNCING' && (
               <div className="flex items-center gap-1.5 text-sky-400">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                <span className="font-semibold">Synchronizing...</span>
+                <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin text-sky-400" />
+                <span className="font-semibold text-[11px] sm:text-xs">Syncing</span>
               </div>
             )}
 
             {syncStats.connectionState === 'SYNC_ERROR' && (
               <div className="flex items-center gap-1.5 text-rose-400">
-                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-                <span className="font-semibold">Sync Error</span>
-                <span className="text-xs text-rose-300 bg-rose-950 px-1 rounded">
-                  {syncStats.failedCount} failed
-                </span>
+                <AlertCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-rose-400" />
+                <span className="font-semibold text-[11px] sm:text-xs">Error</span>
               </div>
             )}
 
@@ -181,48 +174,24 @@ export const Header: React.FC<HeaderProps> = ({
               id="sync-now-btn"
               onClick={handleSyncNow}
               disabled={syncStats.connectionState === 'OFFLINE' || syncStats.connectionState === 'SYNCING'}
-              className="ml-1 text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer p-0.5"
+              className="ml-0.5 text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer p-0.5"
               title="Trigger Immediate Synchronization"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncStats.connectionState === 'SYNCING' ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${syncStats.connectionState === 'SYNCING' ? 'animate-spin' : ''}`} />
             </button>
           </div>
 
-          {/* Test Tool: Toggle Simulated Offline/Online */}
-          <button
-            id="toggle-offline-mode-btn"
-            onClick={handleToggleOfflineSimulation}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
-              syncStats.simulatedOffline
-                ? 'bg-amber-500/20 text-amber-300 border-amber-600 hover:bg-amber-500/30'
-                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-            }`}
-            title="Simulate complete hospital external internet failure to verify local-first operation"
-          >
-            {syncStats.simulatedOffline ? (
-              <>
-                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden md:inline">Simulating Outage</span>
-                <span className="md:hidden">Offline</span>
-              </>
-            ) : (
-              <>
-                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden md:inline">Simulate Outage</span>
-                <span className="md:hidden">Simulate</span>
-              </>
-            )}
-          </button>
-
-          {/* PWA Install Button */}
-          <PWAInstallButton />
+          {/* PWA Install Button (desktop / tablet) */}
+          <div className="hidden md:block">
+            <PWAInstallButton />
+          </div>
 
           {/* Notifications Center */}
-          <div className="relative" ref={notifsRef}>
+          <div className="relative shrink-0" ref={notifsRef}>
             <button
               id="notifications-toggle-btn"
               onClick={() => setShowNotifs(!showNotifs)}
-              className="relative p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+              className="relative p-1.5 sm:p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
               title="Hospital IT Notifications"
             >
               <Bell className="w-4 h-4" />
@@ -234,7 +203,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {showNotifs && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-4 z-50 text-slate-200">
+              <div className="absolute right-0 mt-2 w-72 sm:w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3 sm:p-4 z-50 text-slate-200">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                   <span className="font-semibold text-xs uppercase tracking-wider text-slate-400">
                     Notifications ({notifications.length})
@@ -286,25 +255,26 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Quick User & Role Switcher for QA & Testing */}
-          <div className="relative" ref={roleMenuRef}>
+          {/* User Profile & Role Switcher */}
+          <div className="relative shrink-0" ref={roleMenuRef}>
             <button
               id="user-role-switcher-btn"
               onClick={() => setShowRoleMenu(!showRoleMenu)}
-              className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 p-1 sm:pl-2 sm:pr-3 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer"
+              title={`Logged in as ${currentUser?.fullName || 'Staff'}`}
             >
-              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider">
+              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider shrink-0">
                 {getUserInitials(currentUser?.fullName || '')}
               </div>
-              <div className="hidden sm:block text-xs">
-                <div className="font-semibold text-white leading-tight">{currentUser?.fullName}</div>
-                <div className="text-[10px] text-sky-400 font-mono">{currentUser?.role.replace('_', ' ')}</div>
+              <div className="hidden md:block text-xs">
+                <div className="font-semibold text-white leading-tight max-w-[110px] truncate">{currentUser?.fullName}</div>
+                <div className="text-[10px] text-sky-400 font-mono truncate">{currentUser?.role?.replace('_', ' ')}</div>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
 
             {showRoleMenu && (
-              <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50">
+              <div className="absolute right-0 mt-2 w-72 max-w-[90vw] rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50">
                 <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
                   <div>
                     <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Switch Hospital Role</p>
@@ -326,11 +296,11 @@ export const Header: React.FC<HeaderProps> = ({
                           : 'hover:bg-slate-800 text-slate-300'
                       }`}
                     >
-                      <div>
-                        <div className="font-semibold">{u.fullName}</div>
-                        <div className="text-[10px] text-slate-400">{u.department} - <span className="text-sky-300">{u.role}</span></div>
+                      <div className="min-w-0 pr-2">
+                        <div className="font-semibold truncate">{u.fullName}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{u.department} - <span className="text-sky-300">{u.role}</span></div>
                       </div>
-                      {currentUser?.id === u.id && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+                      {currentUser?.id === u.id && <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />}
                     </button>
                   ))}
                 </div>
@@ -345,7 +315,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-sky-300 hover:bg-sky-950/60 hover:text-sky-200 transition cursor-pointer"
                     >
-                      <KeyRound className="w-3.5 h-3.5 text-sky-400" />
+                      <KeyRound className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                       <span>Open Staff Login Portal</span>
                     </button>
                   )}
@@ -358,7 +328,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition cursor-pointer"
                     >
-                      <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                      <LogOut className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                       <span>Lock & Sign Out</span>
                     </button>
                   )}

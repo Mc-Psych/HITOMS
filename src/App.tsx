@@ -256,7 +256,7 @@ export default function App() {
   const openTicketsCount = (tickets || []).filter((t) => t.status !== 'Closed' && t.status !== 'Resolved').length;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans antialiased">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans antialiased w-full max-w-full overflow-x-hidden">
       {/* Top Application Header */}
       <Header
         currentUser={currentUser}
@@ -270,17 +270,19 @@ export default function App() {
 
       {/* Offline Status Simulation Notice */}
       {syncStats.simulatedOffline && (
-        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-3 sm:px-4 py-2 text-xs text-amber-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="font-semibold">Simulated Hospital ISP Outage Active:</span>
-            <span className="text-amber-200">
-              External internet / Starlink disconnected. All tickets, assets, maintenance, and stock mutations are safely stored in local IndexedDB and queued for cloud sync.
-            </span>
+            <div className="leading-snug">
+              <span className="font-semibold">Simulated Outage Active: </span>
+              <span className="text-amber-200">
+                Operating 100% offline. All records are safely saved locally and will auto-sync once restored.
+              </span>
+            </div>
           </div>
           <button
             onClick={() => syncService.toggleSimulatedOffline()}
-            className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 font-bold transition cursor-pointer shrink-0"
+            className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 font-bold transition cursor-pointer shrink-0 self-end sm:self-auto"
           >
             Restore Connection
           </button>
@@ -288,19 +290,20 @@ export default function App() {
       )}
 
       {/* Mobile Top bar */}
-      <div className="md:hidden bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-white">
+      <div className="md:hidden bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between text-white w-full max-w-full">
         <button
           onClick={() => setMobileSidebarOpen(true)}
-          className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+          className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+          title="Open Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
-        <div className="text-xs font-bold capitalize text-slate-200">
+        <div className="text-xs font-bold capitalize text-slate-200 truncate px-2">
           {currentView.replace(/([A-Z])/g, ' $1')}
         </div>
         <button
           onClick={() => setQuickTicketOpen(true)}
-          className="p-1.5 rounded-lg bg-sky-600 text-white font-semibold text-xs flex items-center gap-1 cursor-pointer"
+          className="p-1.5 rounded-lg bg-sky-600 text-white font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>Ticket</span>
@@ -308,7 +311,7 @@ export default function App() {
       </div>
 
       {/* Main Body Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden w-full max-w-full">
         {/* Persistent Sidebar */}
         <Sidebar
           currentView={currentView}
@@ -322,8 +325,8 @@ export default function App() {
         />
 
         {/* Dynamic Content Canvas */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100/70 dark:bg-slate-950">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 lg:p-8 bg-slate-100/70 dark:bg-slate-950 w-full max-w-full">
+          <div className="max-w-7xl mx-auto w-full">
             {currentView === 'dashboard' && (
               <DashboardView
                 tickets={tickets}

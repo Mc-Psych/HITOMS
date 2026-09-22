@@ -3,6 +3,7 @@ import { type Asset } from '../types';
 
 export interface QrLabelRenderOptions {
   hospitalName?: string;
+  labelSize?: 'compact' | 'standard' | 'large';
   includeHospitalHeader?: boolean;
   includeSerial?: boolean;
   includeDeptLocation?: boolean;
@@ -13,14 +14,14 @@ export interface QrLabelRenderOptions {
 
 /**
  * Generates rich formatted metadata string to be embedded into the QR code matrix.
- * Includes Name, Serial, Assigned Department, Location, Custodian, and Tag.
+ * Encodes hospital, asset tag, model, serial number, department, location, custodian, and specifications.
  */
 export function generateAssetQrMetadataPayload(
   asset: Partial<Asset>,
   hospitalName = 'REGIONAL HOSPITAL IT UNIT'
 ): string {
   const assetName = `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.assetType || 'IT Equipment';
-  
+
   const lines: string[] = [
     `🏥 ${hospitalName}`,
     `🏷️ ASSET TAG: ${asset.assetTag || 'N/A'}`,
@@ -54,25 +55,157 @@ export function generateAssetQrMetadataPayload(
 }
 
 /**
- * Renders a high-resolution JPEG Data URL where the QR code image is placed at the top,
- * and text details (Asset Name, Serial, Assigned Department, etc.) are rendered directly
- * below the QR code image for instant manual visual identification.
+ * Helper to draw a rounded rectangle on a canvas context
  */
-export async function renderAssetQrJpegDataUrl(
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+/**
+ * Truncates text with ellipsis if it exceeds maxWidth
+ */
+function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text;
+  }
+  let truncated = text;
+  while (truncated.length > 0 && ctx.measureText(truncated + '...').width > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+  return truncated + '...';
+}
+
+/**
+ * Renders an off-screen HTML5 Canvas containing the EXACT visual layout of the
+ * print preview card in AssetQRLabelModal.
+ */
+export async function renderAssetLabelCanvas(
   asset: Asset,
   options: QrLabelRenderOptions = {}
-): Promise<string> {
+): Promise<HTMLCanvasElement> {
   const {
     hospitalName = 'REGIONAL HOSPITAL IT UNIT',
+    labelSize = 'standard',
     includeHospitalHeader = true,
     includeSerial = true,
     includeDeptLocation = true,
     includeCustodian = true,
     includeSecurityNotice = true,
-    scale = 2,
+    scale = 3, // 3x for ultra-sharp high-DPI rendering (300+ DPI equivalent)
   } = options;
 
-  // Generate QR Code matrix using rich metadata payload
+  // Set card dimensions matching the exact print preview aspect ratios
+  // Standard: 320 x 176 (approx 3" x 2" label)
+  // Compact: 288 x 144 (approx 2" x 1" label)
+  // Large: 384 x 224 (approx 4" x 3" label badge)
+  let baseWidth = 320;
+  let baseHeight = 176;
+
+  if (labelSize === 'compact') {
+    baseWidth = 288;
+    baseHeight = 144;
+  } else if (labelSize === 'large') {
+    baseWidth = 384;
+    baseHeight = 224;
+  }
+
+  const canvasWidth = baseWidth * scale;
+  const canvasHeight = baseHeight * scale;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D context unavailable');
+
+  // Background - pure white with padding
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  // Outer Card Frame (matching: bg-white rounded-xl border-2 border-slate-900)
+  const cardPadding = 6 * scale;
+  const cardX = cardPadding;
+  const cardY = cardPadding;
+  const cardW = canvasWidth - cardPadding * 2;
+  const cardH = canvasHeight - cardPadding * 2;
+  const cardRadius = 12 * scale;
+
+  // Card background & solid border
+  ctx.fillStyle = '#ffffff';
+  drawRoundedRect(ctx, cardX, cardY, cardW, cardH, cardRadius);
+  ctx.fill();
+
+  ctx.strokeStyle = '#0f172a'; // slate-900
+  ctx.lineWidth = 2.5 * scale;
+  ctx.stroke();
+
+  const innerPad = (labelSize === 'compact' ? 8 : labelSize === 'large' ? 14 : 11) * scale;
+  let currentY = cardY + innerPad;
+
+  // 1. Header (matching: bg-slate-900 text-white font-bold px-2 py-0.5 rounded flex items-center justify-between)
+  if (includeHospitalHeader) {
+    const headerHeight = (labelSize === 'compact' ? 18 : labelSize === 'large' ? 24 : 21) * scale;
+    const headerX = cardX + innerPad;
+    const headerY = currentY;
+    const headerW = cardW - innerPad * 2;
+    const headerRadius = 4 * scale;
+
+    ctx.fillStyle = '#0f172a'; // slate-900
+    drawRoundedRect(ctx, headerX, headerY, headerW, headerHeight, headerRadius);
+    ctx.fill();
+
+    // Right Badge: IT ASSET (bg-sky-500 text-white uppercase)
+    const badgeW = (labelSize === 'compact' ? 44 : 54) * scale;
+    const badgeH = headerHeight - 4 * scale;
+    const badgeX = headerX + headerW - badgeW - 3 * scale;
+    const badgeY = headerY + 2 * scale;
+    const badgeRadius = 3 * scale;
+
+    ctx.fillStyle = '#0ea5e9'; // sky-500
+    drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, badgeRadius);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${8 * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('IT ASSET', badgeX + badgeW / 2, badgeY + badgeH / 2);
+
+    // Left text: Hospital Name
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${(labelSize === 'compact' ? 9 : labelSize === 'large' ? 11 : 10) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const maxHospitalNameWidth = headerW - badgeW - 14 * scale;
+    const displayHospitalName = truncateText(ctx, hospitalName.toUpperCase(), maxHospitalNameWidth);
+    ctx.fillText(displayHospitalName, headerX + 6 * scale, headerY + headerHeight / 2);
+
+    currentY += headerHeight + 6 * scale;
+  }
+
+  // 2. Middle Section (QR Code on Left + Info Column on Right)
+  // Calculate footer space requirement first
+  const footerHeight = includeSecurityNotice ? 16 * scale : 0;
+  const middleAreaHeight = cardY + cardH - innerPad - footerHeight - currentY;
+
+  // Generate QR code data URL
   const payload = generateAssetQrMetadataPayload(asset, hospitalName);
   const qrDataUrl = await QRCode.toDataURL(payload, {
     width: 320 * scale,
@@ -84,7 +217,6 @@ export async function renderAssetQrJpegDataUrl(
     },
   });
 
-  // Load QR image onto offscreen canvas
   const qrImg = new Image();
   await new Promise<void>((resolve, reject) => {
     qrImg.onload = () => resolve();
@@ -92,169 +224,140 @@ export async function renderAssetQrJpegDataUrl(
     qrImg.src = qrDataUrl;
   });
 
-  // Canvas Dimensions: 420 x 580 (base) * scale
-  const canvasWidth = 440 * scale;
-  const canvasHeight = 620 * scale;
+  // QR Box Dimensions (matching preview: rounded-lg border border-slate-300)
+  const qrBoxSize = Math.min(middleAreaHeight - 4 * scale, (labelSize === 'compact' ? 68 : labelSize === 'large' ? 104 : 84) * scale);
+  const qrBoxX = cardX + innerPad;
+  const qrBoxY = currentY + (middleAreaHeight - qrBoxSize) / 2;
+  const qrBoxRadius = 6 * scale;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 2D context unavailable');
-
-  // Background
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  drawRoundedRect(ctx, qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, qrBoxRadius);
+  ctx.fill();
 
-  // Outer border & subtle container frame
-  ctx.strokeStyle = '#0284c7'; // sky-600
-  ctx.lineWidth = 3 * scale;
-  ctx.strokeRect(8 * scale, 8 * scale, canvasWidth - 16 * scale, canvasHeight - 16 * scale);
-
-  ctx.strokeStyle = '#e2e8f0';
+  ctx.strokeStyle = '#cbd5e1'; // slate-300
   ctx.lineWidth = 1 * scale;
-  ctx.strokeRect(12 * scale, 12 * scale, canvasWidth - 24 * scale, canvasHeight - 24 * scale);
-
-  let currentY = 24 * scale;
-
-  // 1. Hospital Header
-  if (includeHospitalHeader) {
-    ctx.fillStyle = '#0f172a'; // slate-900
-    ctx.fillRect(13 * scale, 13 * scale, canvasWidth - 26 * scale, 34 * scale);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${13 * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText(`🏥 ${hospitalName.toUpperCase()}`, canvasWidth / 2, currentY + 14 * scale);
-
-    ctx.fillStyle = '#38bdf8'; // sky-400
-    ctx.font = `bold ${9 * scale}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText('CLINICAL IT ASSET IDENTIFICATION SYSTEM', canvasWidth / 2, currentY + 26 * scale);
-
-    currentY += 42 * scale;
-  } else {
-    currentY += 10 * scale;
-  }
-
-  // 2. QR Code Image (Rendered Centrally at the top)
-  const qrBoxSize = 220 * scale;
-  const qrBoxX = (canvasWidth - qrBoxSize) / 2;
-  const qrBoxY = currentY;
-
-  // Background white box for QR with subtle border
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize);
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1.5 * scale;
-  ctx.strokeRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize);
-
-  // Draw QR matrix
-  ctx.drawImage(qrImg, qrBoxX + 6 * scale, qrBoxY + 6 * scale, qrBoxSize - 12 * scale, qrBoxSize - 12 * scale);
-
-  currentY = qrBoxY + qrBoxSize + 16 * scale;
-
-  // 3. Asset Tag (Prominent Identifier)
-  ctx.fillStyle = '#0284c7'; // sky-600
-  ctx.font = `900 ${21 * scale}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(asset.assetTag, canvasWidth / 2, currentY);
-
-  currentY += 12 * scale;
-
-  // Separator Line
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1.5 * scale;
-  ctx.beginPath();
-  ctx.moveTo(24 * scale, currentY);
-  ctx.lineTo(canvasWidth - 24 * scale, currentY);
   ctx.stroke();
 
-  currentY += 20 * scale;
+  // Draw QR Image inside box with 3*scale padding
+  const qrImgPad = 3 * scale;
+  ctx.drawImage(
+    qrImg,
+    qrBoxX + qrImgPad,
+    qrBoxY + qrImgPad,
+    qrBoxSize - qrImgPad * 2,
+    qrBoxSize - qrImgPad * 2
+  );
 
-  // 4. Text Details Rendered Below the QR Code
-  const detailsLeftX = 28 * scale;
-  const detailsRightX = canvasWidth - 28 * scale;
-  const valueLeftX = 145 * scale;
+  // Right Info Column
+  const textX = qrBoxX + qrBoxSize + 10 * scale;
+  const textMaxW = cardX + cardW - innerPad - textX;
+  let textY = qrBoxY + 2 * scale;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
 
-  const equipmentName = `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.assetType || 'IT Workstation';
+  // 1. Asset Tag (matching: font-mono font-black text-sky-600 text-sm tracking-tight truncate)
+  ctx.fillStyle = '#0284c7'; // sky-600
+  ctx.font = `900 ${(labelSize === 'compact' ? 12 : labelSize === 'large' ? 17 : 14) * scale}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+  const displayTag = truncateText(ctx, asset.assetTag, textMaxW);
+  ctx.fillText(displayTag, textX, textY);
+  textY += (labelSize === 'compact' ? 13 : labelSize === 'large' ? 19 : 16) * scale;
 
-  // Row helper
-  const drawDetailRow = (label: string, value: string, isHighlight = false, isMono = false) => {
-    ctx.textAlign = 'left';
-    ctx.font = `bold ${11.5 * scale}px ui-sans-serif, system-ui, sans-serif`;
+  // 2. Hardware Model (matching: font-bold text-slate-900 text-xs truncate mt-0.5)
+  const modelText = `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || 'IT Equipment';
+  ctx.fillStyle = '#0f172a'; // slate-900
+  ctx.font = `bold ${(labelSize === 'compact' ? 9.5 : labelSize === 'large' ? 13 : 11) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  const displayModel = truncateText(ctx, modelText, textMaxW);
+  ctx.fillText(displayModel, textX, textY);
+  textY += (labelSize === 'compact' ? 11 : labelSize === 'large' ? 15 : 13) * scale;
+
+  // 3. Asset Type (matching: text-[10px] text-slate-500 truncate)
+  if (asset.assetType) {
     ctx.fillStyle = '#64748b'; // slate-500
-    ctx.fillText(label, detailsLeftX, currentY);
-
-    ctx.font = isMono
-      ? `bold ${12 * scale}px ui-monospace, monospace`
-      : isHighlight
-      ? `bold ${13 * scale}px ui-sans-serif, system-ui, sans-serif`
-      : `600 ${12 * scale}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillStyle = isHighlight ? '#0f172a' : '#1e293b';
-
-    // Ellipsis truncate value if too long
-    let displayVal = value;
-    if (displayVal.length > 28) {
-      displayVal = displayVal.slice(0, 26) + '...';
-    }
-    ctx.fillText(displayVal, valueLeftX, currentY);
-
-    currentY += 20 * scale;
-  };
-
-  // Asset Name
-  drawDetailRow('ASSET NAME:', equipmentName, true);
-
-  // Serial Number
-  if (includeSerial) {
-    drawDetailRow('SERIAL (S/N):', asset.serialNumber || 'N/A', false, true);
+    ctx.font = `${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    const displayType = truncateText(ctx, asset.assetType, textMaxW);
+    ctx.fillText(displayType, textX, textY);
+    textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
   }
 
-  // Assigned Department
+  // 4. Serial Number (matching: text-[10px] font-mono text-slate-600 truncate mt-1)
+  if (includeSerial && asset.serialNumber) {
+    ctx.fillStyle = '#475569'; // slate-600
+    ctx.font = `600 ${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-monospace, SFMono-Regular, monospace`;
+    const displaySerial = truncateText(ctx, `S/N: ${asset.serialNumber}`, textMaxW);
+    ctx.fillText(displaySerial, textX, textY);
+    textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
+  }
+
+  // 5. Department & Location (matching: text-[10px] text-slate-600 truncate)
   if (includeDeptLocation) {
-    drawDetailRow('DEPARTMENT:', asset.department || 'General', true);
-    if (asset.location) {
-      drawDetailRow('LOCATION / ROOM:', asset.location);
-    }
+    const locParts = [asset.department || 'IT Unit'];
+    if (asset.location) locParts.push(asset.location);
+    ctx.fillStyle = '#475569'; // slate-600
+    ctx.font = `${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    const displayDept = truncateText(ctx, locParts.join(' • '), textMaxW);
+    ctx.fillText(displayDept, textX, textY);
+    textY += (labelSize === 'compact' ? 10 : labelSize === 'large' ? 14 : 12) * scale;
   }
 
-  // Assigned Custodian
+  // 6. Assigned Custodian (matching: text-[10px] text-sky-700 font-medium truncate)
   if (includeCustodian && asset.assignedUser) {
-    drawDetailRow('CUSTODIAN:', asset.assignedUser);
+    ctx.fillStyle = '#0369a1'; // sky-700
+    ctx.font = `600 ${(labelSize === 'compact' ? 8.5 : labelSize === 'large' ? 11 : 9.5) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    const displayCust = truncateText(ctx, `Cust: ${asset.assignedUser}`, textMaxW);
+    ctx.fillText(displayCust, textX, textY);
   }
 
-  // Hardware Type & Status
-  drawDetailRow('STATUS / TYPE:', `${asset.assetType} • ${asset.status}`);
-
-  // 5. Security Notice Footer
+  // 3. Footer (matching: text-[8px] font-semibold text-slate-400 text-center tracking-tight border-t border-slate-200 pt-1 mt-1 truncate uppercase)
   if (includeSecurityNotice) {
-    const footerY = canvasHeight - 44 * scale;
-    ctx.fillStyle = '#fef2f2'; // red-50
-    ctx.fillRect(14 * scale, footerY, canvasWidth - 28 * scale, 30 * scale);
-    ctx.strokeStyle = '#fecaca'; // red-200
-    ctx.lineWidth = 1 * scale;
-    ctx.strokeRect(14 * scale, footerY, canvasWidth - 28 * scale, 30 * scale);
+    const footerY = cardY + cardH - innerPad - 2 * scale;
+    const footerLineY = footerY - 10 * scale;
 
-    ctx.fillStyle = '#b91c1c'; // red-700
-    ctx.font = `bold ${10 * scale}px ui-sans-serif, system-ui, sans-serif`;
+    // Top border line
+    ctx.strokeStyle = '#e2e8f0'; // slate-200
+    ctx.lineWidth = 1 * scale;
+    ctx.beginPath();
+    ctx.moveTo(cardX + innerPad, footerLineY);
+    ctx.lineTo(cardX + cardW - innerPad, footerLineY);
+    ctx.stroke();
+
+    // Footer Text
+    ctx.fillStyle = '#94a3b8'; // slate-400
+    ctx.font = `600 ${(labelSize === 'compact' ? 7.5 : labelSize === 'large' ? 9.5 : 8) * scale}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('🔒 PROPERTY OF HOSPITAL IT • DO NOT REMOVE OR DAMAGE', canvasWidth / 2, footerY + 19 * scale);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PROPERTY OF HOSPITAL IT • DO NOT REMOVE', cardX + cardW / 2, footerY - 2 * scale);
   }
 
-  return canvas.toDataURL('image/jpeg', 0.95);
+  return canvas;
 }
 
 /**
- * Triggers a direct download of the asset's QR code and details as a JPEG image.
+ * Returns high-resolution JPEG Data URL rendered exactly as the print preview design
+ */
+export async function renderAssetQrJpegDataUrl(
+  asset: Asset,
+  options: QrLabelRenderOptions = {}
+): Promise<string> {
+  const canvas = await renderAssetLabelCanvas(asset, options);
+  return canvas.toDataURL('image/jpeg', 0.98);
+}
+
+/**
+ * Triggers a direct download of the asset's QR label JPEG image formatted exactly as preview
  */
 export async function downloadAssetQrJpeg(
   asset: Asset,
-  hospitalName = 'REGIONAL HOSPITAL IT UNIT'
+  optionsOrHospitalName?: string | QrLabelRenderOptions
 ): Promise<void> {
-  const dataUrl = await renderAssetQrJpegDataUrl(asset, { hospitalName });
+  const options: QrLabelRenderOptions =
+    typeof optionsOrHospitalName === 'string'
+      ? { hospitalName: optionsOrHospitalName }
+      : optionsOrHospitalName || {};
+
+  const dataUrl = await renderAssetQrJpegDataUrl(asset, options);
   const link = document.createElement('a');
   link.href = dataUrl;
-  link.download = `QR-${asset.assetTag}-${asset.serialNumber || 'LABEL'}.jpeg`;
+  link.download = `ASSET-LABEL-${asset.assetTag}.jpeg`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
