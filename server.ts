@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -7,6 +8,7 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: "10mb" }));
   const PORT = 3000;
+  const server = http.createServer(app);
 
   // Initialize Gemini API client on the server side
   const ai = new GoogleGenAI({
@@ -125,7 +127,13 @@ Evaluate clinical patient care impact, operational risk, recommended priority le
   // Vite middleware for development vs static serve for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: {
+          server,
+          clientPort: 443,
+        },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -137,7 +145,7 @@ Evaluate clinical patient care impact, operational risk, recommended priority le
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`HITOMS Server listening on http://0.0.0.0:${PORT}`);
   });
 }

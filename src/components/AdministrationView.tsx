@@ -18,6 +18,8 @@ import {
   Users,
   Key,
   FileUp,
+  FileSpreadsheet,
+  Download,
   RotateCcw,
   Sliders,
   ShieldCheck,
@@ -42,6 +44,7 @@ import {
   ROLE_PERMISSIONS,
 } from '../services/authService';
 import { settingsService, DEFAULT_SYSTEM_SETTINGS } from '../services/settingsService';
+import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadModal';
 
 interface AdministrationViewProps {
   currentUser: UserType | null;
@@ -88,19 +91,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [userRevokedPerms, setUserRevokedPerms] = useState<Permission[]>([]);
   const [userOverrideSaveSuccess, setUserOverrideSaveSuccess] = useState(false);
 
-  // Bulk Staff Upload states
+  // Bulk Staff Upload modal state
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
-  const [bulkInputText, setBulkInputText] = useState('');
-  const [mandatoryPasswordChange, setMandatoryPasswordChange] = useState(true);
-  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
-  const [bulkResult, setBulkResult] = useState<{
-    created: number;
-    skipped: number;
-    accounts: Array<{ fullName: string; username: string; defaultPassword: string; role: Role; department: string }>;
-  } | null>(null);
-  const [bulkError, setBulkError] = useState<string | null>(null);
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   useEffect(() => {
@@ -263,79 +257,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     } catch (err) {
       console.error(err);
     }
-  };
-
-  // Handle Bulk Staff Upload
-  const handleExecuteBulkUpload = async () => {
-    if (!currentUser || !isSuperAdmin) return;
-    if (!bulkInputText.trim()) {
-      setBulkError('Please enter or paste at least one line of staff data.');
-      return;
-    }
-
-    setIsProcessingBulk(true);
-    setBulkError(null);
-
-    try {
-      // Parse CSV / TSV lines: Full Name, Department, Role, Phone, Email
-      const lines = bulkInputText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      const parsedStaff: Array<{
-        fullName: string;
-        department: string;
-        role: Role;
-        phone?: string;
-        email?: string;
-      }> = [];
-
-      for (const line of lines) {
-        // Skip header lines
-        if (line.toLowerCase().startsWith('full name') || line.toLowerCase().startsWith('name,')) {
-          continue;
-        }
-
-        const cols = line.split(/[,;\t]/).map((c) => c.trim());
-        if (cols.length < 1 || !cols[0]) continue;
-
-        const fullName = cols[0];
-        const department = cols[1] || 'General Clinical';
-        let role: Role = 'STAFF_USER';
-
-        if (cols[2]) {
-          const rStr = cols[2].toUpperCase().replace(/\s+/g, '_');
-          if (ALL_ROLES.includes(rStr as Role)) {
-            role = rStr as Role;
-          }
-        }
-
-        const phone = cols[3] || '+233 24 000 0000';
-        const email = cols[4] || undefined;
-
-        parsedStaff.push({ fullName, department, role, phone, email });
-      }
-
-      if (parsedStaff.length === 0) {
-        throw new Error('Could not parse any valid staff records. Please check the format.');
-      }
-
-      const res = await authService.bulkCreateStaff(parsedStaff, mandatoryPasswordChange, currentUser);
-      setBulkResult(res);
-      setBulkInputText('');
-      onRefresh();
-    } catch (err: any) {
-      setBulkError(err.message || 'Failed to process bulk upload.');
-    } finally {
-      setIsProcessingBulk(false);
-    }
-  };
-
-  const handleInsertSampleBulkData = () => {
-    setBulkInputText(
-`Dr. Kwame Mensah, OPD, CLINICAL_LEAD, +233 24 111 2222, mensah@hospital.local
-Sister Beatrice Osei, Maternity, STAFF_USER, +233 24 333 4444, osei@hospital.local
-Emmanuel Owusu, IT Department, IT_OFFICER, +233 24 555 6666, owusu@hospital.local
-Dr. Abigail Boateng, Pharmacy, CLINICAL_LEAD, +233 24 777 8888, boateng@hospital.local
-Frank Kwarteng, Stores, PROCUREMENT_OFFICER, +233 24 999 0000, kwarteng@hospital.local`
-    );
   };
 
   // Group permission definitions by category
@@ -628,17 +549,26 @@ Frank Kwarteng, Stores, PROCUREMENT_OFFICER, +233 24 999 0000, kwarteng@hospital
             </div>
 
             {isSuperAdmin && rbacSubTab === 'STAFF_DIRECTORY' && (
-              <button
-                onClick={() => {
-                  setBulkResult(null);
-                  setBulkError(null);
-                  setIsBulkModalOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
-              >
-                <FileUp className="w-4 h-4" />
-                <span>Bulk Upload Staff</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadStaffTemplate(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+                  title="Download CSV staff template with sample entries"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Download Template (.csv)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsBulkModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Upload Staff with Template</span>
+                </button>
+              </div>
             )}
           </div>
 
@@ -1082,155 +1012,13 @@ Frank Kwarteng, Stores, PROCUREMENT_OFFICER, +233 24 999 0000, kwarteng@hospital
         </div>
       )}
 
-      {/* MODAL 2: BULK UPLOAD STAFF (Click outside to close) */}
-      {isBulkModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
-          onClick={() => setIsBulkModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs text-slate-800 dark:text-slate-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <FileUp className="w-5 h-5 text-emerald-600" />
-                <span>Bulk Provision Hospital Staff Accounts</span>
-              </h3>
-              <button
-                onClick={() => setIsBulkModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="p-6 overflow-y-auto space-y-4">
-              {bulkError && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{bulkError}</span>
-                </div>
-              )}
-
-              {/* Automatic Credentials Rule Explanation */}
-              <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 space-y-2 text-emerald-900 dark:text-emerald-200">
-                <div className="font-bold flex items-center gap-1.5">
-                  <Key className="w-4 h-4 text-emerald-600" />
-                  <span>Automated Credential Generation Rules:</span>
-                </div>
-                <ul className="list-disc list-inside space-y-1 text-slate-700 dark:text-slate-300">
-                  <li><strong>Username:</strong> Staff member&apos;s surname converted to lowercase (e.g., <em>Dr. Kwame Mensah</em> &rarr; <code className="text-sky-600 font-bold font-mono">mensah</code>).</li>
-                  <li><strong>Initial Password:</strong> Last 4 alphabets of surname (e.g., <em>Mensah</em> &rarr; <code className="text-emerald-600 font-bold font-mono">nsah</code>; <em>Boateng</em> &rarr; <code className="text-emerald-600 font-bold font-mono">teng</code>).</li>
-                  <li><strong>Offline Storage:</strong> Committed securely directly to local browser storage (IndexedDB).</li>
-                </ul>
-              </div>
-
-              {/* Mandatory Password Change Toggle */}
-              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={mandatoryPasswordChange}
-                    onChange={(e) => setMandatoryPasswordChange(e.target.checked)}
-                    className="w-4 h-4 text-sky-600 rounded"
-                  />
-                  <div>
-                    <span className="font-bold text-slate-900 dark:text-white block">
-                      Enforce Mandatory Password Change on First Login
-                    </span>
-                    <span className="text-[11px] text-slate-500 block">
-                      When enabled, users logging in with their initial password must set a new confidential password before accessing hospital data.
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              {/* CSV Input Area */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">
-                    Staff Data (Comma or Tab separated)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleInsertSampleBulkData}
-                    className="text-sky-600 hover:text-sky-500 font-bold text-[11px] cursor-pointer"
-                  >
-                    Paste Sample Template
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 mb-1">
-                  Format per line: <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">Full Name, Department, Role, Phone, Email</code>
-                </p>
-                <textarea
-                  rows={6}
-                  value={bulkInputText}
-                  onChange={(e) => setBulkInputText(e.target.value)}
-                  placeholder="e.g. Dr. Kwame Mensah, OPD, CLINICAL_LEAD, +233 24 111 2222, mensah@hospital.local"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
-                />
-              </div>
-
-              {/* Bulk Results Table if completed */}
-              {bulkResult && (
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
-                  <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white">
-                    <span>Provisioning Outcome</span>
-                    <span className="text-emerald-600">
-                      Created: {bulkResult.created} | Skipped: {bulkResult.skipped}
-                    </span>
-                  </div>
-
-                  <div className="max-h-40 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                        <tr>
-                          <th className="p-2">Full Name</th>
-                          <th className="p-2">Username</th>
-                          <th className="p-2">Initial Password</th>
-                          <th className="p-2">Department</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                        {bulkResult.accounts.map((acc, i) => (
-                          <tr key={i}>
-                            <td className="p-2 font-medium">{acc.fullName}</td>
-                            <td className="p-2 font-mono font-bold text-sky-600">@{acc.username}</td>
-                            <td className="p-2 font-mono font-bold text-emerald-600">{acc.defaultPassword}</td>
-                            <td className="p-2 text-slate-500">{acc.department}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50 dark:bg-slate-800/30">
-              <button
-                type="button"
-                onClick={() => setIsBulkModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
-              >
-                {bulkResult ? 'Close' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteBulkUpload}
-                disabled={isProcessingBulk || !bulkInputText.trim()}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-50 cursor-pointer"
-              >
-                {isProcessingBulk ? 'Provisioning...' : 'Provision Staff Accounts'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL 2: BULK UPLOAD STAFF WITH TEMPLATE */}
+      <StaffBulkUploadModal
+        isOpen={isBulkModalOpen}
+        onClose={() => setIsBulkModalOpen(false)}
+        currentUser={currentUser}
+        onSuccess={onRefresh}
+      />
     </div>
   );
 };
