@@ -217,6 +217,7 @@ All clinical staff are reminded of patient privacy policies. Shared passwords an
         memoType: 'EXECUTIVE_IT_MEMO',
         department: 'Hospital IT Department',
         targetAudience: 'All Clinical Heads of Department, Nursing Supervisors, Medical Directorate, and Pharmacy',
+        targetRoles: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'HOSPITAL_MANAGEMENT', 'DEPARTMENT_HEAD', 'STAFF_USER'],
         fromSender: {
           uid: 'usr-courage-kay',
           name: 'Courage Kay',
@@ -263,6 +264,7 @@ The IT Network Operations Center monitors latency and packet jitter 24/7. In the
         memoType: 'CLINICAL_ADVISORY',
         department: 'Clinical Operations & Health Informatics',
         targetAudience: 'Emergency Department, Outpatient Clinics, Intensive Care Unit, and Main Pharmacy',
+        targetRoles: ['DEPARTMENT_HEAD', 'STAFF_USER', 'HOSPITAL_MANAGEMENT', 'IT_OFFICER'],
         fromSender: {
           uid: 'usr-sarah-mensah',
           name: 'Dr. Sarah Mensah',
@@ -308,6 +310,7 @@ Once the IT Department issues the "LHIMS Normal Operations Restored" broadcast, 
         memoType: 'OPERATIONS_REPORT',
         department: 'Hospital IT Operations & Systems Administration',
         targetAudience: 'Hospital Executive Committee, Quality Assurance Board, and Department Heads',
+        targetRoles: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'HOSPITAL_MANAGEMENT', 'DEPARTMENT_HEAD', 'PROCUREMENT_OFFICER', 'AUDITOR', 'STAFF_USER'],
         fromSender: {
           uid: 'usr-courage-kay',
           name: 'Courage Kay',

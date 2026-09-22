@@ -58,10 +58,43 @@ export const MemoDetailModal: React.FC<MemoDetailModalProps> = ({
   const letterheadFooterText = systemSettings?.letterheadFooterText || 'CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (HITOMS)';
   const letterheadMode = systemSettings?.letterheadMode || 'HEADER_AND_BANNER';
 
+  const isITUser = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'IT_ADMIN' || currentUser?.role === 'IT_OFFICER';
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const isITLeader = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'IT_ADMIN';
   const isAuthor = currentUser?.id === memo.fromSender.uid;
-  const canApprove = isSuperAdmin || currentUser?.role === 'HOSPITAL_MANAGEMENT';
+  const canApprove = isSuperAdmin || currentUser?.role === 'IT_ADMIN';
+
+  const isPdfLetterhead = Boolean(
+    letterheadImage &&
+      (letterheadImage.startsWith('data:application/pdf') ||
+        letterheadImage.includes('application/pdf') ||
+        letterheadImage.toLowerCase().includes('.pdf'))
+  );
+
+  if (!isITUser) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full border border-slate-200 dark:border-slate-800 text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 flex items-center justify-center mx-auto">
+            <Shield className="w-7 h-7" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+            Restricted Access
+          </h3>
+          <p className="text-xs text-slate-500">
+            Access to hospital memorandums, directorate advisories, and publishing controls is strictly restricted to Super Administrators and IT Personnel.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 text-xs font-bold cursor-pointer hover:opacity-90"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handlePrint = () => {
     window.print();
@@ -209,11 +242,27 @@ export const MemoDetailModal: React.FC<MemoDetailModalProps> = ({
           {/* UPLOADED GRAPHIC LETTERHEAD BANNER (If present) */}
           {letterheadImage && (letterheadMode === 'CUSTOM_BANNER' || letterheadMode === 'HEADER_AND_BANNER') && (
             <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm print:border-none print:shadow-none bg-slate-900 print:bg-transparent">
-              <img
-                src={letterheadImage}
-                alt="Hospital Letterhead Banner"
-                className="w-full max-h-44 sm:max-h-56 object-contain sm:object-cover mx-auto print:max-h-48"
-              />
+              {isPdfLetterhead ? (
+                <div className="w-full">
+                  <object
+                    data={letterheadImage}
+                    type="application/pdf"
+                    className="w-full h-44 sm:h-56 rounded-xl overflow-hidden print:h-48"
+                  >
+                    <iframe
+                      src={`${letterheadImage}#toolbar=0&navpanes=0`}
+                      className="w-full h-44 sm:h-56 rounded-xl border-none"
+                      title="Hospital Letterhead PDF Banner"
+                    />
+                  </object>
+                </div>
+              ) : (
+                <img
+                  src={letterheadImage}
+                  alt="Hospital Letterhead Banner"
+                  className="w-full max-h-44 sm:max-h-56 object-contain sm:object-cover mx-auto print:max-h-48"
+                />
+              )}
             </div>
           )}
 

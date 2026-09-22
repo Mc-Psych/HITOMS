@@ -138,7 +138,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'reports',
-      label: 'Memos & Reports',
+      label:
+        role === 'SUPER_ADMIN' || role === 'IT_ADMIN' || role === 'IT_OFFICER'
+          ? 'Memos & Reports'
+          : 'Operations & Data Reports',
       icon: FileBarChart2,
       rolesAllowed: [
         'SUPER_ADMIN',
@@ -148,7 +151,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         'DEPARTMENT_HEAD',
         'PROCUREMENT_OFFICER',
         'AUDITOR',
-        'STAFF_USER',
       ],
     },
     {

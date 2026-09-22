@@ -73,6 +73,13 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isPdfLetterhead = Boolean(
+    letterheadImage &&
+      (letterheadImage.startsWith('data:application/pdf') ||
+        letterheadImage.includes('application/pdf') ||
+        letterheadImage.toLowerCase().includes('.pdf'))
+  );
+
   useEffect(() => {
     if (systemSettings) {
       setLetterheadImage(systemSettings.hospitalLetterheadImage || '');
@@ -103,13 +110,16 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setError('Please select a valid image file (PNG, JPG, SVG, WebP).');
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+    if (!isImage && !isPdf) {
+      setError('Please select a valid image file (PNG, JPG, SVG, WebP) or official letterhead PDF document.');
       return;
     }
 
-    if (file.size > 3.5 * 1024 * 1024) {
-      setError('Letterhead image exceeds 3.5MB. Please choose an optimized image.');
+    if (file.size > 6 * 1024 * 1024) {
+      setError('Letterhead file exceeds 6MB. Please choose an optimized file.');
       return;
     }
 
@@ -292,11 +302,33 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
               {/* If Uploaded/Preset Banner exists and mode is BANNER */}
               {letterheadImage && (letterheadMode === 'CUSTOM_BANNER' || letterheadMode === 'HEADER_AND_BANNER') && (
                 <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm bg-slate-900">
-                  <img
-                    src={letterheadImage}
-                    alt="Official Letterhead Banner"
-                    className="w-full max-h-36 sm:max-h-44 object-contain sm:object-cover mx-auto"
-                  />
+                  {isPdfLetterhead ? (
+                    <div className="p-3 text-center space-y-2 bg-slate-900">
+                      <div className="flex items-center justify-center gap-2 text-rose-400 font-bold text-xs">
+                        <FileText className="w-4 h-4" />
+                        <span>Official PDF Letterhead Document Loaded</span>
+                      </div>
+                      <div className="w-full h-44 sm:h-52 rounded-lg overflow-hidden border border-slate-700 bg-white">
+                        <object
+                          data={letterheadImage}
+                          type="application/pdf"
+                          className="w-full h-full"
+                        >
+                          <iframe
+                            src={`${letterheadImage}#toolbar=0&navpanes=0`}
+                            className="w-full h-full border-none"
+                            title="Hospital Letterhead PDF Preview"
+                          />
+                        </object>
+                      </div>
+                    </div>
+                  ) : (
+                    <img
+                      src={letterheadImage}
+                      alt="Official Letterhead Banner"
+                      className="w-full max-h-36 sm:max-h-44 object-contain sm:object-cover mx-auto"
+                    />
+                  )}
                 </div>
               )}
 
@@ -367,10 +399,10 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
                 <div>
                   <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                     <Upload className="w-4 h-4 text-sky-600" />
-                    <span>Upload Custom Letterhead Banner File</span>
+                    <span>Upload Custom Letterhead Banner or PDF</span>
                   </h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Upload an 8.5" letterhead top banner (recommended size: 1200x240px or 1920x350px PNG/JPG/SVG).
+                    Upload an official hospital letterhead banner (PNG, JPG, SVG, WebP) or PDF document.
                   </p>
                 </div>
 
@@ -390,21 +422,21 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
                 <input
                   type="file"
                   ref={fileInputRef}
-                  accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                  accept="image/png, image/jpeg, image/webp, image/svg+xml, application/pdf, .pdf"
                   onChange={handleFileChange}
                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                 />
                 <div className="w-14 h-14 rounded-2xl bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center mb-3 group-hover:scale-110 transition shadow-inner">
-                  <ImageIcon className="w-7 h-7" />
+                  <FileText className="w-7 h-7" />
                 </div>
                 <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Drag and drop your official letterhead banner here
+                  Drag and drop your official letterhead (PDF or Image) here
                 </h5>
                 <p className="text-[11px] text-slate-500 mt-1 max-w-sm">
-                  Click to browse from your computer. Supports PNG, JPG, WebP, and SVG formats up to 3.5MB.
+                  Click to browse from your computer. Supports PDF documents, PNG, JPG, WebP, and SVG formats up to 6MB.
                 </p>
                 <span className="mt-3 px-3 py-1 rounded-full text-[10px] font-bold bg-sky-50 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-700">
-                  Select Banner File
+                  Select Letterhead File (PDF / Image)
                 </span>
               </div>
             </div>

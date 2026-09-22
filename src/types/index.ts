@@ -639,6 +639,7 @@ export interface HospitalMemo {
   memoType: MemoType;
   department: string;
   targetAudience: string;
+  targetRoles?: Role[];
   fromSender: {
     uid: string;
     name: string;
@@ -669,6 +670,7 @@ export interface AiMemoRequest {
   memoType: MemoType;
   topic: string;
   targetAudience?: string;
+  targetRoles?: Role[];
   department?: string;
   rawNotes: string;
   tone?: 'FORMAL' | 'URGENT' | 'CLINICAL_ADVISORY' | 'EXECUTIVE' | 'EDUCATIONAL';
@@ -685,6 +687,7 @@ export interface AiMemoResponse {
   title: string;
   memoType: MemoType;
   targetAudience: string;
+  targetRoles?: Role[];
   executiveSummary: string;
   backgroundAndContext: string;
   detailedFindingsOrBody: string;

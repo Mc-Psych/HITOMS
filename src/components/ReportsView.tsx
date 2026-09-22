@@ -74,8 +74,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const safeIncidents = incidents || [];
   const safeInventory = inventory || [];
 
-  // Active Main Navigation Tab
-  const [activeTab, setActiveTab] = useState<'MEMOS' | 'EXECUTIVE_AI_REPORT' | 'DATA_REGISTERS'>('MEMOS');
+  const isITUser =
+    currentUser?.role === 'SUPER_ADMIN' ||
+    currentUser?.role === 'IT_ADMIN' ||
+    currentUser?.role === 'IT_OFFICER';
+
+  // Active Main Navigation Tab (Default to MEMOS if IT User, else DATA_REGISTERS)
+  const [activeTab, setActiveTab] = useState<'MEMOS' | 'EXECUTIVE_AI_REPORT' | 'DATA_REGISTERS'>(
+    isITUser ? 'MEMOS' : 'DATA_REGISTERS'
+  );
+
+  useEffect(() => {
+    if (!isITUser && activeTab === 'MEMOS') {
+      setActiveTab('DATA_REGISTERS');
+    }
+  }, [isITUser, activeTab]);
 
   // Memos State
   const [memos, setMemos] = useState<HospitalMemo[]>([]);
@@ -302,61 +315,69 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
             <div className="w-8 h-8 rounded-xl bg-purple-600/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
               <FileBarChart2 className="w-5 h-5" />
             </div>
-            <span>Hospital Memos & Operations Reports</span>
-            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
-              <Sparkles className="w-3 h-3" />
-              <span>AI Write-Up Enabled</span>
-            </span>
+            <span>{isITUser ? 'Hospital Memos & Operations Reports' : 'Hospital Operations & Data Reports'}</span>
+            {isITUser && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+                <Sparkles className="w-3 h-3" />
+                <span>AI Write-Up Enabled</span>
+              </span>
+            )}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Draft authoritative clinical memorandums, generate automated executive IT reports with Gemini AI, and export operational datasets.
+            {isITUser
+              ? 'Draft authoritative clinical memorandums, generate automated executive IT reports with Gemini AI, and export operational datasets.'
+              : 'Access operational registers, system performance datasets, and hospital IT compliance reports.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
-          <button
-            type="button"
-            onClick={() => setIsLetterheadModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-2xs transition cursor-pointer"
-            title="Upload or change official hospital letterhead banner for memos and printable records"
-          >
-            <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-            <span>Upload Letterhead</span>
-          </button>
+        {isITUser && (
+          <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
+            <button
+              type="button"
+              onClick={() => setIsLetterheadModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+              title="Upload or change official hospital letterhead banner (PDF or image) for memos and printable records"
+            >
+              <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+              <span>Upload Letterhead</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMemoToEdit(null);
-              setIsEditorOpen(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>New AI Memo Write-Up</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMemoToEdit(null);
+                setIsEditorOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>New AI Memo Write-Up</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Top Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('MEMOS')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'MEMOS'
-              ? 'bg-purple-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>Hospital Memos & Circulars</span>
-          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-            activeTab === 'MEMOS' ? 'bg-purple-800 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-          }`}>
-            {memos.length}
-          </span>
-        </button>
+        {isITUser && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('MEMOS')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === 'MEMOS'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Hospital Memos & Circulars</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+              activeTab === 'MEMOS' ? 'bg-purple-800 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+            }`}>
+              {memos.length}
+            </span>
+          </button>
+        )}
 
         <button
           type="button"
