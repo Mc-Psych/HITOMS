@@ -9,9 +9,11 @@ import {
   getAllFromStore,
   getFromStore,
   putToStore,
+  putBatchToStore,
   deleteFromStore,
   generateUUID,
   getDeviceId,
+  setSkipSyncEnqueue,
   type StoreName,
 } from './localDatabaseService';
 import { isFirebaseConfigured, firebaseClients } from './firebaseConfig';
@@ -183,21 +185,33 @@ class SyncService {
       const collectionRef = collection(firebaseClients.firestore, collectionName);
       const querySnapshot = await getDocs(collectionRef);
 
-      const remoteIds = new Set<string>();
+      const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
+      const itemsToSave: any[] = [];
 
       // Read remote docs
       for (const document of querySnapshot.docs) {
         const remoteData = document.data();
         const id = document.id;
-        remoteIds.add(id);
 
         // Check if there is a pending local change in queue for this item
-        const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
         const hasPendingEdit = queue.some((q) => q.entityType === storeName && q.entityId === id);
         if (hasPendingEdit) continue;
 
-        // Save remote item to local store
-        await putToStore(storeName, { ...remoteData, id, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() });
+        itemsToSave.push({
+          ...remoteData,
+          id,
+          _syncStatus: 'SYNCED',
+          _lastSyncedAt: new Date().toISOString()
+        });
+      }
+
+      if (itemsToSave.length > 0) {
+        setSkipSyncEnqueue(true);
+        try {
+          await putBatchToStore(storeName, itemsToSave);
+        } finally {
+          setSkipSyncEnqueue(false);
+        }
       }
 
       // If Firestore has 0 documents for this collection, but local store has items,
@@ -251,7 +265,12 @@ class SyncService {
           if (entity) {
             entity._syncStatus = 'SYNCED';
             entity._lastSyncedAt = new Date().toISOString();
-            await putToStore(item.entityType as StoreName, entity);
+            setSkipSyncEnqueue(true);
+            try {
+              await putToStore(item.entityType as StoreName, entity);
+            } finally {
+              setSkipSyncEnqueue(false);
+            }
           }
         } catch (err: any) {
           console.warn(`Sync failed for item ${item.entityId}:`, err);
@@ -262,7 +281,12 @@ class SyncService {
           } else {
             item.status = 'RETRYING';
           }
-          await putToStore('syncQueue', item);
+          setSkipSyncEnqueue(true);
+          try {
+            await putToStore('syncQueue', item);
+          } finally {
+            setSkipSyncEnqueue(false);
+          }
         }
       }
 
@@ -279,9 +303,10 @@ class SyncService {
           { col: 'settings', store: 'settings' },
         ];
 
-        for (const { col, store } of collectionsToSync) {
-          await this.pullCollectionFromFirestore(col, store);
-        }
+        // Process in parallel for speed!
+        await Promise.all(
+          collectionsToSync.map(({ col, store }) => this.pullCollectionFromFirestore(col, store))
+        );
       }
 
       this.stats.lastSuccessfulSync = new Date().toISOString();

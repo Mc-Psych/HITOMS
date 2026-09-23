@@ -27,6 +27,16 @@ import {
 const DB_NAME = 'HITOMS_Local_Database_v2';
 const DB_VERSION = 3;
 
+let skipSyncEnqueue = false;
+
+export function setSkipSyncEnqueue(skip: boolean) {
+  skipSyncEnqueue = skip;
+}
+
+export function isSkipSyncEnqueue(): boolean {
+  return skipSyncEnqueue;
+}
+
 export const STORE_NAMES = {
   users: 'users',
   departments: 'departments',
@@ -236,7 +246,7 @@ export async function getFromStore<T>(storeName: StoreName, key: string): Promis
   });
 }
 
-export async function putToStore<T extends { id?: string; operationId?: string }>(
+export async function putToStore<T extends { id?: string; operationId?: string; _syncStatus?: string }>(
   storeName: StoreName,
   value: T
 ): Promise<T> {
@@ -249,12 +259,32 @@ export async function putToStore<T extends { id?: string; operationId?: string }
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
     const request = store.put(value);
-    request.onsuccess = () => resolve(value);
+    request.onsuccess = () => {
+      // Automatic real-time Sync Enqueue
+      if (
+        !skipSyncEnqueue &&
+        value._syncStatus !== 'SYNCED' &&
+        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+      ) {
+        import('./syncService').then(({ syncService }) => {
+          syncService.enqueueOperation(
+            storeName,
+            value.id || '',
+            'UPDATE',
+            value
+          ).catch((e) => console.warn('[localDatabaseService] Async sync failed:', e));
+        });
+      }
+      resolve(value);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function putBatchToStore<T>(storeName: StoreName, values: T[]): Promise<void> {
+export async function putBatchToStore<T extends { id?: string; operationId?: string; _syncStatus?: string }>(
+  storeName: StoreName,
+  values: T[]
+): Promise<void> {
   const db = await getDB();
   if (!db.objectStoreNames.contains(storeName)) {
     console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring putBatch.`);
@@ -266,7 +296,27 @@ export async function putBatchToStore<T>(storeName: StoreName, values: T[]): Pro
     for (const item of values) {
       store.put(item);
     }
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      // Automatic real-time Sync Enqueue for Batch
+      if (
+        !skipSyncEnqueue &&
+        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+      ) {
+        import('./syncService').then(({ syncService }) => {
+          for (const item of values) {
+            if (item && item.id && item._syncStatus !== 'SYNCED') {
+              syncService.enqueueOperation(
+                storeName,
+                item.id,
+                'UPDATE',
+                item
+              ).catch((e) => console.warn('[localDatabaseService] Batch async sync failed:', e));
+            }
+          }
+        });
+      }
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -281,7 +331,23 @@ export async function deleteFromStore(storeName: StoreName, key: string): Promis
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
     const request = store.delete(key);
-    request.onsuccess = () => resolve();
+    request.onsuccess = () => {
+      // Automatic real-time Sync Enqueue for Deletes
+      if (
+        !skipSyncEnqueue &&
+        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+      ) {
+        import('./syncService').then(({ syncService }) => {
+          syncService.enqueueOperation(
+            storeName,
+            key,
+            'DELETE',
+            null
+          ).catch((e) => console.warn('[localDatabaseService] Sync delete failed:', e));
+        });
+      }
+      resolve();
+    };
     request.onerror = () => reject(request.error);
   });
 }

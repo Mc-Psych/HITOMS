@@ -21,8 +21,11 @@ import {
   putToStore,
   getDeviceId,
   generateUUID,
+  setSkipSyncEnqueue,
 } from './localDatabaseService';
 import { memoService } from './memoService';
+import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
+import { collection, getDocs } from 'firebase/firestore';
 
 export async function ensureSuperAdminCourageKay(): Promise<void> {
   try {
@@ -100,6 +103,59 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
     await memoService.getMemos();
     return; // Already initialized, ensured Courage Kay is super admin and memos are ready
   }
+
+  // If Firebase is configured, try to pull from Firestore to hydrate instead of local mock seed data
+  if (isFirebaseConfigured() && firebaseClients.firestore) {
+    try {
+      const db = firebaseClients.firestore;
+      const usersRef = collection(db, 'users');
+      const usersSnap = await getDocs(usersRef);
+
+      if (!usersSnap.empty) {
+        console.log('[SeedData] Found existing data on Firestore. Hydrating IndexedDB from cloud seed...');
+        setSkipSyncEnqueue(true);
+
+        const collectionsToSync: Array<{ col: string; store: any }> = [
+          { col: 'users', store: 'users' },
+          { col: 'tickets', store: 'tickets' },
+          { col: 'assets', store: 'assets' },
+          { col: 'inventory', store: 'inventory' },
+          { col: 'maintenance', store: 'maintenance' },
+          { col: 'incidents', store: 'incidents' },
+          { col: 'memos', store: 'memos' },
+          { col: 'settings', store: 'settings' },
+        ];
+
+        for (const { col, store } of collectionsToSync) {
+          const colRef = collection(db, col);
+          const snap = await getDocs(colRef);
+          const items: any[] = [];
+          snap.forEach((doc) => {
+            items.push({
+              ...doc.data(),
+              id: doc.id,
+              _syncStatus: 'SYNCED',
+              _lastSyncedAt: new Date().toISOString()
+            });
+          });
+          if (items.length > 0) {
+            await putBatchToStore(store, items);
+          }
+        }
+
+        setSkipSyncEnqueue(false);
+        await ensureSuperAdminCourageKay();
+        await memoService.getMemos();
+        console.log('[SeedData] Hydration from Firestore seed complete!');
+        return;
+      }
+    } catch (e) {
+      setSkipSyncEnqueue(false);
+      console.warn('[SeedData] Failed to hydrate from Firestore on bootstrap. Falling back to local static seed data:', e);
+    }
+  }
+
+  setSkipSyncEnqueue(true);
 
   const deviceId = getDeviceId();
   const now = new Date().toISOString();
@@ -1594,5 +1650,6 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   await putToStore('settings', { ...settings, id: 'main' });
   await putToStore('settings', { ...settings, id: 'app_settings' });
 
+  setSkipSyncEnqueue(false);
   console.log('HITOMS initial seed data populated successfully.');
 }
