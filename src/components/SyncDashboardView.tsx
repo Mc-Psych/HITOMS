@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { IntegrityReportWidget } from './IntegrityReportWidget';
 import {
   RefreshCw,
   Wifi,
@@ -160,6 +161,9 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
         </div>
       </div>
 
+      {/* Data Integrity & Offline Health Report Widget */}
+      <IntegrityReportWidget onDataRepaired={onRefresh} />
+
       {/* Strategy Selector Panel */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-3">
         <div className="flex items-center justify-between">
@@ -229,9 +233,9 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {syncQueue.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                  <tr key={item.operationId || item.entityId} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="px-4 py-3 font-mono text-slate-500">
-                      {new Date(item.timestamp).toLocaleTimeString()}
+                      {new Date(item.createdAt).toLocaleTimeString()}
                     </td>
                     <td className="px-4 py-3 font-bold text-sky-600">
                       {item.storeName}
@@ -285,15 +289,15 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
                 />
                 <div>
                   <div className="font-semibold text-slate-900 dark:text-white">
-                    Batch Sync: {log.recordsPushed} pushed, {log.recordsPulled} pulled, {log.conflictsResolved} conflicts
+                    {log.message || `Batch Sync completed successfully.`}
                   </div>
                   <div className="text-[10px] text-slate-400">
-                    Duration: {log.durationMs}ms | Triggered by {log.triggeredBy}
+                    Status: {log.status} | Sync count: {log.count} records
                   </div>
                 </div>
               </div>
               <span className="font-mono text-slate-500 text-[11px]">
-                {new Date(log.startedAt).toLocaleString()}
+                {new Date(log.timestamp).toLocaleString()}
               </span>
             </div>
           ))}

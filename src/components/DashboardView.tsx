@@ -1,4 +1,5 @@
 import React from 'react';
+import { IntegrityReportWidget } from './IntegrityReportWidget';
 import {
   LifeBuoy,
   HardDrive,
@@ -91,6 +92,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Offline Data Integrity & Health Report Widget */}
+      <IntegrityReportWidget />
 
       {/* Hospital System Status Cards (LHIMS, QuickBooks, Quixmo, Starlink, etc.) */}
       <div>

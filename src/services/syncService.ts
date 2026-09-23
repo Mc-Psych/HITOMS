@@ -181,17 +181,19 @@ class SyncService {
   private async pullCollectionFromFirestore(collectionName: string, storeName: StoreName): Promise<void> {
     if (!isFirebaseConfigured() || !firebaseClients.firestore) return;
     try {
-      const { collection, getDocs, setDoc, doc } = await import('firebase/firestore');
+      const { collection, getDocs, doc, writeBatch } = await import('firebase/firestore');
       const collectionRef = collection(firebaseClients.firestore, collectionName);
       const querySnapshot = await getDocs(collectionRef);
 
       const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
       const itemsToSave: any[] = [];
+      const remoteDocIds = new Set<string>();
 
       // Read remote docs
       for (const document of querySnapshot.docs) {
         const remoteData = document.data();
         const id = document.id;
+        remoteDocIds.add(id);
 
         // Check if there is a pending local change in queue for this item
         const hasPendingEdit = queue.some((q) => q.entityType === storeName && q.entityId === id);
@@ -214,15 +216,52 @@ class SyncService {
         }
       }
 
+      // Reconcile Deletions: Remove local IndexedDB items no longer present in Firestore
+      if (!querySnapshot.empty) {
+        const localItems = await getAllFromStore<any>(storeName);
+        const localItemsToDelete: string[] = [];
+
+        for (const localItem of localItems) {
+          if (!localItem || !localItem.id) continue;
+          if (!remoteDocIds.has(localItem.id)) {
+            // Do not delete if the user/item has a pending local CREATE mutation
+            const hasPendingCreate = queue.some(
+              (q) => q.entityType === storeName && q.entityId === localItem.id && q.operation === 'CREATE'
+            );
+            if (!hasPendingCreate) {
+              localItemsToDelete.push(localItem.id);
+            }
+          }
+        }
+
+        if (localItemsToDelete.length > 0) {
+          setSkipSyncEnqueue(true);
+          try {
+            for (const idToDelete of localItemsToDelete) {
+              await deleteFromStore(storeName, idToDelete);
+            }
+          } finally {
+            setSkipSyncEnqueue(false);
+          }
+        }
+      }
+
       // If Firestore has 0 documents for this collection, but local store has items,
-      // upload the local items to Firestore to seed the cloud database!
+      // upload local items to Firestore using high-speed writeBatch (chunked)
       if (querySnapshot.empty) {
         const localItems = await getAllFromStore<any>(storeName);
-        for (const item of localItems) {
-          if (item && item.id) {
-            const cleanItem = { ...item, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() };
-            const docRef = doc(firebaseClients.firestore, collectionName, item.id);
-            await setDoc(docRef, cleanItem, { merge: true });
+        if (localItems.length > 0) {
+          for (let i = 0; i < localItems.length; i += 400) {
+            const batch = writeBatch(firebaseClients.firestore);
+            const chunk = localItems.slice(i, i + 400);
+            for (const item of chunk) {
+              if (item && item.id) {
+                const cleanItem = { ...item, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() };
+                const docRef = doc(firebaseClients.firestore, collectionName, item.id);
+                batch.set(docRef, cleanItem, { merge: true });
+              }
+            }
+            await batch.commit();
           }
         }
       }
@@ -311,6 +350,11 @@ class SyncService {
 
       this.stats.lastSuccessfulSync = new Date().toISOString();
       await this.refreshCounts();
+
+      // Trigger background integrity validation scan post-sync
+      import('./integrityValidationService').then(({ integrityValidationService }) => {
+        integrityValidationService.runValidationScan().catch((e) => console.warn('[SyncService] Post-sync validation scan error:', e));
+      });
     } catch (error: any) {
       console.error('Error during synchronization:', error);
       this.stats.lastError = error.message;

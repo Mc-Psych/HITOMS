@@ -28,6 +28,7 @@ import {
 } from './types';
 import { initializeSeedDataIfNeeded } from './services/seedData';
 import { authService } from './services/authService';
+import { integrityValidationService } from './services/integrityValidationService';
 import { syncService, type SyncStats } from './services/syncService';
 import { ticketService } from './services/ticketService';
 import { assetService } from './services/assetService';
@@ -184,6 +185,9 @@ export default function App() {
     };
 
     bootApp();
+
+    // Start background periodic data integrity validation service
+    integrityValidationService.startPeriodicValidation();
 
     // Start background 30-minute recurring ticket bell monitor for IT / Super Admin
     ticketSoundService.startRecurringBellMonitor(
