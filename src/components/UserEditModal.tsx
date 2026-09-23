@@ -19,6 +19,11 @@ import {
   UserCheck,
   UserX,
   ShieldAlert,
+  Wrench,
+  Tag,
+  Plus,
+  Sparkles,
+  Info,
 } from 'lucide-react';
 import { type User as UserType, type Role, type AccountStatus } from '../types';
 import {
@@ -26,6 +31,7 @@ import {
   extractSurname,
   getDefaultPasswordForSurname,
   ROLE_DESCRIPTIONS,
+  STANDARD_SPECIALTIES,
 } from '../services/authService';
 
 interface UserEditModalProps {
@@ -88,6 +94,9 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [customDepartment, setCustomDepartment] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [role, setRole] = useState<Role>('STAFF_USER');
+  const [specialties, setSpecialties] = useState<string[]>([]);
+  const [specialtyNotes, setSpecialtyNotes] = useState('');
+  const [customSpecialtyInput, setCustomSpecialtyInput] = useState('');
   const [status, setStatus] = useState<AccountStatus>('Active');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -116,6 +125,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       }
       setJobTitle(userToEdit.jobTitle || '');
       setRole(userToEdit.role || 'STAFF_USER');
+      setSpecialties(userToEdit.specialties || []);
+      setSpecialtyNotes(userToEdit.specialtyNotes || '');
       setStatus(userToEdit.status || 'Active');
       setPassword('');
       setMustChangePassword(userToEdit.mustChangePasswordOnFirstLogin ?? false);
@@ -130,6 +141,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setCustomDepartment('');
       setJobTitle('');
       setRole('STAFF_USER');
+      setSpecialties([]);
+      setSpecialtyNotes('');
       setStatus('Active');
       setPassword('');
       setMustChangePassword(true);
@@ -139,6 +152,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setShowDeleteConfirm(false);
     setShowSuspendModal(false);
     setDeleteConfirmText('');
+    setCustomSpecialtyInput('');
   }, [userToEdit, isOpen]);
 
   if (!isOpen) return null;
@@ -161,6 +175,25 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const handleGenerateDefaultPassword = () => {
     const surname = extractSurname(fullName || 'user');
     setPassword(getDefaultPasswordForSurname(surname));
+  };
+
+  const handleToggleSpecialty = (specId: string) => {
+    setSpecialties((prev) =>
+      prev.includes(specId) ? prev.filter((s) => s !== specId) : [...prev, specId]
+    );
+  };
+
+  const handleAddCustomSpecialty = () => {
+    const trimmed = customSpecialtyInput.trim();
+    if (!trimmed) return;
+    if (!specialties.includes(trimmed)) {
+      setSpecialties((prev) => [...prev, trimmed]);
+    }
+    setCustomSpecialtyInput('');
+  };
+
+  const handleRemoveSpecialty = (spec: string) => {
+    setSpecialties((prev) => prev.filter((s) => s !== spec));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -187,6 +220,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           department: effectiveDepartment,
           jobTitle: jobTitle.trim(),
           role: role,
+          specialties: specialties,
+          specialtyNotes: specialtyNotes.trim(),
           status: status,
           offlineAccessAllowed: offlineAllowed,
           mustChangePasswordOnFirstLogin: mustChangePassword,
@@ -207,6 +242,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             department: effectiveDepartment,
             jobTitle: jobTitle.trim(),
             role: role,
+            specialties: specialties,
+            specialtyNotes: specialtyNotes.trim(),
             status: status,
             password: password.trim() || undefined,
             offlineAccessAllowed: offlineAllowed,
@@ -275,8 +312,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       userToEdit?.fullName.toLowerCase().includes('courage kay'));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
           <div className="flex items-center gap-3">
@@ -306,8 +343,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
               </h2>
               <p className="text-xs text-slate-500">
                 {isEditing
-                  ? `ID: ${userToEdit?.id} • Manage role authorization, credentials, and access status.`
-                  : 'Create a new staff member profile with offline-first login credentials.'}
+                  ? `ID: ${userToEdit?.id} • Manage role authorization, specialties, credentials, and account lifecycle.`
+                  : 'Create a new staff member profile with offline-first login credentials and role specialties.'}
               </p>
             </div>
           </div>
@@ -329,7 +366,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
           {/* Section 1: Basic Identity */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -509,7 +546,120 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Credentials & Login Security */}
+          {/* Section 3: Technical / Clinical Specialties */}
+          <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Wrench className="w-3.5 h-3.5" />
+                <span>Specialties & Domain Expertise</span>
+              </h3>
+              <span className="text-[11px] text-slate-400">
+                {specialties.length} Selected
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Select key technical skills, clinical systems, or infrastructure domains assigned to this user profile. Enables smart ticket auto-triage and duty roster routing.
+            </p>
+
+            {/* Standard Specialties Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+              {STANDARD_SPECIALTIES.map((spec) => {
+                const isSelected = specialties.includes(spec.id);
+                return (
+                  <button
+                    type="button"
+                    key={spec.id}
+                    onClick={() => handleToggleSpecialty(spec.id)}
+                    className={`p-2 rounded-xl text-left border text-xs font-semibold transition cursor-pointer flex items-center justify-between ${
+                      isSelected
+                        ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 shadow-2xs'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="truncate pr-1">{spec.label}</span>
+                    <span
+                      className={`w-4 h-4 rounded-md shrink-0 flex items-center justify-center text-[10px] ${
+                        isSelected
+                          ? 'bg-sky-600 text-white font-bold'
+                          : 'border border-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      {isSelected ? '✓' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Specialties Input */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Tag className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={customSpecialtyInput}
+                    onChange={(e) => setCustomSpecialtyInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomSpecialty();
+                      }
+                    }}
+                    placeholder="Add custom specialty tag (e.g. CCTV & Surveillance, Solar PV)..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddCustomSpecialty}
+                  disabled={!customSpecialtyInput.trim()}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs disabled:opacity-40 transition cursor-pointer flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add</span>
+                </button>
+              </div>
+
+              {/* Selected Specialties Badges */}
+              {specialties.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                  {specialties.map((s) => (
+                    <span
+                      key={s}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-200 border border-sky-200 dark:border-sky-800"
+                    >
+                      <span>{s}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSpecialty(s)}
+                        className="hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer ml-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Specialty Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Specialty Assignment Notes / Specific Coverage
+                </label>
+                <input
+                  type="text"
+                  value={specialtyNotes}
+                  onChange={(e) => setSpecialtyNotes(e.target.value)}
+                  placeholder="e.g. Primary technician on 2nd Floor ICU LHIMS terminals & Starlink gateway"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Credentials & Login Security */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -576,13 +726,13 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
 
           {/* Quick Actions for Super Admin (Suspend / Activate / Delete) */}
           {isEditing && isSuperAdmin && !isSelf && (
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30 p-3 rounded-xl">
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30 p-3.5 rounded-xl">
               <div className="flex items-center gap-2">
                 {status === 'Active' ? (
                   <button
                     type="button"
                     onClick={() => setShowSuspendModal(true)}
-                    className="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
                     <UserX className="w-3.5 h-3.5" />
                     <span>Suspend User</span>
@@ -591,7 +741,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleToggleStatus('Active')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
                     <UserCheck className="w-3.5 h-3.5" />
                     <span>Reactivate User</span>
@@ -603,10 +753,10 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete User Profile</span>
+                  <span>Permanently Delete User</span>
                 </button>
               )}
             </div>
@@ -622,7 +772,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     Are you sure you want to permanently delete {userToEdit?.fullName}?
                   </h4>
                   <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-snug">
-                    This will remove their login profile and credentials from the offline IndexedDB database. Their historical audit logs and ticket records will remain for compliance.
+                    This will permanently remove their user credentials, role permissions, and offline profile from the database.
                   </p>
                 </div>
               </div>
@@ -650,7 +800,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                    className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -669,7 +819,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     Suspend User Account: {userToEdit?.fullName}
                   </h4>
                   <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
-                    This staff member will immediately be locked out from logging in or modifying tickets until reactivated.
+                    This staff member will immediately be locked out from logging in or modifying hospital tickets until reactivated.
                   </p>
                 </div>
               </div>
@@ -698,7 +848,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowSuspendModal(false)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                    className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -708,7 +858,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           )}
 
           {/* Form Footer */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 sticky bottom-0 bg-white dark:bg-slate-900 py-2">
             <button
               type="button"
               onClick={onClose}
@@ -723,7 +873,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
               className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{isEditing ? 'Save Changes' : 'Provision Staff Account'}</span>
+              <span>{isEditing ? 'Save Staff Changes' : 'Provision Staff Account'}</span>
             </button>
           </div>
         </form>

@@ -44,6 +44,28 @@ export function getUserInitials(fullName: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+export interface SpecialtyDefinition {
+  id: string;
+  label: string;
+  category: 'Infrastructure' | 'Hardware' | 'Software' | 'Clinical' | 'Security' | 'Operations';
+  color: string;
+}
+
+export const STANDARD_SPECIALTIES: SpecialtyDefinition[] = [
+  { id: 'Network & Starlink', label: 'Network & Starlink WAN', category: 'Infrastructure', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border-indigo-200' },
+  { id: 'Hardware & Workstations', label: 'Hardware & Workstations', category: 'Hardware', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border-blue-200' },
+  { id: 'LHIMS / Hospital EHR', label: 'LHIMS / Hospital EHR Systems', category: 'Software', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-purple-200' },
+  { id: 'Printers & Barcodes', label: 'Printers & Barcode Scanners', category: 'Hardware', color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300 border-cyan-200' },
+  { id: 'Servers & Virtualization', label: 'Datacenter Servers & Virtualization', category: 'Infrastructure', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-300' },
+  { id: 'Database & SQL', label: 'Database & Data Replication', category: 'Software', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200' },
+  { id: 'Power, UPS & Inverters', label: 'Datacenter Power & UPS Inverters', category: 'Infrastructure', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-200' },
+  { id: 'Biomedical & Diagnostic Devices', label: 'Biomedical & Diagnostic Consoles', category: 'Clinical', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-200' },
+  { id: 'Telephony & Intercoms', label: 'IP PBX Telephony & Ward Intercoms', category: 'Infrastructure', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 border-teal-200' },
+  { id: 'Cybersecurity & Endpoint Security', label: 'Cybersecurity & Endpoint Antivirus', category: 'Security', color: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300 border-violet-200' },
+  { id: 'Clinical Informatics & Triage', label: 'Clinical Informatics & Ward Triage', category: 'Clinical', color: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border-sky-200' },
+  { id: 'Procurement & Inventory', label: 'IT Procurement & Spare Inventory', category: 'Operations', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300 border-orange-200' },
+];
+
 export type Permission =
   | 'users.view'
   | 'users.create'
@@ -782,6 +804,8 @@ class AuthService {
       department: userData.department?.trim() || 'General Clinical',
       jobTitle: userData.jobTitle?.trim() || 'Hospital Staff',
       role: userData.role || 'STAFF_USER',
+      specialties: userData.specialties || [],
+      specialtyNotes: userData.specialtyNotes?.trim() || '',
       status: userData.status || 'Active',
       createdAt: now,
       updatedAt: now,
@@ -835,6 +859,8 @@ class AuthService {
     if (updates.phone !== undefined) user.phone = updates.phone.trim();
     if (updates.department !== undefined) user.department = updates.department.trim();
     if (updates.jobTitle !== undefined) user.jobTitle = updates.jobTitle.trim();
+    if (updates.specialties !== undefined) user.specialties = updates.specialties;
+    if (updates.specialtyNotes !== undefined) user.specialtyNotes = updates.specialtyNotes.trim();
     if (updates.photoURL !== undefined) user.photoURL = updates.photoURL;
     if (updates.offlineAccessAllowed !== undefined) user.offlineAccessAllowed = updates.offlineAccessAllowed;
 

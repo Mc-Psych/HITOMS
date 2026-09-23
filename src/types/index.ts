@@ -30,6 +30,8 @@ export interface User extends SyncMetadata {
   department: string;
   jobTitle: string;
   role: Role;
+  specialties?: string[]; // Technical & clinical specializations (e.g., Network, Hardware, LHIMS, Servers, Database, etc.)
+  specialtyNotes?: string;
   status: AccountStatus;
   createdAt: string;
   updatedAt: string;

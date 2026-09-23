@@ -39,6 +39,10 @@ import {
   Search,
   Filter,
   Trash2,
+  Wrench,
+  Tag,
+  ShieldAlert,
+  Activity,
 } from 'lucide-react';
 import {
   type User as UserType,
@@ -57,6 +61,7 @@ import {
   PERMISSION_DEFINITIONS,
   ROLE_DESCRIPTIONS,
   ROLE_PERMISSIONS,
+  STANDARD_SPECIALTIES,
 } from '../services/authService';
 import { settingsService, DEFAULT_SYSTEM_SETTINGS } from '../services/settingsService';
 import {
@@ -136,12 +141,100 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [userToEdit, setUserToEdit] = useState<UserType | null>(null);
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
   const [staffRoleFilter, setStaffRoleFilter] = useState<Role | 'ALL'>('ALL');
+  const [staffSpecialtyFilter, setStaffSpecialtyFilter] = useState<string | 'ALL'>('ALL');
   const [staffStatusFilter, setStaffStatusFilter] = useState<AccountStatus | 'ALL'>('ALL');
+
+  // Direct table actions state
+  const [userToSuspend, setUserToSuspend] = useState<UserType | null>(null);
+  const [tableSuspensionReason, setTableSuspensionReason] = useState('');
+  const [userToDelete, setUserToDelete] = useState<UserType | null>(null);
+  const [tableDeleteConfirmText, setTableDeleteConfirmText] = useState('');
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [userActionMessage, setUserActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Letterhead modal state
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
   
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
+  const handleDirectSuspend = async () => {
+    if (!currentUser || !userToSuspend) return;
+    setIsActionLoading(true);
+    try {
+      await authService.setUserStatus(
+        userToSuspend.id,
+        'Suspended',
+        currentUser,
+        tableSuspensionReason.trim() || undefined
+      );
+      setUserActionMessage({
+        type: 'success',
+        text: `User ${userToSuspend.fullName} (@${userToSuspend.username || extractSurname(userToSuspend.fullName).toLowerCase()}) has been suspended.`,
+      });
+      setUserToSuspend(null);
+      setTableSuspensionReason('');
+      onRefresh();
+      setTimeout(() => setUserActionMessage(null), 4000);
+    } catch (err: any) {
+      setUserActionMessage({
+        type: 'error',
+        text: err.message || 'Failed to suspend user.',
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDirectReactivate = async (targetUser: UserType) => {
+    if (!currentUser) return;
+    setIsActionLoading(true);
+    try {
+      await authService.setUserStatus(targetUser.id, 'Active', currentUser);
+      setUserActionMessage({
+        type: 'success',
+        text: `User ${targetUser.fullName} reactivated successfully. Full access restored.`,
+      });
+      onRefresh();
+      setTimeout(() => setUserActionMessage(null), 4000);
+    } catch (err: any) {
+      setUserActionMessage({
+        type: 'error',
+        text: err.message || 'Failed to reactivate user.',
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDirectDelete = async () => {
+    if (!currentUser || !userToDelete) return;
+    if (tableDeleteConfirmText.trim().toLowerCase() !== 'delete') {
+      setUserActionMessage({
+        type: 'error',
+        text: 'Please type "delete" to confirm removal of this staff account.',
+      });
+      return;
+    }
+    setIsActionLoading(true);
+    try {
+      await authService.deleteUser(userToDelete.id, currentUser);
+      setUserActionMessage({
+        type: 'success',
+        text: `Staff profile for ${userToDelete.fullName} has been permanently deleted.`,
+      });
+      setUserToDelete(null);
+      setTableDeleteConfirmText('');
+      onRefresh();
+      setTimeout(() => setUserActionMessage(null), 4000);
+    } catch (err: any) {
+      setUserActionMessage({
+        type: 'error',
+        text: err.message || 'Failed to delete user profile.',
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -854,199 +947,423 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
           {/* SUB-VIEW 1: STAFF DIRECTORY */}
           {rbacSubTab === 'STAFF_DIRECTORY' && (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden space-y-3">
-              {/* Directory Filter & Search Header */}
-              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30">
-                <div>
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users className="w-4 h-4 text-sky-600" />
-                    <span>Hospital Staff Directory ({allUsers.length})</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Manage staff user accounts, update profile details, assign RBAC roles, or suspend access.
-                  </p>
+            <div className="space-y-4">
+              {/* Directory Stats Banner */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 flex items-center justify-center font-bold">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Staff</div>
+                    <div className="text-lg font-black text-slate-900 dark:text-white">{allUsers.length}</div>
+                  </div>
                 </div>
 
-                <div className="w-full md:w-auto flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 md:w-48">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={staffSearchQuery}
-                      onChange={(e) => setStaffSearchQuery(e.target.value)}
-                      placeholder="Search staff..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    />
+                <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-bold">
+                    <UserCheck className="w-5 h-5" />
                   </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Active Users</div>
+                    <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
+                      {allUsers.filter((u) => u.status === 'Active' || !u.status).length}
+                    </div>
+                  </div>
+                </div>
 
-                  <select
-                    value={staffRoleFilter}
-                    onChange={(e) => setStaffRoleFilter(e.target.value as Role | 'ALL')}
-                    className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
-                  >
-                    <option value="ALL">All Roles</option>
-                    {ALL_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 flex items-center justify-center font-bold">
+                    <UserX className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Suspended</div>
+                    <div className="text-lg font-black text-rose-600 dark:text-rose-400">
+                      {allUsers.filter((u) => u.status === 'Suspended' || u.status === 'Disabled').length}
+                    </div>
+                  </div>
+                </div>
 
-                  <select
-                    value={staffStatusFilter}
-                    onChange={(e) => setStaffStatusFilter(e.target.value as AccountStatus | 'ALL')}
-                    className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
-                  >
-                    <option value="ALL">All Statuses</option>
-                    <option value="Active">Active</option>
-                    <option value="Suspended">Suspended</option>
-                    <option value="Disabled">Disabled</option>
-                  </select>
+                <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 flex items-center justify-center font-bold">
+                    <Wrench className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">IT & Specialists</div>
+                    <div className="text-lg font-black text-indigo-600 dark:text-indigo-400">
+                      {allUsers.filter((u) => u.role === 'SUPER_ADMIN' || u.role === 'IT_ADMIN' || u.role === 'IT_OFFICER' || (u.specialties && u.specialties.length > 0)).length}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase font-semibold">
-                    <tr>
-                      <th className="px-4 py-3">Staff Profile</th>
-                      <th className="px-4 py-3">Username</th>
-                      <th className="px-4 py-3">Role</th>
-                      <th className="px-4 py-3">Department & Title</th>
-                      <th className="px-4 py-3">Account Status</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {allUsers
-                      .filter((u) => {
-                        const query = staffSearchQuery.trim().toLowerCase();
-                        if (query) {
-                          const matchesName = (u.fullName || '').toLowerCase().includes(query);
-                          const matchesUsername = (u.username || '').toLowerCase().includes(query);
-                          const matchesEmail = (u.email || '').toLowerCase().includes(query);
-                          const matchesDept = (u.department || '').toLowerCase().includes(query);
-                          if (!matchesName && !matchesUsername && !matchesEmail && !matchesDept) return false;
-                        }
-                        if (staffRoleFilter !== 'ALL' && u.role !== staffRoleFilter) return false;
-                        if (staffStatusFilter !== 'ALL' && u.status !== staffStatusFilter) return false;
-                        return true;
-                      })
-                      .map((u) => {
-                        const overrides = authService.getUserPermissionOverrides(u.id);
-                        const hasOverrides = overrides.granted.length > 0 || overrides.revoked.length > 0;
-                        const isSuspended = u.status === 'Suspended' || u.status === 'Disabled';
+              {/* Action Message Banner */}
+              {userActionMessage && (
+                <div
+                  className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between gap-3 animate-in fade-in ${
+                    userActionMessage.type === 'success'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-semibold">
+                    {userActionMessage.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{userActionMessage.text}</span>
+                  </div>
+                  <button
+                    onClick={() => setUserActionMessage(null)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
-                        return (
-                          <tr
-                            key={u.id}
-                            className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
-                              isSuspended ? 'bg-rose-50/30 dark:bg-rose-950/10' : ''
-                            }`}
-                          >
-                            <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] ${
-                                    isSuspended
-                                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                      : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
-                                  }`}
-                                >
-                                  {u.fullName.charAt(0).toUpperCase()}
+              {/* Directory Filter & Search Header */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xs overflow-hidden">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30">
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-sky-600" />
+                      <span>Hospital Staff Directory ({allUsers.length})</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Full Super Admin CRUD: Edit user profiles, assign roles & specialties, reset passwords, suspend, or delete accounts.
+                    </p>
+                  </div>
+
+                  <div className="w-full lg:w-auto flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 sm:w-44">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={staffSearchQuery}
+                        onChange={(e) => setStaffSearchQuery(e.target.value)}
+                        placeholder="Search name, handle, dept, specialty..."
+                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      />
+                    </div>
+
+                    <select
+                      value={staffRoleFilter}
+                      onChange={(e) => setStaffRoleFilter(e.target.value as Role | 'ALL')}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                    >
+                      <option value="ALL">All Roles</option>
+                      {ALL_ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {ROLE_DESCRIPTIONS[r]?.title || r}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={staffSpecialtyFilter}
+                      onChange={(e) => setStaffSpecialtyFilter(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                    >
+                      <option value="ALL">All Specialties</option>
+                      {STANDARD_SPECIALTIES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={staffStatusFilter}
+                      onChange={(e) => setStaffStatusFilter(e.target.value as AccountStatus | 'ALL')}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                    >
+                      <option value="ALL">All Statuses</option>
+                      <option value="Active">Active</option>
+                      <option value="Suspended">Suspended</option>
+                      <option value="Disabled">Disabled</option>
+                    </select>
+
+                    {(staffSearchQuery || staffRoleFilter !== 'ALL' || staffSpecialtyFilter !== 'ALL' || staffStatusFilter !== 'ALL') && (
+                      <button
+                        onClick={() => {
+                          setStaffSearchQuery('');
+                          setStaffRoleFilter('ALL');
+                          setStaffSpecialtyFilter('ALL');
+                          setStaffStatusFilter('ALL');
+                        }}
+                        className="px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 uppercase font-semibold">
+                      <tr>
+                        <th className="px-4 py-3">Staff Profile</th>
+                        <th className="px-4 py-3">Username</th>
+                        <th className="px-4 py-3">Role</th>
+                        <th className="px-4 py-3">Specialties & Domains</th>
+                        <th className="px-4 py-3">Department & Designation</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Super Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {allUsers
+                        .filter((u) => {
+                          const query = staffSearchQuery.trim().toLowerCase();
+                          if (query) {
+                            const matchesName = (u.fullName || '').toLowerCase().includes(query);
+                            const matchesUsername = (u.username || '').toLowerCase().includes(query);
+                            const matchesEmail = (u.email || '').toLowerCase().includes(query);
+                            const matchesDept = (u.department || '').toLowerCase().includes(query);
+                            const matchesJob = (u.jobTitle || '').toLowerCase().includes(query);
+                            const matchesSpec = (u.specialties || []).some((s) => s.toLowerCase().includes(query));
+                            if (!matchesName && !matchesUsername && !matchesEmail && !matchesDept && !matchesJob && !matchesSpec) {
+                              return false;
+                            }
+                          }
+                          if (staffRoleFilter !== 'ALL' && u.role !== staffRoleFilter) return false;
+                          if (staffSpecialtyFilter !== 'ALL') {
+                            if (!u.specialties || !u.specialties.includes(staffSpecialtyFilter)) return false;
+                          }
+                          if (staffStatusFilter !== 'ALL' && u.status !== staffStatusFilter) return false;
+                          return true;
+                        })
+                        .map((u) => {
+                          const overrides = authService.getUserPermissionOverrides(u.id);
+                          const hasOverrides = overrides.granted.length > 0 || overrides.revoked.length > 0;
+                          const isSuspended = u.status === 'Suspended' || u.status === 'Disabled';
+                          const isSelf = currentUser?.id === u.id;
+                          const isProtectedAdmin =
+                            u.role === 'SUPER_ADMIN' &&
+                            (u.username?.toLowerCase() === 'kay' || u.fullName.toLowerCase().includes('courage kay'));
+
+                          return (
+                            <tr
+                              key={u.id}
+                              className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
+                                isSuspended ? 'bg-rose-50/30 dark:bg-rose-950/10' : ''
+                              }`}
+                            >
+                              {/* Staff Profile */}
+                              <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                                <div className="flex items-center gap-2.5">
+                                  <div
+                                    className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shadow-2xs shrink-0 ${
+                                      isSuspended
+                                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                                        : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                                    }`}
+                                  >
+                                    {u.fullName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold">{u.fullName}</span>
+                                      {isSelf && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                                          You
+                                        </span>
+                                      )}
+                                      {isProtectedAdmin && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                                          Root Admin
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400 font-normal flex items-center gap-2">
+                                      <span>{u.email}</span>
+                                      {u.phone && <span>• {u.phone}</span>}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <span>{u.fullName}</span>
-                                    {currentUser?.id === u.id && (
-                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-                                        You
+                              </td>
+
+                              {/* Username */}
+                              <td className="px-4 py-3 font-mono text-sky-600 dark:text-sky-400 font-bold">
+                                @{u.username || extractSurname(u.fullName).toLowerCase()}
+                              </td>
+
+                              {/* Role */}
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold inline-block ${
+                                    u.role === 'SUPER_ADMIN'
+                                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200'
+                                      : u.role === 'IT_ADMIN'
+                                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200'
+                                      : u.role === 'IT_OFFICER'
+                                      ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200'
+                                      : u.role === 'HOSPITAL_MANAGEMENT' || u.role === 'DEPARTMENT_HEAD'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                                  }`}
+                                  title={ROLE_DESCRIPTIONS[u.role]?.description}
+                                >
+                                  {u.role}
+                                </span>
+                              </td>
+
+                              {/* Specialties & Domains */}
+                              <td className="px-4 py-3">
+                                {u.specialties && u.specialties.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1 max-w-xs">
+                                    {u.specialties.slice(0, 3).map((spec) => {
+                                      const specDef = STANDARD_SPECIALTIES.find((s) => s.id === spec);
+                                      return (
+                                        <span
+                                          key={spec}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                                            specDef?.color || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200'
+                                          }`}
+                                          title={u.specialtyNotes ? `Notes: ${u.specialtyNotes}` : undefined}
+                                        >
+                                          {spec}
+                                        </span>
+                                      );
+                                    })}
+                                    {u.specialties.length > 3 && (
+                                      <span
+                                        className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                                        title={u.specialties.slice(3).join(', ')}
+                                      >
+                                        +{u.specialties.length - 3}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[11px] text-slate-400 font-normal">{u.email}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-mono text-sky-600 font-bold">
-                              @{u.username || extractSurname(u.fullName).toLowerCase()}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                                {u.role}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                              <div className="font-medium text-slate-800 dark:text-slate-200">{u.department}</div>
-                              <div className="text-[10px] text-slate-400">{u.jobTitle || 'Staff Member'}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-1 items-start">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
-                                    u.status === 'Active'
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                                  }`}
-                                >
-                                  <span
-                                    className={`w-1.5 h-1.5 rounded-full ${
-                                      u.status === 'Active' ? 'bg-emerald-500' : 'bg-rose-500'
-                                    }`}
-                                  />
-                                  <span>{u.status || 'Active'}</span>
-                                </span>
-
-                                {u.mustChangePasswordOnFirstLogin && (
-                                  <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
-                                    Must Change Pass
-                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 italic">General Operations</span>
                                 )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-right space-x-1.5 whitespace-nowrap">
-                              {/* Edit Profile Button */}
-                              {isSuperAdmin && (
-                                <button
-                                  onClick={() => {
-                                    setUserToEdit(u);
-                                    setIsUserEditModalOpen(true);
-                                  }}
-                                  className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
-                                  title="Edit user profile, reset password, suspend, or delete"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                  <span>Edit</span>
-                                </button>
-                              )}
+                              </td>
 
-                              {isSuperAdmin && (
-                                <button
-                                  onClick={() => setSelectedUserForOverride(u)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
-                                    hasOverrides
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-200'
-                                      : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200'
-                                  }`}
-                                  title="Customize permissions for this individual user"
-                                >
-                                  {hasOverrides ? 'Custom Perms*' : 'Perms'}
-                                </button>
-                              )}
+                              {/* Department & Title */}
+                              <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                                <div className="font-medium text-slate-800 dark:text-slate-200">{u.department}</div>
+                                <div className="text-[10px] text-slate-400">{u.jobTitle || 'Hospital Staff'}</div>
+                              </td>
 
-                              <button
-                                onClick={() => onUserSwitch(u)}
-                                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer text-[11px]"
-                                title="Switch session to this user"
-                              >
-                                Assume
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
+                              {/* Status */}
+                              <td className="px-4 py-3">
+                                <div className="flex flex-col gap-1 items-start">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 ${
+                                      u.status === 'Active'
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                        : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${
+                                        u.status === 'Active' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                                      }`}
+                                    />
+                                    <span>{u.status || 'Active'}</span>
+                                  </span>
+
+                                  {u.mustChangePasswordOnFirstLogin && (
+                                    <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                                      Must Change Pass
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Super Admin Actions */}
+                              <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                                {/* Edit Profile Button */}
+                                {isSuperAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setUserToEdit(u);
+                                      setIsUserEditModalOpen(true);
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                                    title="Edit user profile, role, specialties, and password"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                    <span>Edit</span>
+                                  </button>
+                                )}
+
+                                {/* Quick Suspend / Reactivate Action */}
+                                {isSuperAdmin && !isSelf && (
+                                  u.status === 'Active' ? (
+                                    <button
+                                      onClick={() => {
+                                        setUserToSuspend(u);
+                                        setTableSuspensionReason('');
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                                      title="Suspend this user account"
+                                    >
+                                      <UserX className="w-3 h-3" />
+                                      <span>Suspend</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleDirectReactivate(u)}
+                                      disabled={isActionLoading}
+                                      className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                                      title="Reactivate this suspended account"
+                                    >
+                                      <UserCheck className="w-3 h-3" />
+                                      <span>Reactivate</span>
+                                    </button>
+                                  )
+                                )}
+
+                                {/* Quick Delete Action */}
+                                {isSuperAdmin && !isSelf && !isProtectedAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setUserToDelete(u);
+                                      setTableDeleteConfirmText('');
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold transition cursor-pointer inline-flex items-center gap-1 text-[11px]"
+                                    title="Permanently delete user profile"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Delete</span>
+                                  </button>
+                                )}
+
+                                {/* Permissions Override Matrix */}
+                                {isSuperAdmin && (
+                                  <button
+                                    onClick={() => setSelectedUserForOverride(u)}
+                                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
+                                      hasOverrides
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-200'
+                                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200'
+                                    }`}
+                                    title="Customize individual permission overrides"
+                                  >
+                                    {hasOverrides ? 'Perms*' : 'Perms'}
+                                  </button>
+                                )}
+
+                                {/* Session Switch */}
+                                <button
+                                  onClick={() => onUserSwitch(u)}
+                                  className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer text-[11px]"
+                                  title="Switch session to this user"
+                                >
+                                  Assume
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -1784,6 +2101,118 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           onRefresh();
         }}
       />
+
+      {/* MODAL 5: DIRECT QUICK SUSPEND USER MODAL */}
+      {userToSuspend && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-amber-200 dark:border-amber-800 w-full max-w-md overflow-hidden p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex items-center justify-center font-bold shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Suspend User: {userToSuspend.fullName}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  @{userToSuspend.username || extractSurname(userToSuspend.fullName).toLowerCase()} • {userToSuspend.role}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              This will immediately lock the user account, blocking them from logging in, updating tickets, or syncing offline records until reactivated by a Super Administrator.
+            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Reason for suspension (recorded in audit logs):
+              </label>
+              <input
+                type="text"
+                value={tableSuspensionReason}
+                onChange={(e) => setTableSuspensionReason(e.target.value)}
+                placeholder="e.g. Leave of absence / Security review / Disciplinary"
+                className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setUserToSuspend(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isActionLoading}
+                onClick={handleDirectSuspend}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold shadow-md transition cursor-pointer"
+              >
+                Confirm Account Suspension
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: DIRECT QUICK DELETE USER MODAL */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-rose-300 dark:border-rose-800 w-full max-w-md overflow-hidden p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 flex items-center justify-center font-bold shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Permanently Delete Profile: {userToDelete.fullName}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  @{userToDelete.username || extractSurname(userToDelete.fullName).toLowerCase()} • {userToDelete.role}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 p-3 rounded-xl border border-rose-200 dark:border-rose-900 leading-relaxed">
+              <strong>Warning:</strong> This will permanently delete the user's login account, password credentials, and permission overrides from the local and synced databases.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Type <span className="font-mono bg-rose-100 dark:bg-rose-950 px-1 py-0.5 rounded text-rose-800 dark:text-rose-300">delete</span> to confirm permanent removal:
+              </label>
+              <input
+                type="text"
+                value={tableDeleteConfirmText}
+                onChange={(e) => setTableDeleteConfirmText(e.target.value)}
+                placeholder="delete"
+                className="w-full px-3.5 py-2 text-xs font-mono rounded-xl border border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={tableDeleteConfirmText.trim().toLowerCase() !== 'delete' || isActionLoading}
+                onClick={handleDirectDelete}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold shadow-md transition cursor-pointer"
+              >
+                Permanently Delete User Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
