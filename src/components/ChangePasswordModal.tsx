@@ -4,7 +4,8 @@ import { type User } from '../types';
 import { authService } from '../services/authService';
 
 interface ChangePasswordModalProps {
-  currentUser: User;
+  currentUser?: User;
+  user?: User;
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
@@ -12,12 +13,14 @@ interface ChangePasswordModalProps {
 }
 
 export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
-  currentUser,
+  currentUser: directCurrentUser,
+  user: directUser,
   isOpen,
   onClose,
   onSuccess,
   isMandatory = false,
 }) => {
+  const currentUser = directCurrentUser || directUser;
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -37,7 +40,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isMandatory, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !currentUser) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

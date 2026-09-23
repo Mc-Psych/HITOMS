@@ -39,6 +39,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
     Medium: { priority: 'Medium', responseHours: 4, resolutionHours: 24 },
     Low: { priority: 'Low', responseHours: 8, resolutionHours: 72 },
   },
+  reNotificationIntervalMinutes: 30,
+  ringToneDurationSeconds: 5,
+  emergencyReNotificationMinutes: 15,
   lastSuccessfulSync: null,
 };
 

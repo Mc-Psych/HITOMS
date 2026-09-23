@@ -21,6 +21,7 @@ import {
   ChevronsRight,
   PanelLeftClose,
   PanelLeftOpen,
+  KeyRound,
 } from 'lucide-react';
 import { type Role, type User, type SystemSettings } from '../types';
 import { authService, getUserInitials } from '../services/authService';
@@ -45,6 +46,7 @@ interface SidebarProps {
   onCloseMobile: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenChangePassword?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -58,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   isCollapsed: externalIsCollapsed,
   onToggleCollapse,
+  onOpenChangePassword,
 }) => {
   const [internalIsCollapsed, setInternalIsCollapsed] = useState(false);
   const isCollapsed = externalIsCollapsed !== undefined ? externalIsCollapsed : internalIsCollapsed;
@@ -275,20 +278,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-3 border-t border-slate-800 bg-slate-950/50">
         {isCollapsed ? (
           <div
-            className="w-8 h-8 mx-auto rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs tracking-wider cursor-default shadow-sm"
-            title={`${currentUser?.fullName} (${currentUser?.role}) - ${currentUser?.department}`}
+            onClick={onOpenChangePassword}
+            className="w-8 h-8 mx-auto rounded-lg bg-sky-700 hover:bg-sky-600 text-white flex items-center justify-center font-bold text-xs tracking-wider cursor-pointer shadow-sm transition"
+            title={`${currentUser?.fullName} (${currentUser?.role}) - Click to Change Password`}
           >
             {getUserInitials(currentUser?.fullName || '')}
           </div>
         ) : (
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs shrink-0 tracking-wider">
-              {getUserInitials(currentUser?.fullName || '')}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="w-7 h-7 rounded-lg bg-sky-700 text-white flex items-center justify-center font-bold text-xs shrink-0 tracking-wider">
+                {getUserInitials(currentUser?.fullName || '')}
+              </div>
+              <div className="min-w-0 flex-1 text-[11px]">
+                <div className="font-semibold text-slate-200 truncate">{currentUser?.fullName}</div>
+                <div className="text-sky-400 font-mono text-[10px] truncate">{currentUser?.department}</div>
+              </div>
             </div>
-            <div className="min-w-0 flex-1 text-[11px]">
-              <div className="font-semibold text-slate-200 truncate">{currentUser?.fullName}</div>
-              <div className="text-sky-400 font-mono text-[10px] truncate">{currentUser?.department}</div>
-            </div>
+
+            {onOpenChangePassword && (
+              <button
+                type="button"
+                onClick={onOpenChangePassword}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800/80 transition cursor-pointer shrink-0"
+                title="Change My Password"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         )}
       </div>

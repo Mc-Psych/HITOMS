@@ -1,6 +1,7 @@
 import { type Ticket, type User } from '../types';
 import { notificationService } from './notificationService';
 import { ticketService } from './ticketService';
+import { settingsService } from './settingsService';
 
 const MUTE_KEY = 'hitoms_ticket_bell_muted';
 const LAST_RING_MAP_KEY = 'hitoms_ticket_bell_last_rings';
@@ -36,7 +37,7 @@ class SystemNotificationRingService {
       return true;
     }
     const dept = (user.department || '').toLowerCase();
-    return dept.includes('it') || dept.includes('information technology') || dept.includes('tech support');
+    return dept.includes('it') || dept.includes('information technology') || dept.includes('tech support') || dept.includes('biomedical');
   }
 
   /**
@@ -54,9 +55,33 @@ class SystemNotificationRingService {
   }
 
   /**
+   * Get configured ring tone duration in seconds (default: 5s)
+   */
+  public getConfiguredRingDurationSeconds(): number {
+    try {
+      const s = settingsService.getSettingsSync();
+      return Math.max(2, Math.min(120, s.ringToneDurationSeconds || 5));
+    } catch {
+      return 5;
+    }
+  }
+
+  /**
+   * Get configured re-notification interval in minutes (default: 30m)
+   */
+  public getConfiguredReNotificationMinutes(): number {
+    try {
+      const s = settingsService.getSettingsSync();
+      return Math.max(1, Math.min(1440, s.reNotificationIntervalMinutes || 30));
+    } catch {
+      return 30;
+    }
+  }
+
+  /**
    * Play realistic helpdesk bell chime tone on PC/Phone via Web Audio API
    */
-  public async playBellRingtone(isCritical: boolean = false): Promise<void> {
+  public async playBellRingtone(isCritical: boolean = false, customDurationSec?: number): Promise<void> {
     if (this.isMuted()) return;
 
     try {
@@ -73,11 +98,13 @@ class SystemNotificationRingService {
         await this.audioCtx.resume();
       }
 
+      const durationSec = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+      const pulseInterval = isCritical ? 0.35 : 0.45;
+      const repetitions = Math.max(2, Math.round(durationSec / pulseInterval));
       const now = this.audioCtx.currentTime;
-      const repetitions = isCritical ? 4 : 3;
 
       for (let i = 0; i < repetitions; i++) {
-        const startTime = now + i * 0.45;
+        const startTime = now + i * pulseInterval;
 
         // Fundamental Bell Pitch (C6 = 1046.5Hz) & Harmonic (E6 = 1318.5Hz)
         const osc1 = this.audioCtx.createOscillator();
@@ -93,7 +120,7 @@ class SystemNotificationRingService {
         // Bell strike envelope (fast attack, natural exponential ring decay)
         gain.gain.setValueAtTime(0.001, startTime);
         gain.gain.exponentialRampToValueAtTime(0.6, startTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.4);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + (pulseInterval * 0.9));
 
         osc1.connect(gain);
         osc2.connect(gain);
@@ -101,13 +128,17 @@ class SystemNotificationRingService {
 
         osc1.start(startTime);
         osc2.start(startTime);
-        osc1.stop(startTime + 0.42);
-        osc2.stop(startTime + 0.42);
+        osc1.stop(startTime + pulseInterval);
+        osc2.stop(startTime + pulseInterval);
       }
 
       // Haptic feedback for mobile phones
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(isCritical ? [200, 100, 200, 100, 500] : [200, 100, 300]);
+        const pattern: number[] = [];
+        for (let i = 0; i < Math.min(repetitions, 8); i++) {
+          pattern.push(isCritical ? 150 : 200, 100);
+        }
+        navigator.vibrate(pattern);
       }
     } catch (err) {
       console.warn('[TicketSoundService] Audio playback hindered by browser autoplay policy:', err);
@@ -117,7 +148,7 @@ class SystemNotificationRingService {
   /**
    * Play urgent emergency hospital siren / alarm ringtone
    */
-  public async playEmergencyAlertTone(): Promise<void> {
+  public async playEmergencyAlertTone(customDurationSec?: number): Promise<void> {
     if (this.isMuted()) return;
 
     try {
@@ -134,11 +165,14 @@ class SystemNotificationRingService {
         await this.audioCtx.resume();
       }
 
+      const durationSec = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+      const cycleLength = 0.45;
+      const repetitions = Math.max(3, Math.round(durationSec / cycleLength));
       const now = this.audioCtx.currentTime;
 
       // Two-tone alternating emergency siren
-      for (let i = 0; i < 5; i++) {
-        const startTime = now + i * 0.35;
+      for (let i = 0; i < repetitions; i++) {
+        const startTime = now + i * cycleLength;
         const osc = this.audioCtx.createOscillator();
         const gain = this.audioCtx.createGain();
 
@@ -148,13 +182,13 @@ class SystemNotificationRingService {
 
         gain.gain.setValueAtTime(0.01, startTime);
         gain.gain.linearRampToValueAtTime(0.5, startTime + 0.05);
-        gain.gain.linearRampToValueAtTime(0.01, startTime + 0.32);
+        gain.gain.linearRampToValueAtTime(0.01, startTime + (cycleLength * 0.9));
 
         osc.connect(gain);
         gain.connect(this.audioCtx.destination);
 
         osc.start(startTime);
-        osc.stop(startTime + 0.33);
+        osc.stop(startTime + cycleLength);
       }
 
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -301,9 +335,9 @@ class SystemNotificationRingService {
   }
 
   /**
-   * Check all active unclosed tickets and ring the 30-minute recurring reminder
+   * Check all active unclosed tickets and ring the recurring reminder at the configured interval
    */
-  public async evaluateRecurring30MinAlerts(currentUser: User | null): Promise<{
+  public async evaluateRecurringTicketAlerts(currentUser: User | null): Promise<{
     ringTriggered: boolean;
     unclosedCount: number;
     unclosedTickets: Ticket[];
@@ -312,14 +346,17 @@ class SystemNotificationRingService {
       return { ringTriggered: false, unclosedCount: 0, unclosedTickets: [] };
     }
 
+    const intervalMinutes = this.getConfiguredReNotificationMinutes();
+    const ringDurationSeconds = this.getConfiguredRingDurationSeconds();
     const allTickets = await ticketService.getTickets();
+
     // Unclosed tickets = status NOT 'Closed' and NOT 'Resolved'
     const unclosedTickets = allTickets.filter(
       (t) => t.status !== 'Closed' && t.status !== 'Resolved'
     );
 
     const now = Date.now();
-    const thirtyMinMs = 30 * 60 * 1000; // 30 minutes in milliseconds
+    const intervalMs = intervalMinutes * 60 * 1000;
     const lastRings = this.getLastRingsMap();
     let shouldRing = false;
     let criticalFound = false;
@@ -329,8 +366,8 @@ class SystemNotificationRingService {
       const ticketCreatedTime = new Date(ticket.createdAt).getTime();
       const lastRingTime = lastRings[ticket.id] || ticketCreatedTime;
 
-      // If ticket has been unclosed for at least 30 minutes since last bell ring
-      if (now - lastRingTime >= thirtyMinMs) {
+      // If ticket has been unclosed for at least the configured interval since last bell ring
+      if (now - lastRingTime >= intervalMs) {
         shouldRing = true;
         dueTickets.push(ticket);
         if (ticket.priority === 'Critical') {
@@ -344,18 +381,18 @@ class SystemNotificationRingService {
     if (shouldRing) {
       this.saveLastRingsMap(lastRings);
 
-      // Play bell ringtone
-      await this.playBellRingtone(criticalFound);
+      // Play bell ringtone with configured duration
+      await this.playBellRingtone(criticalFound, ringDurationSeconds);
 
       // Deliver OS system notification even if app is closed
       const ticketListStr = dueTickets.slice(0, 3).map((t) => `#${t.ticketNumber}`).join(', ');
       const extraCount = dueTickets.length > 3 ? ` +${dueTickets.length - 3} more` : '';
 
       await this.showSystemNotification(
-        `🔔 30-Min Unresolved Ticket Alert (${dueTickets.length})`,
+        `🔔 ${intervalMinutes}-Min Unresolved Ticket Alert (${dueTickets.length})`,
         {
           body: `Pending unresolved tickets: ${ticketListStr}${extraCount}. Please attend to them!`,
-          tag: 'hitoms-30min-reminder',
+          tag: 'hitoms-recurring-reminder',
           requireInteraction: criticalFound,
           vibrate: [300, 100, 300, 100, 600],
         }
@@ -363,8 +400,8 @@ class SystemNotificationRingService {
 
       // Post in-app recurring notification alert for IT staff
       await notificationService.notify(
-        `🔔 30-Min Unresolved Ticket Alert (${dueTickets.length})`,
-        `The following ticket(s) have been open for over 30 minutes without being worked on and closed: ${ticketListStr}${extraCount}. Please review!`,
+        `🔔 ${intervalMinutes}-Min Unresolved Ticket Alert (${dueTickets.length})`,
+        `The following ticket(s) have been open for over ${intervalMinutes} minutes without being resolved: ${ticketListStr}${extraCount}. Please review!`,
         criticalFound ? 'error' : 'warning',
         'Tickets',
         'ALL'
@@ -379,21 +416,28 @@ class SystemNotificationRingService {
   }
 
   /**
-   * Start 30-minute background checking loop
+   * Alias for backwards compatibility
+   */
+  public async evaluateRecurring30MinAlerts(currentUser: User | null) {
+    return this.evaluateRecurringTicketAlerts(currentUser);
+  }
+
+  /**
+   * Start recurring background checking loop (polls every 30s)
    */
   public startRecurringBellMonitor(getCurrentUser: () => User | null, onRefresh?: () => void): void {
     if (this.intervalId !== null) return;
 
-    // Check every 30 seconds for tickets crossing the 30-min threshold
+    // Check every 30 seconds for tickets crossing the threshold
     this.intervalId = window.setInterval(async () => {
       const user = getCurrentUser();
       if (this.isItOrSuperAdmin(user)) {
-        const res = await this.evaluateRecurring30MinAlerts(user);
+        const res = await this.evaluateRecurringTicketAlerts(user);
         if (res.ringTriggered && onRefresh) {
           onRefresh();
         }
       }
-    }, 30000); // 30s evaluation interval
+    }, 30000);
   }
 
   /**
@@ -409,11 +453,12 @@ class SystemNotificationRingService {
   /**
    * Test system notification ring (plays chime + siren test and triggers OS notification)
    */
-  public async testSystemNotificationRing(): Promise<void> {
+  public async testSystemNotificationRing(customDurationSec?: number): Promise<void> {
     await this.requestNotificationPermission();
-    await this.playBellRingtone(true);
+    const duration = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+    await this.playBellRingtone(true, duration);
     await this.showSystemNotification('🔔 HITOMS System Notification Ring Test', {
-      body: 'Verified: Notification ring is active for alerts and tickets even when the app is closed!',
+      body: `Verified: Ring duration set to ${duration}s. Notification ring is active for alerts and tickets even when the app is closed!`,
       tag: 'hitoms-test-ring',
       requireInteraction: false,
       vibrate: [200, 100, 200, 100, 400],

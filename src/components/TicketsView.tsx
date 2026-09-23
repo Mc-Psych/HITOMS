@@ -24,6 +24,15 @@ import {
   Sparkles,
   BrainCircuit,
   Check,
+  UserCheck,
+  UserX,
+  RotateCcw,
+  Tag,
+  Inbox,
+  Flame,
+  CheckCheck,
+  Layers,
+  Wrench,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -37,6 +46,7 @@ import {
 } from '../types';
 import { ticketService } from '../services/ticketService';
 import { aiTriageService } from '../services/aiTriageService';
+import { extractSurname } from '../services/authService';
 import { ScanQrToReportModal } from './ScanQrToReportModal';
 
 interface TicketsViewProps {
@@ -105,10 +115,17 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   };
 
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+
+  // Multi-criteria filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<string>('ALL');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
+  const [assignedTechFilter, setAssignedTechFilter] = useState<string>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [queuePreset, setQueuePreset] = useState<
+    'ALL' | 'MY_QUEUE' | 'UNASSIGNED' | 'CRITICAL' | 'IN_PROGRESS' | 'AWAITING_RATING'
+  >('ALL');
 
   // Form states for creating ticket
   const [title, setTitle] = useState('');
@@ -170,6 +187,8 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     (u) => u.role === 'IT_OFFICER' || u.role === 'IT_ADMIN' || u.role === 'SUPER_ADMIN'
   );
 
+  const isCurrentUserIT =
+    currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
   const canAssign = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
   const canUpdateStatus = currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
 
@@ -185,21 +204,132 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [resolveModalOpen, isCreateModalOpen, selectedTicket]);
 
-  // Filter tickets
+  // Dynamic + Standard Departments
+  const standardDepartments = [
+    'Emergency / Casualty (A&E)',
+    'Intensive Care Unit (ICU)',
+    'Outpatient Department (OPD)',
+    'Main Surgical Theatre',
+    'Inpatient Wards',
+    'Main Pharmacy & Dispensary',
+    'Clinical Laboratory',
+    'Radiology & Imaging',
+    'Maternity & Labor Ward',
+    'Pediatrics & NICU',
+    'LHIMS & Records Center',
+    'Hospital Administration',
+    'Finance & Billing',
+    'Dialysis & Renal Center',
+    'Physiotherapy Unit',
+  ];
+
+  const allAvailableDepartments = Array.from(
+    new Set([
+      ...safeTickets.map((t) => t.department).filter(Boolean),
+      ...standardDepartments,
+    ])
+  ).sort((a, b) => a.localeCompare(b));
+
+  // Quick Queue Counter Helpers
+  const countMyQueue = safeTickets.filter(
+    (t) => currentUser && t.assignedTo?.uid === currentUser.id && t.status !== 'Closed'
+  ).length;
+  const countUnassigned = safeTickets.filter(
+    (t) => (!t.assignedTo || !t.assignedTo.uid) && t.status !== 'Closed' && t.status !== 'Resolved'
+  ).length;
+  const countCritical = safeTickets.filter(
+    (t) => t.priority === 'Critical' && t.status !== 'Closed'
+  ).length;
+  const countInProgress = safeTickets.filter(
+    (t) => t.status === 'In Progress' || t.status === 'Assigned'
+  ).length;
+  const countAwaitingRating = safeTickets.filter((t) => t.status === 'Resolved').length;
+
+  // Filter tickets with multi-criteria support
   const filteredTickets = safeTickets.filter((t) => {
-    const matchesSearch =
-      t.ticketNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.department.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.reportedBy.name.toLowerCase().includes(searchQuery.toLowerCase());
+    // 1. Quick Queue Presets
+    if (queuePreset === 'MY_QUEUE') {
+      if (!currentUser || t.assignedTo?.uid !== currentUser.id) return false;
+      if (t.status === 'Closed') return false;
+    } else if (queuePreset === 'UNASSIGNED') {
+      if (t.assignedTo && t.assignedTo.uid) return false;
+      if (t.status === 'Closed' || t.status === 'Resolved') return false;
+    } else if (queuePreset === 'CRITICAL') {
+      if (t.priority !== 'Critical') return false;
+      if (t.status === 'Closed') return false;
+    } else if (queuePreset === 'IN_PROGRESS') {
+      if (t.status !== 'In Progress' && t.status !== 'Assigned') return false;
+    } else if (queuePreset === 'AWAITING_RATING') {
+      if (t.status !== 'Resolved') return false;
+    }
 
-    const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
-    const matchesPriority = priorityFilter === 'ALL' || t.priority === priorityFilter;
-    const matchesDept = deptFilter === 'ALL' || t.department === deptFilter;
+    // 2. Text Search Query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesNum = (t.ticketNumber || '').toLowerCase().includes(q);
+      const matchesTitle = (t.title || '').toLowerCase().includes(q);
+      const matchesDesc = (t.description || '').toLowerCase().includes(q);
+      const matchesDept = (t.department || '').toLowerCase().includes(q);
+      const matchesLoc = (t.location || '').toLowerCase().includes(q);
+      const matchesReporter = (t.reportedBy?.name || '').toLowerCase().includes(q);
+      const matchesTech = (t.assignedTo?.name || '').toLowerCase().includes(q);
+      const matchesCat = (t.category || '').toLowerCase().includes(q);
+      if (
+        !matchesNum &&
+        !matchesTitle &&
+        !matchesDesc &&
+        !matchesDept &&
+        !matchesLoc &&
+        !matchesReporter &&
+        !matchesTech &&
+        !matchesCat
+      ) {
+        return false;
+      }
+    }
 
-    return matchesSearch && matchesStatus && matchesPriority && matchesDept;
+    // 3. Priority Filter
+    if (priorityFilter !== 'ALL' && t.priority !== priorityFilter) return false;
+
+    // 4. Department Filter
+    if (deptFilter !== 'ALL' && t.department.toLowerCase() !== deptFilter.toLowerCase()) return false;
+
+    // 5. Assigned Technician Filter
+    if (assignedTechFilter === 'UNASSIGNED') {
+      if (t.assignedTo && t.assignedTo.uid) return false;
+    } else if (assignedTechFilter === 'MY_ASSIGNED') {
+      if (!currentUser || t.assignedTo?.uid !== currentUser.id) return false;
+    } else if (assignedTechFilter !== 'ALL') {
+      if (t.assignedTo?.uid !== assignedTechFilter) return false;
+    }
+
+    // 6. Status Filter
+    if (statusFilter !== 'ALL' && t.status !== statusFilter) return false;
+
+    // 7. Category Filter
+    if (categoryFilter !== 'ALL' && t.category !== categoryFilter) return false;
+
+    return true;
   });
+
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) ||
+    priorityFilter !== 'ALL' ||
+    deptFilter !== 'ALL' ||
+    assignedTechFilter !== 'ALL' ||
+    statusFilter !== 'ALL' ||
+    categoryFilter !== 'ALL' ||
+    queuePreset !== 'ALL';
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setPriorityFilter('ALL');
+    setDeptFilter('ALL');
+    setAssignedTechFilter('ALL');
+    setStatusFilter('ALL');
+    setCategoryFilter('ALL');
+    setQueuePreset('ALL');
+  };
 
   // Handle local file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -370,64 +500,348 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
         </div>
       </div>
 
-      {/* Filter Bar */}
+      {/* Quick Queue Preset Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
+        <button
+          type="button"
+          onClick={() => setQueuePreset('ALL')}
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            queuePreset === 'ALL'
+              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>All Tickets</span>
+          <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200/80 dark:bg-slate-700 font-extrabold">
+            {safeTickets.length}
+          </span>
+        </button>
+
+        {isCurrentUserIT && (
+          <button
+            type="button"
+            onClick={() => {
+              setQueuePreset('MY_QUEUE');
+              setAssignedTechFilter('ALL');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+              queuePreset === 'MY_QUEUE'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+            }`}
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>My Assigned Queue</span>
+            {countMyQueue > 0 && (
+              <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                queuePreset === 'MY_QUEUE' ? 'bg-indigo-800 text-white' : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200'
+              }`}>
+                {countMyQueue}
+              </span>
+            )}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            setQueuePreset('UNASSIGNED');
+            setAssignedTechFilter('ALL');
+          }}
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            queuePreset === 'UNASSIGNED'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+          }`}
+        >
+          <Inbox className="w-3.5 h-3.5" />
+          <span>Unassigned Queue</span>
+          {countUnassigned > 0 && (
+            <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              queuePreset === 'UNASSIGNED' ? 'bg-amber-800 text-white' : 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+            }`}>
+              {countUnassigned}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setQueuePreset('CRITICAL');
+            setPriorityFilter('ALL');
+          }}
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            queuePreset === 'CRITICAL'
+              ? 'bg-rose-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+          }`}
+        >
+          <Flame className="w-3.5 h-3.5" />
+          <span>Critical (P1)</span>
+          {countCritical > 0 && (
+            <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              queuePreset === 'CRITICAL' ? 'bg-rose-800 text-white' : 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200'
+            }`}>
+              {countCritical}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setQueuePreset('IN_PROGRESS');
+            setStatusFilter('ALL');
+          }}
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            queuePreset === 'IN_PROGRESS'
+              ? 'bg-sky-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40'
+          }`}
+        >
+          <Wrench className="w-3.5 h-3.5" />
+          <span>In Progress</span>
+          {countInProgress > 0 && (
+            <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              queuePreset === 'IN_PROGRESS' ? 'bg-sky-800 text-white' : 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200'
+            }`}>
+              {countInProgress}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setQueuePreset('AWAITING_RATING');
+            setStatusFilter('ALL');
+          }}
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            queuePreset === 'AWAITING_RATING'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+          }`}
+        >
+          <Star className="w-3.5 h-3.5" />
+          <span>Awaiting Unit Rating</span>
+          {countAwaitingRating > 0 && (
+            <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              queuePreset === 'AWAITING_RATING' ? 'bg-emerald-800 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
+            }`}>
+              {countAwaitingRating}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Multi-Criteria Filter Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Search */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {/* 1. Search */}
+          <div className="relative lg:col-span-2">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               id="ticket-search-input"
               type="text"
-              placeholder="Search tickets, tags, staff..."
+              placeholder="Search #, title, desc, staff, tech..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* Status Filter */}
-          <select
-            id="ticket-status-filter"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
-          >
-            <option value="ALL">All Statuses ({safeTickets.length})</option>
-            <option value="New">New</option>
-            <option value="Assigned">Assigned</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Pending">Pending</option>
-            <option value="Resolved">Resolved</option>
-            <option value="Closed">Closed</option>
-          </select>
+          {/* 2. Priority Filter */}
+          <div className="relative">
+            <select
+              id="ticket-priority-filter"
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="ALL">Priority: All</option>
+              <option value="Critical">🔴 Critical (P1)</option>
+              <option value="High">🟠 High Priority</option>
+              <option value="Medium">🔵 Medium Priority</option>
+              <option value="Low">⚪ Low Priority</option>
+            </select>
+          </div>
 
-          {/* Priority Filter */}
-          <select
-            id="ticket-priority-filter"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-            className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
-          >
-            <option value="ALL">All Priorities</option>
-            <option value="Critical">Critical</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
-          </select>
+          {/* 3. Department Filter */}
+          <div className="relative">
+            <select
+              id="ticket-dept-filter"
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="ALL">Department: All</option>
+              {allAvailableDepartments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          {/* Department Filter */}
-          <select
-            id="ticket-dept-filter"
-            value={deptFilter}
-            onChange={(e) => setDeptFilter(e.target.value)}
-            className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
-          >
-            <option value="ALL">All Departments</option>
-            {departments.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+          {/* 4. Assigned Technician Filter */}
+          <div className="relative">
+            <select
+              id="ticket-tech-filter"
+              value={assignedTechFilter}
+              onChange={(e) => setAssignedTechFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="ALL">Technician: All</option>
+              {isCurrentUserIT && (
+                <option value="MY_ASSIGNED">⭐ My Assigned Tickets</option>
+              )}
+              <option value="UNASSIGNED">⚠️ Unassigned Queue</option>
+              <optgroup label="IT Officers & Admins">
+                {itStaff.map((tech) => (
+                  <option key={tech.id} value={tech.id}>
+                    👤 {tech.fullName} (@{tech.username || extractSurname(tech.fullName).toLowerCase()})
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+
+          {/* 5. Status Filter */}
+          <div className="relative">
+            <select
+              id="ticket-status-filter"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="ALL">Status: All</option>
+              <option value="New">New</option>
+              <option value="Assigned">Assigned</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Pending">Pending</option>
+              <option value="Resolved">Resolved</option>
+              <option value="Closed">Closed</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Category Filter & Filter Summary Row */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-400">Category:</span>
+            <select
+              id="ticket-category-filter"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-2 py-1 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none text-slate-800 dark:text-slate-200 cursor-pointer"
+            >
+              <option value="ALL">All Categories</option>
+              <option value="Hardware">Hardware</option>
+              <option value="Software">Software</option>
+              <option value="Network">Network</option>
+              <option value="Internet">Internet</option>
+              <option value="Printer">Printer</option>
+              <option value="Server">Server</option>
+              <option value="Hospital System">Hospital System / LHIMS</option>
+              <option value="Email">Email</option>
+              <option value="Security">Security</option>
+              <option value="Account/Login">Account/Login</option>
+              <option value="Other">Other</option>
+            </select>
+
+            {/* Active filter badges */}
+            {priorityFilter !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                Priority: {priorityFilter}
+                <button
+                  onClick={() => setPriorityFilter('ALL')}
+                  className="hover:text-rose-900 cursor-pointer ml-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {deptFilter !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                Dept: {deptFilter}
+                <button
+                  onClick={() => setDeptFilter('ALL')}
+                  className="hover:text-sky-900 cursor-pointer ml-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {assignedTechFilter !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                Tech:{' '}
+                {assignedTechFilter === 'MY_ASSIGNED'
+                  ? 'My Queue'
+                  : assignedTechFilter === 'UNASSIGNED'
+                  ? 'Unassigned'
+                  : itStaff.find((u) => u.id === assignedTechFilter)?.fullName || 'Selected'}
+                <button
+                  onClick={() => setAssignedTechFilter('ALL')}
+                  className="hover:text-indigo-900 cursor-pointer ml-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {statusFilter !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                Status: {statusFilter}
+                <button
+                  onClick={() => setStatusFilter('ALL')}
+                  className="hover:text-slate-900 cursor-pointer ml-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {categoryFilter !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                Category: {categoryFilter}
+                <button
+                  onClick={() => setCategoryFilter('ALL')}
+                  className="hover:text-amber-900 cursor-pointer ml-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetAllFilters}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Filters</span>
+              </button>
+            )}
+          </div>
+
+          <div className="text-[11px] font-semibold text-slate-500">
+            Showing <strong className="text-slate-900 dark:text-white">{filteredTickets.length}</strong> of{' '}
+            {safeTickets.length} tickets
+          </div>
         </div>
       </div>
 
@@ -441,96 +855,173 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 <th className="px-4 py-3">Title & Category</th>
                 <th className="px-4 py-3">Priority</th>
                 <th className="px-4 py-3">Department / Location</th>
+                <th className="px-4 py-3">Assigned Technician</th>
                 <th className="px-4 py-3">Reported By</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Sync Status</th>
+                <th className="px-4 py-3">Sync</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredTickets.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-8 text-slate-400">
-                    No tickets found matching current filters.
+                  <td colSpan={9} className="text-center py-12 text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Inbox className="w-8 h-8 text-slate-300 dark:text-slate-600 stroke-[1.5]" />
+                      <div className="font-semibold text-slate-700 dark:text-slate-300">
+                        No tickets matching the current filter criteria
+                      </div>
+                      <p className="text-xs text-slate-400 max-w-sm text-center">
+                        Try clearing priority, department, or assigned technician filters to view more queue items.
+                      </p>
+                      {hasActiveFilters && (
+                        <button
+                          type="button"
+                          onClick={resetAllFilters}
+                          className="mt-2 px-3 py-1 bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 text-xs font-bold rounded-lg border border-sky-200 dark:border-sky-800 cursor-pointer"
+                        >
+                          Clear All Filters
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
-                filteredTickets.map((ticket) => (
-                  <tr
-                    key={ticket.id}
-                    onClick={() => setSelectedTicket(ticket)}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition cursor-pointer"
-                  >
-                    <td className="px-4 py-3 font-mono font-bold text-sky-600">
-                      {ticket.ticketNumber}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900 dark:text-white">{ticket.title}</div>
-                      <div className="text-[10px] text-slate-400">{ticket.category}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          ticket.priority === 'Critical'
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
-                            : ticket.priority === 'High'
-                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
-                            : ticket.priority === 'Medium'
-                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                        }`}
-                      >
-                        {ticket.priority}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      <div>{ticket.department}</div>
-                      <div className="text-[10px] text-slate-400">{ticket.location}</div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      <div>{ticket.reportedBy.name}</div>
-                      <div className="text-[10px] text-slate-400">{new Date(ticket.createdAt).toLocaleDateString()}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          ticket.status === 'Resolved' || ticket.status === 'Closed'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                            : ticket.status === 'In Progress'
-                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400'
-                            : ticket.status === 'Assigned'
-                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400'
-                            : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
-                        }`}
-                      >
-                        {ticket.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
-                          ticket._syncStatus === 'SYNCED'
-                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
-                            : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
-                        }`}
-                      >
-                        {ticket._syncStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedTicket(ticket);
-                        }}
-                        className="text-sky-600 hover:text-sky-700 font-semibold text-xs flex items-center justify-end gap-1 ml-auto"
-                      >
-                        <span>View</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredTickets.map((ticket) => {
+                  const isAssignedToMe = currentUser && ticket.assignedTo?.uid === currentUser.id;
+                  const isUnassigned = !ticket.assignedTo || !ticket.assignedTo.uid;
+
+                  return (
+                    <tr
+                      key={ticket.id}
+                      onClick={() => setSelectedTicket(ticket)}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition cursor-pointer ${
+                        isAssignedToMe ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''
+                      }`}
+                    >
+                      <td className="px-4 py-3 font-mono font-bold text-sky-600">
+                        {ticket.ticketNumber}
+                      </td>
+                      <td className="px-4 py-3 max-w-xs">
+                        <div className="font-semibold text-slate-900 dark:text-white truncate">
+                          {ticket.title}
+                        </div>
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                          <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+                            {ticket.category}
+                          </span>
+                          {ticket.isGeneralIssue && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold text-[9px]">
+                              General Issue
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            ticket.priority === 'Critical'
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+                              : ticket.priority === 'High'
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
+                              : ticket.priority === 'Medium'
+                              ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {ticket.priority}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        <div className="font-medium text-slate-800 dark:text-slate-200">
+                          {ticket.department}
+                        </div>
+                        <div className="text-[10px] text-slate-400">{ticket.location}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {isUnassigned ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span>Unassigned</span>
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <div
+                              className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                                isAssignedToMe
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                              }`}
+                            >
+                              {ticket.assignedTo?.name ? ticket.assignedTo.name.charAt(0).toUpperCase() : 'T'}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                                <span>{ticket.assignedTo?.name}</span>
+                                {isAssignedToMe && (
+                                  <span className="px-1 py-0.2 rounded text-[9px] font-black bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                                    You
+                                  </span>
+                                )}
+                              </div>
+                              {ticket.assignedTo?.autoAssignedBySpecialty && (
+                                <div className="text-[9px] text-indigo-500 dark:text-indigo-400 font-medium">
+                                  Auto-Roster Match
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        <div className="font-medium text-slate-800 dark:text-slate-200">
+                          {ticket.reportedBy.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {new Date(ticket.createdAt).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            ticket.status === 'Resolved' || ticket.status === 'Closed'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                              : ticket.status === 'In Progress'
+                              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400'
+                              : ticket.status === 'Assigned'
+                              ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
+                          }`}
+                        >
+                          {ticket.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
+                            ticket._syncStatus === 'SYNCED'
+                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                              : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
+                          }`}
+                        >
+                          {ticket._syncStatus}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTicket(ticket);
+                          }}
+                          className="text-sky-600 hover:text-sky-700 font-semibold text-xs flex items-center justify-end gap-1 ml-auto cursor-pointer"
+                        >
+                          <span>View</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -14,6 +14,7 @@ import {
   LogIn,
   LogOut,
   KeyRound,
+  Lock,
   QrCode,
   ShieldAlert,
   Volume2,
@@ -36,6 +37,7 @@ interface HeaderProps {
   onLogout?: () => void;
   onOpenScanQrReport?: () => void;
   onOpenEmergencyCenter?: () => void;
+  onOpenChangePassword?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenScanQrReport,
   onOpenEmergencyCenter,
+  onOpenChangePassword,
 }) => {
   const [syncStats, setSyncStats] = useState<SyncStats>(syncService.getStats());
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -394,8 +397,21 @@ export const Header: React.FC<HeaderProps> = ({
                   ))}
                 </div>
 
-                {/* Login Portal & Sign Out Footer */}
+                {/* Login Portal, Password & Sign Out Footer */}
                 <div className="pt-2 mt-2 border-t border-slate-800 space-y-1">
+                  {onOpenChangePassword && currentUser && (
+                    <button
+                      onClick={() => {
+                        setShowRoleMenu(false);
+                        onOpenChangePassword();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-amber-300 hover:bg-amber-950/60 hover:text-amber-200 transition cursor-pointer"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Change My Password</span>
+                    </button>
+                  )}
+
                   {onOpenLoginModal && (
                     <button
                       onClick={() => {

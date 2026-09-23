@@ -119,6 +119,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
   // System Notification Ring states
   const [ringTestSuccess, setRingTestSuccess] = useState(false);
+  const [notificationSaveSuccess, setNotificationSaveSuccess] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(systemNotificationRingService.isMuted());
 
   // Permission Matrix states
@@ -388,9 +389,30 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   };
 
   const handleTestSystemRing = async () => {
-    await systemNotificationRingService.testSystemNotificationRing();
+    const duration = settings.ringToneDurationSeconds || 5;
+    await systemNotificationRingService.testSystemNotificationRing(duration);
     setRingTestSuccess(true);
     setTimeout(() => setRingTestSuccess(false), 3500);
+  };
+
+  const handleSaveNotificationSettings = async () => {
+    if (!currentUser) return;
+    try {
+      const updated = await settingsService.updateSettings(
+        {
+          reNotificationIntervalMinutes: settings.reNotificationIntervalMinutes ?? 30,
+          ringToneDurationSeconds: settings.ringToneDurationSeconds ?? 5,
+          emergencyReNotificationMinutes: settings.emergencyReNotificationMinutes ?? 15,
+        },
+        currentUser
+      );
+      setSettings(updated);
+      setNotificationSaveSuccess(true);
+      setTimeout(() => setNotificationSaveSuccess(false), 3000);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to save notification settings');
+    }
   };
 
   const handleToggleAudioMute = () => {
@@ -1566,19 +1588,20 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             </div>
           </div>
 
-          {/* SYSTEM NOTIFICATION RING ENGINE */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          {/* SYSTEM NOTIFICATION RING ENGINE & TIMING CONTROLS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Bell className="w-4 h-4 text-sky-600" />
-                  <span>System Notification Ring Engine (Alerts & Tickets)</span>
+                  <span>IT Helpdesk Bell, Recurring Alerts & Alarm Timing Controls</span>
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Notification ring for alerts and tickets even if the app or browser tab is closed.
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Admin authority: Configure how often unresolved tickets re-alert IT officers and how long the audible chime or siren rings.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={handleToggleAudioMute}
@@ -1604,38 +1627,180 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 <button
                   type="button"
                   onClick={handleTestSystemRing}
-                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition shadow-2xs"
+                  title="Test chime playback with currently selected ring duration"
                 >
-                  <Bell className="w-3.5 h-3.5" />
-                  <span>Test Notification Ring</span>
+                  <Bell className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Test Ring ({settings.ringToneDurationSeconds || 5}s)</span>
                 </button>
+
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleSaveNotificationSettings}
+                    className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Save Timing Settings</span>
+                  </button>
+                )}
               </div>
             </div>
 
             {ringTestSuccess && (
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>Ring tone sounded and OS system notification dispatched! Works even when the app is minimized or closed.</span>
+                <span>Ringtone sounded for {settings.ringToneDurationSeconds || 5}s and OS system notification dispatched! Works even when the app is minimized or closed.</span>
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            {notificationSaveSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in font-semibold">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>Notification timing rules updated successfully across all hospital devices!</span>
+              </div>
+            )}
+
+            {/* Timing Configuration Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Field 1: Re-Notification Time Duration */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Bell className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Re-Notification Time Duration (Interval)</span>
+                  </label>
+                  <span className="text-xs font-mono font-bold text-sky-600 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded-md border border-sky-200 dark:border-sky-800">
+                    {settings.reNotificationIntervalMinutes || 30} mins
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Controls how frequently the Helpdesk bell and background notifications re-ring for IT officers & admins while tickets remain unclosed and unresolved.
+                </p>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {[5, 10, 15, 30, 45, 60, 120].map((mins) => {
+                    const isSelected = (settings.reNotificationIntervalMinutes || 30) === mins;
+                    return (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => setSettings((prev) => ({ ...prev, reNotificationIntervalMinutes: mins }))}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-sky-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {mins < 60 ? `${mins}m` : `${mins / 60}h`} {mins === 30 ? '(Default)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[11px] text-slate-500">Custom minutes:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={settings.reNotificationIntervalMinutes || 30}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 1;
+                      setSettings((prev) => ({ ...prev, reNotificationIntervalMinutes: Math.max(1, Math.min(1440, val)) }));
+                    }}
+                    className="w-24 px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-400">minutes</span>
+                </div>
+              </div>
+
+              {/* Field 2: How Long It Should Ring (Ring Duration) */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Ringtone Duration (How Long It Rings)</span>
+                  </label>
+                  <span className="text-xs font-mono font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                    {settings.ringToneDurationSeconds || 5} seconds
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Controls how many seconds the audible bell chime or emergency siren continuously plays during an alert event before silencing automatically.
+                </p>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {[3, 5, 10, 15, 30, 60].map((sec) => {
+                    const isSelected = (settings.ringToneDurationSeconds || 5) === sec;
+                    return (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => setSettings((prev) => ({ ...prev, ringToneDurationSeconds: sec }))}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {sec}s {sec === 5 ? '(Default)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[11px] text-slate-500">Custom seconds:</span>
+                  <input
+                    type="number"
+                    min="2"
+                    max="120"
+                    value={settings.ringToneDurationSeconds || 5}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 2;
+                      setSettings((prev) => ({ ...prev, ringToneDurationSeconds: Math.max(2, Math.min(120, val)) }));
+                    }}
+                    className="w-24 px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-400">seconds (2 - 120s)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Architecture Explanatory Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
-                <div className="font-bold text-slate-900 dark:text-white mb-1">Background Delivery</div>
-                <p className="text-slate-500 text-[11px]">
-                  Registered with Service Worker so critical hospital IT alerts ring through OS notification center.
+                <div className="font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Background Delivery</span>
+                </div>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Registered with Service Worker so critical hospital IT alerts ring through OS notification center even when minimized or closed.
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
-                <div className="font-bold text-slate-900 dark:text-white mb-1">30-Min Recurring Bell</div>
-                <p className="text-slate-500 text-[11px]">
-                  Unresolved tickets past 30 minutes trigger recurring reminder rings until acknowledged.
+                <div className="font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Configured Re-Alerts</span>
+                </div>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Unresolved tickets past {settings.reNotificationIntervalMinutes || 30} minutes trigger recurring reminder rings until attended to.
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
-                <div className="font-bold text-slate-900 dark:text-white mb-1">Emergency Hospital Siren</div>
-                <p className="text-slate-500 text-[11px]">
-                  Immediate siren alert for Code Blue IT or Code Red Starlink system failures across all hospital terminals.
+                <div className="font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Emergency Hospital Siren</span>
+                </div>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Immediate siren alert for Code Blue IT or Starlink outages, sounding for {settings.ringToneDurationSeconds || 5} seconds per broadcast.
                 </p>
               </div>
             </div>

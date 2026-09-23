@@ -330,6 +330,7 @@ export default function App() {
         onLogout={handleLogout}
         onOpenScanQrReport={() => setGlobalScanQrModalOpen(true)}
         onOpenEmergencyCenter={() => setEmergencyModalOpen(true)}
+        onOpenChangePassword={() => setChangePasswordModalOpen(true)}
       />
 
       {/* Hospital Emergency Broadcast Banner */}
@@ -394,6 +395,7 @@ export default function App() {
           openTicketCount={openTicketsCount}
           mobileOpen={mobileSidebarOpen}
           onCloseMobile={() => setMobileSidebarOpen(false)}
+          onOpenChangePassword={() => setChangePasswordModalOpen(true)}
         />
 
         {/* Dynamic Content Canvas */}
@@ -700,10 +702,10 @@ export default function App() {
       />
 
       {/* Mandatory / Self-Service Change Password Modal */}
-      {passwordChangeUser && (
+      {(passwordChangeUser || currentUser) && (
         <ChangePasswordModal
           isOpen={changePasswordModalOpen}
-          user={passwordChangeUser}
+          user={passwordChangeUser || currentUser || undefined}
           onClose={() => setChangePasswordModalOpen(false)}
           onSuccess={() => {
             setChangePasswordModalOpen(false);

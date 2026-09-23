@@ -726,6 +726,9 @@ export interface SystemSettings {
   mandatoryPasswordChangeOnFirstLogin?: boolean;
   disableDemoLogin?: boolean; // When true, quick demo profiles on login modal are hidden (controlled by Super Admin Courage Kay)
   systemNotificationRingEnabled?: boolean; // Active notification ring for alerts & tickets even if app is closed
+  reNotificationIntervalMinutes?: number; // How often recurring bell rings for unresolved tickets (e.g. 5, 10, 15, 30, 45, 60, 120 mins; default: 30)
+  ringToneDurationSeconds?: number; // How long audible alarm/chime sounds (e.g. 3, 5, 10, 15, 30, 60 seconds; default: 5)
+  emergencyReNotificationMinutes?: number; // How often emergency broadcasts re-alert unacknowledged terminals (default: 15)
   officerMonthlySpecialties?: OfficerMonthlySpecialty[]; // Auto-assignment specialty roster per month
   customTexts?: Record<string, string>;
   rolePermissionsOverrides?: Record<string, string[]>;

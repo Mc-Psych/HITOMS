@@ -20,6 +20,80 @@ async function startServer() {
     },
   });
 
+  // Helper for safe JSON extraction from Gemini responses
+  const cleanJsonText = (raw: string | undefined): string => {
+    if (!raw) return "{}";
+    let text = raw.trim();
+    if (text.startsWith("```json")) {
+      text = text.slice(7);
+    } else if (text.startsWith("```")) {
+      text = text.slice(3);
+    }
+    if (text.endsWith("```")) {
+      text = text.slice(0, -3);
+    }
+    return text.trim();
+  };
+
+  // Helper for resilient Gemini API execution with retry & fallback model
+  const generateContentWithRetry = async (params: {
+    contents: any;
+    config?: any;
+    primaryModel?: string;
+    fallbackModel?: string;
+    maxRetries?: number;
+  }) => {
+    const primaryModel = params.primaryModel || "gemini-3.8-flash";
+    const fallbackModel = params.fallbackModel || "gemini-3.1-flash-lite";
+    const maxRetries = params.maxRetries ?? 2;
+
+    const modelsToTry = [primaryModel, fallbackModel];
+    let lastError: any = null;
+
+    for (const model of modelsToTry) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: params.contents,
+            config: params.config,
+          });
+          return response;
+        } catch (err: any) {
+          lastError = err;
+          const status = err?.status || err?.code || err?.statusCode || "";
+          const msg = (err?.message || "").toLowerCase();
+          const isTemporary =
+            status === 503 ||
+            status === 429 ||
+            status === 500 ||
+            status === "UNAVAILABLE" ||
+            msg.includes("503") ||
+            msg.includes("high demand") ||
+            msg.includes("unavailable") ||
+            msg.includes("resource has been exhausted") ||
+            msg.includes("overloaded") ||
+            msg.includes("econnreset");
+
+          if (isTemporary && attempt < maxRetries) {
+            const delayMs = (attempt + 1) * 1200 + Math.floor(Math.random() * 600);
+            console.warn(
+              `[HITOMS Server] Gemini ${model} temporarily unavailable (attempt ${attempt + 1}/${maxRetries}). Retrying in ${delayMs}ms...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            continue;
+          }
+
+          // If retries for primary model exhausted, warn and try secondary model
+          console.warn(`[HITOMS Server] Gemini ${model} invocation attempt ${attempt + 1} did not succeed.`);
+          break;
+        }
+      }
+    }
+
+    throw lastError;
+  };
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", app: "HITOMS Server", timestamp: new Date().toISOString() });
@@ -44,8 +118,9 @@ Linked Asset Tag: ${assetTag || "None"}
 
 Evaluate clinical patient care impact, operational risk, recommended priority level (Critical, High, Medium, Low), suggested IT category, technical root cause hypothesis, and actionable immediate troubleshooting steps for hospital IT staff.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+      const response = await generateContentWithRetry({
+        primaryModel: "gemini-3.8-flash",
+        fallbackModel: "gemini-3.1-flash-lite",
         contents: prompt,
         config: {
           systemInstruction: "You are an expert Hospital IT Operations AI Triage Specialist. Analyze tickets accurately with focus on clinical risk, patient care workflows, and medical hardware.",
@@ -91,10 +166,11 @@ Evaluate clinical patient care impact, operational risk, recommended priority le
         },
       });
 
-      const triageData = JSON.parse(response.text || "{}");
+      const rawJson = cleanJsonText(response.text);
+      const triageData = JSON.parse(rawJson || "{}");
       return res.json({ success: true, triage: triageData });
     } catch (err: any) {
-      console.error("[HITOMS Server] AI Triage error:", err);
+      console.warn("[HITOMS Server] AI Triage switched to offline rule engine:", err?.message || err);
 
       // Intelligent fallback logic if API key is missing or offline
       const deptUpper = (req.body.department || "").toUpperCase();
@@ -165,8 +241,9 @@ ${liveStats ? `Live Hospital Data Context: Open Helpdesk Tickets: ${liveStats.op
 Ensure the output is written in authoritative, crisp, healthcare-grade English suitable for hospital boards, clinical nursing wards, and technical IT staff.
 Include thorough, practical steps, clinical safety precautions, operational timelines, and designated IT escalation channels.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+      const response = await generateContentWithRetry({
+        primaryModel: "gemini-3.8-flash",
+        fallbackModel: "gemini-3.1-flash-lite",
         contents: prompt,
         config: {
           systemInstruction: `You are an elite Hospital Executive Memo & Technical Report Writer. 
@@ -239,10 +316,11 @@ Always return clean JSON complying with the schema.`,
         },
       });
 
-      const memoData = JSON.parse(response.text || "{}");
+      const rawJson = cleanJsonText(response.text);
+      const memoData = JSON.parse(rawJson || "{}");
       return res.json({ success: true, memo: memoData, isFallback: false });
     } catch (err: any) {
-      console.error("[HITOMS Server] AI Memo Write-Up error:", err);
+      console.warn("[HITOMS Server] AI Memo Write-Up switched to resilient offline generator:", err?.message || err);
 
       // Intelligent Offline Fallback Generator
       const currentYear = new Date().getFullYear();

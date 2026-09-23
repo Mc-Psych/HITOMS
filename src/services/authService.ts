@@ -572,14 +572,17 @@ class AuthService {
     const surname = extractSurname(user.fullName);
     const defaultPassword = getDefaultPasswordForSurname(surname);
 
-    const isMatch =
-      (user.password && user.password === cleanPassword) ||
-      cleanPassword.toLowerCase() === defaultPassword.toLowerCase() ||
-      cleanPassword === 'admin' ||
-      cleanPassword === 'admin123' ||
-      cleanPassword === 'kay' ||
-      cleanPassword === 'kay1' ||
-      cleanPassword === 'password';
+    const hasChangedPassword = !!user.lastPasswordChangeAt;
+
+    const isMatch = hasChangedPassword
+      ? (user.password && user.password === cleanPassword)
+      : (user.password && user.password === cleanPassword) ||
+        cleanPassword.toLowerCase() === defaultPassword.toLowerCase() ||
+        cleanPassword === 'admin' ||
+        cleanPassword === 'admin123' ||
+        cleanPassword === 'kay' ||
+        cleanPassword === 'kay1' ||
+        cleanPassword === 'password';
 
     if (!isMatch) {
       throw new Error('Incorrect password. For new accounts, initial password is the last 4 letters of your Surname.');
