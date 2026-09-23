@@ -175,6 +175,48 @@ class SyncService {
     return operationId;
   }
 
+  // Pull remote documents from Firestore and sync them into IndexedDB, or seed Firestore if remote is empty
+  private async pullCollectionFromFirestore(collectionName: string, storeName: StoreName): Promise<void> {
+    if (!isFirebaseConfigured() || !firebaseClients.firestore) return;
+    try {
+      const { collection, getDocs, setDoc, doc } = await import('firebase/firestore');
+      const collectionRef = collection(firebaseClients.firestore, collectionName);
+      const querySnapshot = await getDocs(collectionRef);
+
+      const remoteIds = new Set<string>();
+
+      // Read remote docs
+      for (const document of querySnapshot.docs) {
+        const remoteData = document.data();
+        const id = document.id;
+        remoteIds.add(id);
+
+        // Check if there is a pending local change in queue for this item
+        const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
+        const hasPendingEdit = queue.some((q) => q.entityType === storeName && q.entityId === id);
+        if (hasPendingEdit) continue;
+
+        // Save remote item to local store
+        await putToStore(storeName, { ...remoteData, id, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() });
+      }
+
+      // If Firestore has 0 documents for this collection, but local store has items,
+      // upload the local items to Firestore to seed the cloud database!
+      if (querySnapshot.empty) {
+        const localItems = await getAllFromStore<any>(storeName);
+        for (const item of localItems) {
+          if (item && item.id) {
+            const cleanItem = { ...item, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() };
+            const docRef = doc(firebaseClients.firestore, collectionName, item.id);
+            await setDoc(docRef, cleanItem, { merge: true });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[SyncService] Failed to sync collection ${collectionName}:`, e);
+    }
+  }
+
   // Automatic or Manual Sync
   public async runAutomaticSync(): Promise<void> {
     if (this.isSyncRunning) return;
@@ -196,14 +238,7 @@ class SyncService {
       const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
       const pendingItems = queue.filter((q) => q.status === 'PENDING' || q.status === 'RETRYING');
 
-      if (pendingItems.length === 0) {
-        this.stats.connectionState = 'ONLINE';
-        this.isSyncRunning = false;
-        this.notify();
-        return;
-      }
-
-      // Process pending queue
+      // 1. Push: Process pending local queue mutations
       for (const item of pendingItems) {
         try {
           await this.syncSingleItem(item);
@@ -228,6 +263,24 @@ class SyncService {
             item.status = 'RETRYING';
           }
           await putToStore('syncQueue', item);
+        }
+      }
+
+      // 2. Pull & Seed: Symmetric bi-directional synchronization with Firestore
+      if (isFirebaseConfigured() && firebaseClients.firestore) {
+        const collectionsToSync: Array<{ col: string; store: StoreName }> = [
+          { col: 'users', store: 'users' },
+          { col: 'tickets', store: 'tickets' },
+          { col: 'assets', store: 'assets' },
+          { col: 'inventory', store: 'inventory' },
+          { col: 'maintenance', store: 'maintenance' },
+          { col: 'incidents', store: 'incidents' },
+          { col: 'memos', store: 'memos' },
+          { col: 'settings', store: 'settings' },
+        ];
+
+        for (const { col, store } of collectionsToSync) {
+          await this.pullCollectionFromFirestore(col, store);
         }
       }
 
