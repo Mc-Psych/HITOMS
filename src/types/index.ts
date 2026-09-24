@@ -96,7 +96,8 @@ export interface Attachment {
   name: string;
   size: number;
   type: string;
-  dataUrl: string; // Base64 data for local offline storage
+  dataUrl?: string; // Base64 data for local offline storage
+  data?: string; // Alias
   uploadedBy: string;
   createdAt: string;
   syncedToCloud?: boolean;
@@ -358,7 +359,7 @@ export interface Incident extends SyncMetadata {
   updatedAt: string;
 }
 
-export type SystemOperationalStatus = 'Operational' | 'Degraded' | 'Down' | 'Maintenance';
+export type SystemOperationalStatus = 'Operational' | 'Degraded' | 'Down' | 'Maintenance' | 'Offline';
 
 export interface HospitalSystem extends SyncMetadata {
   id: string;
@@ -371,9 +372,16 @@ export interface HospitalSystem extends SyncMetadata {
   url: string;
   server: string;
   database: string;
+  ipOrHost?: string;
+  port?: number | string;
+  uptimePercent?: number;
   lastChecked: string;
   latencyMs: number;
   uptimePercentage: number;
+  maintenanceWindow?: string;
+  statusMessage?: string;
+  leadAdmin?: string;
+  vendorSupportHotline?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -659,6 +667,15 @@ export interface HospitalMemo {
   isAiGenerated: boolean;
   aiPromptContext?: string;
   tags?: string[];
+  attachments?: Attachment[];
+  archivedScanImage?: string; // Base64 data URL or photo/scan of physical paper memo
+  archiveSource?: 'DIGITAL_DRAFT' | 'DEVICE_UPLOAD' | 'CAMERA_CAPTURE';
+  physicalArchiveLocation?: string; // Physical file cabinet/rack/folder location
+  confidentialityLevel?: 'STANDARD' | 'CONFIDENTIAL' | 'STRICTLY_RESTRICTED';
+  originalFileName?: string;
+  fileMimeType?: string;
+  fileSizeBytes?: number;
+  memoDate?: string;
   createdAt: string;
   updatedAt: string;
   approvedBy?: {

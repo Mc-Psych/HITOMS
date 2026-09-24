@@ -14,6 +14,7 @@ import {
   Wifi,
   Server,
   TrendingUp,
+  Wrench,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -25,6 +26,7 @@ import {
   type User,
   type SystemSettings,
 } from '../types';
+import { authService } from '../services/authService';
 
 interface DashboardViewProps {
   tickets?: Ticket[];
@@ -66,6 +68,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const safeSystems = (systems && systems.length > 0) ? systems : (hospitalSystems || []);
   const safeInventory = (inventory && inventory.length > 0) ? inventory : (inventoryItems || []);
 
+  // Super Admin & IT Unit Access Check
+  const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+
   // Compute Key Metrics
   const openTickets = safeTickets.filter((t) => t.status !== 'Closed' && t.status !== 'Resolved');
   const criticalTickets = safeTickets.filter((t) => t.priority === 'Critical' && t.status !== 'Closed');
@@ -93,10 +98,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Offline Data Integrity & Health Report Widget */}
-      <IntegrityReportWidget />
+      {/* Offline Data Integrity & Health Report Widget - Strictly Super Admin & IT Unit Only */}
+      {isSuperAdminOrIT && <IntegrityReportWidget />}
 
-      {/* Hospital System Status Cards (LHIMS, QuickBooks, Quixmo, Starlink, etc.) */}
+      {/* Hospital System Status Cards (LHIMS, Claim IT, QuickBooks, Quixmo, Starlink, etc.) */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -104,40 +109,88 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
               Core Hospital Systems Telemetry
             </h2>
+            {isSuperAdminOrIT && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">
+                IT Managed
+              </span>
+            )}
           </div>
-          <button
-            onClick={() => onNavigate('systems')}
-            className="text-xs font-semibold text-sky-600 hover:text-sky-700 cursor-pointer"
-          >
-            View All ({safeSystems.length})
-          </button>
+          <div className="flex items-center gap-2">
+            {isSuperAdminOrIT && (
+              <button
+                onClick={() => onNavigate('systems')}
+                className="text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-sky-600 flex items-center gap-1 cursor-pointer bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg transition"
+              >
+                <Wrench className="w-3 h-3" />
+                <span>Manage & Edit Status</span>
+              </button>
+            )}
+            <button
+              onClick={() => onNavigate('systems')}
+              className="text-xs font-semibold text-sky-600 hover:text-sky-700 cursor-pointer ml-1"
+            >
+              View All ({safeSystems.length})
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {safeSystems.slice(0, 6).map((sys) => (
-            <div
-              key={sys.id}
-              onClick={() => onNavigate('systems')}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-2xs hover:border-sky-300 transition cursor-pointer"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{(sys.systemName || '').split('(')[0]}</span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    sys.status === 'Operational'
-                      ? 'bg-emerald-500'
-                      : sys.status === 'Degraded'
-                      ? 'bg-amber-500'
-                      : 'bg-rose-500 animate-pulse'
-                  }`}
-                />
+          {safeSystems.slice(0, 6).map((sys) => {
+            const isOperational = sys.status === 'Operational';
+            const isMaintenance = sys.status === 'Maintenance';
+            const isDegraded = sys.status === 'Degraded';
+            const isDown = sys.status === 'Down';
+
+            return (
+              <div
+                key={sys.id}
+                onClick={() => onNavigate('systems')}
+                className={`bg-white dark:bg-slate-900 border rounded-xl p-3 shadow-2xs hover:border-sky-300 transition cursor-pointer flex flex-col justify-between ${
+                  isDown
+                    ? 'border-rose-300 dark:border-rose-900 ring-1 ring-rose-500/20'
+                    : isMaintenance
+                    ? 'border-blue-300 dark:border-blue-900 ring-1 ring-blue-500/20'
+                    : isDegraded
+                    ? 'border-amber-300 dark:border-amber-900'
+                    : 'border-slate-200 dark:border-slate-800'
+                }`}
+                title={isSuperAdminOrIT ? `Click to edit ${sys.systemName} status` : sys.systemName}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                    {(sys.systemName || '').split('(')[0]}
+                  </span>
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      isOperational
+                        ? 'bg-emerald-500'
+                        : isMaintenance
+                        ? 'bg-blue-500 animate-pulse'
+                        : isDegraded
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500 animate-ping'
+                    }`}
+                  />
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px]">
+                  <span
+                    className={`font-semibold ${
+                      isOperational
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : isMaintenance
+                        ? 'text-blue-600 dark:text-blue-400'
+                        : isDegraded
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {sys.status}
+                  </span>
+                  <span className="font-mono text-slate-400">{sys.latencyMs || 0}ms</span>
+                </div>
               </div>
-              <div className="mt-2 flex items-center justify-between text-[11px]">
-                <span className="text-slate-500">{sys.status}</span>
-                <span className="font-mono text-slate-400">{sys.latencyMs}ms</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

@@ -27,6 +27,10 @@ import {
   Package,
   Wand2,
   Image as ImageIcon,
+  Camera,
+  Upload,
+  FolderArchive,
+  Eye,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -44,6 +48,8 @@ import { memoService } from '../services/memoService';
 import { MemoDetailModal } from './MemoDetailModal';
 import { MemoEditorModal } from './MemoEditorModal';
 import { LetterheadUploadModal } from './LetterheadUploadModal';
+import { MemoUploadArchiveModal } from './MemoUploadArchiveModal';
+import { MemoScanViewerModal } from './MemoScanViewerModal';
 
 interface ReportsViewProps {
   tickets?: Ticket[];
@@ -94,9 +100,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [memos, setMemos] = useState<HospitalMemo[]>([]);
   const [loadingMemos, setLoadingMemos] = useState(true);
   const [selectedMemoForDetail, setSelectedMemoForDetail] = useState<HospitalMemo | null>(null);
+  const [selectedMemoForScanViewer, setSelectedMemoForScanViewer] = useState<HospitalMemo | null>(null);
   const [memoToEdit, setMemoToEdit] = useState<HospitalMemo | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
+  const [isUploadArchiveModalOpen, setIsUploadArchiveModalOpen] = useState(false);
 
   // Memo Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -130,16 +138,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Filtered Memos List
   const filteredMemos = useMemo(() => {
     return memos.filter((m) => {
-      if (filterType !== 'ALL' && m.memoType !== filterType) return false;
+      if (filterType === 'ARCHIVED_SCANS') {
+        const hasScan = Boolean(m.archivedScanImage || m.archiveSource === 'CAMERA_CAPTURE' || m.archiveSource === 'DEVICE_UPLOAD' || (m.attachments && m.attachments.length > 0));
+        if (!hasScan) return false;
+      } else if (filterType !== 'ALL' && m.memoType !== filterType) {
+        return false;
+      }
       if (filterStatus !== 'ALL' && m.status !== filterStatus) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesTitle = m.title.toLowerCase().includes(q);
-        const matchesRef = m.memoNumber.toLowerCase().includes(q);
-        const matchesAudience = m.targetAudience.toLowerCase().includes(q);
-        const matchesSender = m.fromSender.name.toLowerCase().includes(q);
-        const matchesSummary = m.executiveSummary.toLowerCase().includes(q);
-        if (!matchesTitle && !matchesRef && !matchesAudience && !matchesSender && !matchesSummary) {
+        const matchesTitle = (m.title || '').toLowerCase().includes(q);
+        const matchesRef = (m.memoNumber || '').toLowerCase().includes(q);
+        const matchesAudience = (m.targetAudience || '').toLowerCase().includes(q);
+        const matchesSender = (m.fromSender?.name || '').toLowerCase().includes(q);
+        const matchesSummary = (m.executiveSummary || '').toLowerCase().includes(q);
+        const matchesLocation = (m.physicalArchiveLocation || '').toLowerCase().includes(q);
+        if (!matchesTitle && !matchesRef && !matchesAudience && !matchesSender && !matchesSummary && !matchesLocation) {
           return false;
         }
       }
@@ -334,6 +348,16 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
           <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
             <button
               type="button"
+              onClick={() => setIsUploadArchiveModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 hover:bg-sky-50 dark:hover:bg-sky-950/40 text-sky-700 dark:text-sky-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+              title="Upload memo documents or capture photos of physical paper memos into the system"
+            >
+              <Camera className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+              <span>Upload / Camera Scan Memo</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsLetterheadModalOpen(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-2xs transition cursor-pointer"
               title="Upload or change official hospital letterhead banner (PDF or image) for memos and printable records"
@@ -467,7 +491,8 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                 onChange={(e) => setFilterType(e.target.value)}
                 className="px-3 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
               >
-                <option value="ALL">All Types</option>
+                <option value="ALL">All Memo Types</option>
+                <option value="ARCHIVED_SCANS">Archived Scans & Uploads Only</option>
                 <option value="EXECUTIVE_IT_MEMO">Executive IT Memo</option>
                 <option value="CLINICAL_ADVISORY">Clinical Ward Advisory</option>
                 <option value="INCIDENT_DEBRIEF">Incident Debrief</option>
@@ -484,6 +509,7 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                 <option value="ALL">All Statuses</option>
                 <option value="PUBLISHED">Published</option>
                 <option value="APPROVED">Approved</option>
+                <option value="ARCHIVED">Archived</option>
                 <option value="UNDER_REVIEW">Under Review</option>
                 <option value="DRAFT">Draft</option>
               </select>
@@ -512,123 +538,204 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                 No Memorandums Found
               </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                No hospital memos matched your search filters. Click below to draft a new formal memo using AI.
+                No hospital memos matched your search filters. Click below to draft a new formal memo or upload a document scan.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setMemoToEdit(null);
-                  setIsEditorOpen(true);
-                }}
-                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Draft New Memo with AI</span>
-              </button>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsUploadArchiveModalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Upload / Camera Scan Memo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMemoToEdit(null);
+                    setIsEditorOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Draft New Memo with AI</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredMemos.map((memo) => (
-                <div
-                  key={memo.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs hover:border-purple-300 dark:hover:border-purple-800 transition flex flex-col justify-between group space-y-4"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
-                          {memo.memoNumber}
-                        </span>
-                        {getMemoBadge(memo.memoType)}
+              {filteredMemos.map((memo) => {
+                const hasScanOrAttachment = Boolean(memo.archivedScanImage || (memo.attachments && memo.attachments.length > 0));
+
+                return (
+                  <div
+                    key={memo.id}
+                    className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs hover:border-purple-300 dark:hover:border-purple-800 transition flex flex-col justify-between group space-y-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
+                            {memo.memoNumber}
+                          </span>
+                          {getMemoBadge(memo.memoType)}
+                          {memo.archiveSource === 'CAMERA_CAPTURE' && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 flex items-center gap-1">
+                              <Camera className="w-3 h-3" />
+                              <span>Camera Scan</span>
+                            </span>
+                          )}
+                          {memo.archiveSource === 'DEVICE_UPLOAD' && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 flex items-center gap-1">
+                              <Upload className="w-3 h-3" />
+                              <span>Uploaded File</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {memo.status === 'PUBLISHED' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Published</span>
+                            </span>
+                          )}
+                          {memo.status === 'APPROVED' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+                              Approved
+                            </span>
+                          )}
+                          {memo.status === 'ARCHIVED' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 flex items-center gap-1">
+                              <FolderArchive className="w-3 h-3" />
+                              <span>Archived</span>
+                            </span>
+                          )}
+                          {memo.status === 'UNDER_REVIEW' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              Under Review
+                            </span>
+                          )}
+                          {memo.status === 'DRAFT' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                              Draft
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
-                        {memo.status === 'PUBLISHED' && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Published</span>
-                          </span>
-                        )}
-                        {memo.status === 'UNDER_REVIEW' && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                            Under Review
-                          </span>
-                        )}
-                        {memo.status === 'DRAFT' && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                            Draft
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3
-                        onClick={() => setSelectedMemoForDetail(memo)}
-                        className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition cursor-pointer line-clamp-2"
-                      >
-                        {memo.title}
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Target: <span className="text-slate-600 dark:text-slate-300 font-medium">{memo.targetAudience}</span>
-                      </p>
-                    </div>
-
-                    <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
-                      {memo.executiveSummary}
-                    </p>
-
-                    {memo.actionRequiredOrChecklist && memo.actionRequiredOrChecklist.length > 0 && (
-                      <div className="text-[11px] font-semibold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 bg-sky-50 dark:bg-sky-950/40 px-2.5 py-1 rounded-lg">
-                        <Check className="w-3.5 h-3.5 shrink-0" />
-                        <span>{memo.actionRequiredOrChecklist.length} Mandatory Clinical/IT Action Items</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                    <div className="text-[11px] text-slate-400">
-                      <span>By <strong>{memo.fromSender.name}</strong></span>
-                      <span className="mx-1">•</span>
-                      <span>{new Date(memo.createdAt).toLocaleDateString()}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedMemoForDetail(memo)}
-                        className="px-3 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs transition cursor-pointer flex items-center gap-1"
-                      >
-                        <span>View Letterhead</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMemoToEdit(memo);
-                          setIsEditorOpen(true);
-                        }}
-                        className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-                        title="Edit / Refine Draft"
-                      >
-                        <Wand2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.id === memo.fromSender.uid) && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteMemo(memo.id)}
-                          className="p-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                          title="Delete Memo"
+                      <div>
+                        <h3
+                          onClick={() => setSelectedMemoForDetail(memo)}
+                          className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition cursor-pointer line-clamp-2"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                          {memo.title}
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Target: <span className="text-slate-600 dark:text-slate-300 font-medium">{memo.targetAudience}</span>
+                        </p>
+                      </div>
+
+                      {/* Scanned Image / Document Thumbnail if available */}
+                      {memo.archivedScanImage && (
+                        <div
+                          onClick={() => setSelectedMemoForScanViewer(memo)}
+                          className="relative h-24 bg-slate-950 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer group/thumb hover:ring-2 hover:ring-sky-500 transition"
+                        >
+                          <img
+                            src={memo.archivedScanImage}
+                            alt={memo.title}
+                            className="w-full h-full object-cover opacity-80 group-hover/thumb:opacity-100 group-hover/thumb:scale-105 transition"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex items-end p-2 justify-between text-white">
+                            <span className="text-[10px] font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                              <Eye className="w-3 h-3" />
+                              <span>Inspect Scanned Document</span>
+                            </span>
+                            {memo.physicalArchiveLocation && (
+                              <span className="text-[10px] text-slate-300 font-mono truncate max-w-[150px]">
+                                {memo.physicalArchiveLocation}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
+                        {memo.executiveSummary}
+                      </p>
+
+                      {memo.physicalArchiveLocation && !memo.archivedScanImage && (
+                        <div className="text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                          <FolderArchive className="w-3.5 h-3.5 text-sky-600" />
+                          <span>Filing Location: <strong className="text-slate-700 dark:text-slate-300 font-medium">{memo.physicalArchiveLocation}</strong></span>
+                        </div>
+                      )}
+
+                      {memo.actionRequiredOrChecklist && memo.actionRequiredOrChecklist.length > 0 && (
+                        <div className="text-[11px] font-semibold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 bg-sky-50 dark:bg-sky-950/40 px-2.5 py-1 rounded-lg">
+                          <Check className="w-3.5 h-3.5 shrink-0" />
+                          <span>{memo.actionRequiredOrChecklist.length} Mandatory Clinical/IT Action Items</span>
+                        </div>
                       )}
                     </div>
+
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                      <div className="text-[11px] text-slate-400">
+                        <span>By <strong>{memo.fromSender?.name || 'IT Staff'}</strong></span>
+                        <span className="mx-1">•</span>
+                        <span>{new Date(memo.memoDate || memo.createdAt).toLocaleDateString()}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {hasScanOrAttachment && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMemoForScanViewer(memo)}
+                            className="px-2.5 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 text-sky-700 dark:text-sky-300 font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                            title="Inspect high-resolution document scan / camera photo"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Scan</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedMemoForDetail(memo)}
+                          className="px-3 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                        >
+                          <span>View Letterhead</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMemoToEdit(memo);
+                            setIsEditorOpen(true);
+                          }}
+                          className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                          title="Edit / Refine Draft"
+                        >
+                          <Wand2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.id === memo.fromSender?.uid) && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMemo(memo.id)}
+                            className="p-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="Delete Memo"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1068,6 +1175,22 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
         onSettingsSaved={() => {
           if (onRefresh) onRefresh();
         }}
+      />
+
+      {/* Memo Document Upload & Camera Capture Modal */}
+      <MemoUploadArchiveModal
+        isOpen={isUploadArchiveModalOpen}
+        onClose={() => setIsUploadArchiveModalOpen(false)}
+        currentUser={currentUser}
+        systemSettings={systemSettings}
+        onSaved={handleSavedMemo}
+      />
+
+      {/* High-Resolution Memo Scan / Attachment Viewer */}
+      <MemoScanViewerModal
+        memo={selectedMemoForScanViewer}
+        isOpen={Boolean(selectedMemoForScanViewer)}
+        onClose={() => setSelectedMemoForScanViewer(null)}
       />
 
     </div>

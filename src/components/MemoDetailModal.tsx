@@ -333,6 +333,12 @@ export const MemoDetailModal: React.FC<MemoDetailModalProps> = ({
                 <span className="font-bold text-slate-500 print:text-black min-w-16">DEPT:</span>
                 <span className="text-slate-700 dark:text-slate-300 print:text-black">{memo.department}</span>
               </div>
+              {memo.physicalArchiveLocation && (
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-slate-500 print:text-black min-w-16">ARCHIVE:</span>
+                  <span className="text-sky-700 dark:text-sky-400 font-medium print:text-black">{memo.physicalArchiveLocation}</span>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -358,6 +364,23 @@ export const MemoDetailModal: React.FC<MemoDetailModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* Scanned Physical Document Preview if available */}
+          {memo.archivedScanImage && (
+            <div className="p-4 rounded-2xl bg-slate-900 text-white border border-slate-800 space-y-2 print:border-black print:bg-white print:text-black">
+              <div className="flex items-center justify-between text-xs font-bold text-sky-400 print:text-black">
+                <span>Scanned Paper Memo Document / Camera Capture Archive:</span>
+                {memo.originalFileName && <span className="font-mono text-[11px] text-slate-400">{memo.originalFileName}</span>}
+              </div>
+              <div className="rounded-xl overflow-hidden max-h-80 flex items-center justify-center bg-black">
+                <img
+                  src={memo.archivedScanImage}
+                  alt={memo.title}
+                  className="max-h-80 w-auto object-contain"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Executive Summary Callout */}
           <div className="p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border-l-4 border-sky-600 dark:border-sky-500 space-y-1 print:bg-white print:border-black print:rounded-none">
