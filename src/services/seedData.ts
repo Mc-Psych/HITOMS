@@ -28,6 +28,150 @@ import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
 import { collection, getDocs } from 'firebase/firestore';
 import defaultSeedJson from '../data/defaultSeedData.json';
 
+// Helper to prevent any Firestore / Network call from hanging indefinitely
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 5000, fallbackVal?: T): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallbackVal !== undefined) {
+        resolve(fallbackVal);
+      } else {
+        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
+
+export async function syncLatestStaffAccounts(): Promise<User[]> {
+  try {
+    const existingUsers = await getAllFromStore<User>('users');
+    const existingMap = new Map<string, User>();
+    existingUsers.forEach((u) => {
+      if (u.id) existingMap.set(u.id, u);
+      if (u.username) existingMap.set(u.username.toLowerCase(), u);
+      if (u.email) existingMap.set(u.email.toLowerCase(), u);
+    });
+
+    const usersToUpsert: User[] = [];
+
+    // 1. From defaultSeedData.json snapshot
+    if (defaultSeedJson?.data?.users && Array.isArray(defaultSeedJson.data.users)) {
+      for (const u of defaultSeedJson.data.users) {
+        const found =
+          (u.id && existingMap.get(u.id)) ||
+          (u.username && existingMap.get(u.username.toLowerCase())) ||
+          (u.email && existingMap.get(u.email.toLowerCase()));
+
+        if (!found) {
+          usersToUpsert.push(u as User);
+          if (u.id) existingMap.set(u.id, u as User);
+        } else {
+          let updated = false;
+          const merged = { ...found };
+          if (u.fullName && u.fullName !== found.fullName) {
+            merged.fullName = u.fullName;
+            updated = true;
+          }
+          if (u.username && u.username !== found.username) {
+            merged.username = u.username;
+            updated = true;
+          }
+          if (u.role && u.role !== found.role) {
+            merged.role = u.role as any;
+            updated = true;
+          }
+          if (u.password && u.password !== found.password && !found.lastPasswordChangeAt) {
+            merged.password = u.password;
+            updated = true;
+          }
+          if (u.specialties && JSON.stringify(u.specialties) !== JSON.stringify(found.specialties)) {
+            merged.specialties = u.specialties;
+            updated = true;
+          }
+          if (u.department && u.department !== found.department) {
+            merged.department = u.department;
+            updated = true;
+          }
+          if (updated) {
+            usersToUpsert.push(merged as User);
+            if (u.id) existingMap.set(u.id, merged as User);
+          }
+        }
+      }
+    }
+
+    // 2. From Firestore if online
+    if (isFirebaseConfigured() && firebaseClients.firestore) {
+      try {
+        const db = firebaseClients.firestore;
+        const usersRef = collection(db, 'users');
+        const snap = await withTimeout(getDocs(usersRef), 4000);
+        if (snap && !snap.empty) {
+          snap.forEach((doc) => {
+            const data = doc.data() as User;
+            const id = doc.id;
+            const found =
+              existingMap.get(id) ||
+              (data.username && existingMap.get(data.username.toLowerCase())) ||
+              (data.email && existingMap.get(data.email.toLowerCase()));
+
+            if (!found) {
+              const newUser = {
+                ...data,
+                id,
+                _syncStatus: 'SYNCED' as const,
+                _lastSyncedAt: new Date().toISOString(),
+              };
+              usersToUpsert.push(newUser);
+              existingMap.set(id, newUser);
+            } else {
+              const remoteUpdated = new Date(data.updatedAt || 0).getTime();
+              const localUpdated = new Date(found.updatedAt || 0).getTime();
+              if (remoteUpdated >= localUpdated) {
+                const merged = { ...found, ...data, id, _syncStatus: 'SYNCED' as const };
+                usersToUpsert.push(merged);
+                existingMap.set(id, merged);
+              }
+            }
+          });
+        }
+      } catch (err: any) {
+        console.warn('[SeedData] Note on cloud staff pull:', err?.message);
+      }
+    }
+
+    if (usersToUpsert.length > 0) {
+      setSkipSyncEnqueue(true);
+      try {
+        await putBatchToStore('users', usersToUpsert);
+      } finally {
+        setSkipSyncEnqueue(false);
+      }
+    }
+
+    await ensureSuperAdminCourageKay();
+    const finalUsers = await getAllFromStore<User>('users');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('hitoms_users_synced', { detail: { count: finalUsers.length } })
+      );
+    }
+    return finalUsers;
+  } catch (e) {
+    console.warn('[SeedData] Error in syncLatestStaffAccounts:', e);
+    return getAllFromStore<User>('users');
+  }
+}
+
 export async function ensureSuperAdminCourageKay(): Promise<void> {
   try {
     const users = await getAllFromStore<User>('users');
@@ -42,23 +186,23 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
     if (!courageKay) {
       const admin001 = users.find((u) => u.id === 'usr-admin-001');
       if (admin001) {
-        admin001.fullName = 'Courage Kay';
+        admin001.fullName = 'Courage Kekesi';
         admin001.username = 'kay';
         admin001.email = 'courage.kay@hospital.local';
         admin001.role = 'SUPER_ADMIN';
         admin001.jobTitle = 'Chief Information Officer & Super Administrator';
-        admin001.department = 'IT Operations';
+        admin001.department = 'IT & Systems Administration';
         admin001.status = 'Active';
-        admin001.password = 'admin';
+        admin001.password = '1234';
         await putToStore('users', admin001);
       } else {
         const newUser: User = {
           id: 'usr-admin-001',
-          fullName: 'Courage Kay',
+          fullName: 'Courage Kekesi',
           username: 'kay',
           email: 'courage.kay@hospital.local',
           phone: '+233 24 100 0001',
-          department: 'IT Operations',
+          department: 'IT & Systems Administration',
           jobTitle: 'Chief Information Officer & Super Administrator',
           role: 'SUPER_ADMIN',
           status: 'Active',
@@ -66,7 +210,7 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
           updatedAt: now,
           lastLoginAt: now,
           offlineAccessAllowed: true,
-          password: 'admin',
+          password: '1234',
           _syncStatus: 'SYNCED',
           _syncVersion: 1,
           _lastSyncedAt: now,
@@ -100,9 +244,10 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
 export async function initializeSeedDataIfNeeded(): Promise<void> {
   const userCount = await countStore('users');
   if (userCount > 0) {
-    await ensureSuperAdminCourageKay();
+    // Sync any updated/missing staff accounts on mobile/desktop across sessions
+    await syncLatestStaffAccounts();
     await memoService.getMemos();
-    return; // Already initialized, ensured Courage Kay is super admin and memos are ready
+    return;
   }
 
   // If Firebase is configured, try to pull from Firestore to hydrate instead of local mock seed data
@@ -186,15 +331,15 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   const deviceId = getDeviceId();
   const now = new Date().toISOString();
 
-  // 1. Initial Users (All 8 Roles)
+  // 1. Initial Users (All 8 Roles + Senior IT Officers)
   const users: User[] = [
     {
       id: 'usr-admin-001',
-      fullName: 'Courage Kay',
+      fullName: 'Courage Kekesi',
       username: 'kay',
       email: 'courage.kay@hospital.local',
       phone: '+233 24 100 0001',
-      department: 'IT Operations',
+      department: 'IT & Systems Administration',
       jobTitle: 'Chief Information Officer & Super Administrator',
       role: 'SUPER_ADMIN',
       status: 'Active',
@@ -202,7 +347,47 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
       updatedAt: now,
       lastLoginAt: now,
       offlineAccessAllowed: true,
-      password: 'admin',
+      password: '1234',
+      _syncStatus: 'SYNCED',
+      _syncVersion: 1,
+      _lastSyncedAt: now,
+      _deviceId: deviceId,
+    },
+    {
+      id: 'usr-45b5ac61',
+      fullName: 'Edmond Gadzekpo',
+      username: 'gadzekpo',
+      email: 'gadzekpo@hospital.local',
+      phone: '+233 24 100 0004',
+      department: 'IT & Systems Administration',
+      jobTitle: 'Hospital Staff / IT Admin',
+      role: 'IT_ADMIN',
+      status: 'Active',
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+      offlineAccessAllowed: true,
+      password: 'ekpo',
+      _syncStatus: 'SYNCED',
+      _syncVersion: 1,
+      _lastSyncedAt: now,
+      _deviceId: deviceId,
+    },
+    {
+      id: 'usr-6e1cf172',
+      fullName: 'Ebenezer Appau',
+      username: 'appau',
+      email: 'appau@hospital.local',
+      phone: '+233 24 100 0005',
+      department: 'IT & Systems Administration',
+      jobTitle: 'Senior IT Manager',
+      role: 'IT_ADMIN',
+      status: 'Active',
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+      offlineAccessAllowed: true,
+      password: 'ppau',
       _syncStatus: 'SYNCED',
       _syncVersion: 1,
       _lastSyncedAt: now,

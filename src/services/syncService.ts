@@ -267,6 +267,11 @@ class SyncService {
         setSkipSyncEnqueue(true);
         try {
           await putBatchToStore(storeName, itemsToSave);
+          if (storeName === 'users' && typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('hitoms_users_synced', { detail: { count: itemsToSave.length } })
+            );
+          }
         } finally {
           setSkipSyncEnqueue(false);
         }

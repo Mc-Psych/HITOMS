@@ -212,11 +212,17 @@ export default function App() {
     };
     window.addEventListener('hitoms_settings_updated', handleSettingsUpdated);
 
+    const handleUsersSynced = () => {
+      refreshAllData();
+    };
+    window.addEventListener('hitoms_users_synced', handleUsersSynced);
+
     return () => {
       isMounted = false;
       ticketSoundService.stopRecurringBellMonitor();
       unsubSync();
       window.removeEventListener('hitoms_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('hitoms_users_synced', handleUsersSynced);
     };
   }, [refreshAllData]);
 

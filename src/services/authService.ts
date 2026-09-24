@@ -14,6 +14,7 @@ import {
   getDeviceId,
 } from './localDatabaseService';
 import { auditService } from './auditService';
+import { syncLatestStaffAccounts } from './seedData';
 
 // Extract surname from full name (e.g. "Dr. Sarah Mensah" -> "Mensah")
 export function extractSurname(fullName: string): string {
@@ -545,8 +546,8 @@ class AuthService {
     const trimmedInput = usernameOrEmail.trim().toLowerCase();
     const cleanPassword = passwordAttempt.trim();
 
-    const users = await getAllFromStore<User>('users');
-    const user = users.find((u) => {
+    let users = await getAllFromStore<User>('users');
+    let user = users.find((u) => {
       const uEmail = (u.email || '').toLowerCase();
       const uUsername = (u.username || '').toLowerCase();
       const uFullName = (u.fullName || '').toLowerCase();
@@ -559,6 +560,24 @@ class AuthService {
         (trimmedInput.length >= 3 && uFullName.includes(trimmedInput))
       );
     });
+
+    // If not found locally (e.g. mobile device with older cache), auto-sync latest staff profiles
+    if (!user) {
+      users = await syncLatestStaffAccounts();
+      user = users.find((u) => {
+        const uEmail = (u.email || '').toLowerCase();
+        const uUsername = (u.username || '').toLowerCase();
+        const uFullName = (u.fullName || '').toLowerCase();
+        const uSurname = extractSurname(u.fullName).toLowerCase();
+        return (
+          uEmail === trimmedInput ||
+          uUsername === trimmedInput ||
+          uSurname === trimmedInput ||
+          uFullName === trimmedInput ||
+          (trimmedInput.length >= 3 && uFullName.includes(trimmedInput))
+        );
+      });
+    }
 
     if (!user) {
       throw new Error('No hospital staff profile found with this Surname, Username, or Email.');

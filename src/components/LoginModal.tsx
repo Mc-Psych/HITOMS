@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LogIn, Lock, User, AlertCircle, CheckCircle2, X, Building2, Server, Shield } from 'lucide-react';
+import { LogIn, Lock, User, AlertCircle, CheckCircle2, X, Building2, Server, Shield, RefreshCw } from 'lucide-react';
 import { type User as UserType, type SystemSettings } from '../types';
 import { authService, extractSurname, getDefaultPasswordForSurname } from '../services/authService';
 import { settingsService } from '../services/settingsService';
+import { syncLatestStaffAccounts } from '../services/seedData';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -25,7 +26,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshingStaff, setIsRefreshingStaff] = useState(false);
   const [selectedStaffPreset, setSelectedStaffPreset] = useState<UserType | null>(null);
+
+  // Auto-sync staff accounts when login modal opens (critical for mobile devices)
+  useEffect(() => {
+    if (isOpen) {
+      syncLatestStaffAccounts().catch((e) =>
+        console.warn('[LoginModal] Background staff sync note:', e)
+      );
+    }
+  }, [isOpen]);
+
+  const handleManualSyncStaff = async () => {
+    setIsRefreshingStaff(true);
+    try {
+      await syncLatestStaffAccounts();
+    } catch (e: any) {
+      console.warn('Failed to refresh staff:', e);
+    } finally {
+      setIsRefreshingStaff(false);
+    }
+  };
 
   // Dynamically sync facility settings so Login Page ALWAYS matches the facility details
   const [activeSettings, setActiveSettings] = useState<SystemSettings>(() => {
@@ -212,7 +234,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
                   Quick Terminal Profiles (Click to prefill)
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono">Offline Local Auth</span>
+                <button
+                  type="button"
+                  onClick={handleManualSyncStaff}
+                  disabled={isRefreshingStaff}
+                  className="flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-mono cursor-pointer disabled:opacity-50"
+                  title="Sync latest hospital staff accounts from cloud and seed"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRefreshingStaff ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingStaff ? 'Syncing...' : 'Sync Staff'}</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
