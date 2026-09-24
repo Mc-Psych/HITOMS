@@ -16,7 +16,7 @@ import {
   setSkipSyncEnqueue,
   type StoreName,
 } from './localDatabaseService';
-import { isFirebaseConfigured, firebaseClients } from './firebaseConfig';
+import { isFirebaseConfigured, firebaseClients, ensureFirebaseAuth } from './firebaseConfig';
 
 export type ConnectivityState = 'ONLINE' | 'OFFLINE' | 'SYNCING' | 'SYNC_ERROR';
 
@@ -35,11 +35,51 @@ export interface SyncStats {
 
 type SyncListener = (stats: SyncStats) => void;
 
+// Helper to remove undefined fields recursively which cause Firestore setDoc/writeBatch exceptions
+function cleanFirestoreData(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => cleanFirestoreData(item));
+  }
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = cleanFirestoreData(value);
+    }
+  }
+  return result;
+}
+
+// Helper to prevent any Firestore / Network call from hanging indefinitely
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 6000, fallbackVal?: T): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallbackVal !== undefined) {
+        resolve(fallbackVal);
+      } else {
+        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
+
 class SyncService {
   private listeners: Set<SyncListener> = new Set();
   private simulatedOffline: boolean = false;
   private isSyncRunning: boolean = false;
   private syncTimer: any = null;
+  private watchdogTimer: any = null;
   private stats: SyncStats = {
     connectionState: 'ONLINE',
     simulatedOffline: false,
@@ -56,16 +96,22 @@ class SyncService {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.handleNetworkChange(true));
       window.addEventListener('offline', () => this.handleNetworkChange(false));
-      // Periodic automatic sync
+      // Periodic automatic sync every 30 seconds
       this.syncTimer = setInterval(() => {
-        this.runAutomaticSync();
-      }, 20000);
+        this.runAutomaticSync().catch((err) =>
+          console.warn('[SyncService] Periodic sync error:', err?.message)
+        );
+      }, 30000);
     }
   }
 
   public init() {
     this.detectConnection();
     this.refreshCounts();
+    // Kick off an initial sync check shortly after startup
+    setTimeout(() => {
+      this.runAutomaticSync().catch((e) => console.warn('[SyncService] Initial startup sync error:', e?.message));
+    }, 1500);
   }
 
   public subscribe(listener: SyncListener): () => void {
@@ -76,7 +122,11 @@ class SyncService {
 
   private notify() {
     for (const l of this.listeners) {
-      l(this.stats);
+      try {
+        l(this.stats);
+      } catch (err) {
+        console.warn('[SyncService] Error notifying listener:', err);
+      }
     }
   }
 
@@ -90,7 +140,7 @@ class SyncService {
     this.stats.simulatedOffline = this.simulatedOffline;
     this.detectConnection();
     if (!this.simulatedOffline) {
-      this.runAutomaticSync();
+      this.runAutomaticSync().catch((e) => console.warn('[SyncService] Online resume sync error:', e));
     }
   }
 
@@ -99,7 +149,7 @@ class SyncService {
       this.stats.connectionState = isOnline ? 'ONLINE' : 'OFFLINE';
       this.notify();
       if (isOnline) {
-        this.runAutomaticSync();
+        this.runAutomaticSync().catch((e) => console.warn('[SyncService] Network resume sync error:', e));
       }
     }
   }
@@ -109,6 +159,8 @@ class SyncService {
       this.stats.connectionState = 'OFFLINE';
     } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.stats.connectionState = 'OFFLINE';
+    } else if (this.isSyncRunning) {
+      this.stats.connectionState = 'SYNCING';
     } else if (this.stats.failedCount > 0) {
       this.stats.connectionState = 'SYNC_ERROR';
     } else {
@@ -131,12 +183,12 @@ class SyncService {
       this.stats.failedCount = failed;
       this.stats.conflictsCount = unresolvedConflicts;
 
-      if (failed > 0 && !this.simulatedOffline) {
-        this.stats.connectionState = 'SYNC_ERROR';
+      if (this.isSyncRunning) {
+        this.stats.connectionState = 'SYNCING';
       } else if (this.simulatedOffline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
         this.stats.connectionState = 'OFFLINE';
-      } else if (this.isSyncRunning) {
-        this.stats.connectionState = 'SYNCING';
+      } else if (failed > 0) {
+        this.stats.connectionState = 'SYNC_ERROR';
       } else {
         this.stats.connectionState = 'ONLINE';
       }
@@ -160,7 +212,7 @@ class SyncService {
       entityType,
       entityId,
       operation,
-      payload,
+      payload: cleanFirestoreData(payload),
       createdAt: new Date().toISOString(),
       retryCount: 0,
       status: 'PENDING',
@@ -169,9 +221,11 @@ class SyncService {
     await putToStore('syncQueue', queueItem);
     await this.refreshCounts();
 
-    // If online, immediately trigger background upload
+    // If online, trigger non-blocking background upload
     if (this.stats.connectionState === 'ONLINE' && !this.simulatedOffline) {
-      this.runAutomaticSync().catch(console.error);
+      setTimeout(() => {
+        this.runAutomaticSync().catch((e) => console.warn('[SyncService] Auto enqueue sync warning:', e?.message));
+      }, 50);
     }
 
     return operationId;
@@ -183,7 +237,9 @@ class SyncService {
     try {
       const { collection, getDocs, doc, writeBatch } = await import('firebase/firestore');
       const collectionRef = collection(firebaseClients.firestore, collectionName);
-      const querySnapshot = await getDocs(collectionRef);
+
+      // Wrap getDocs with 6 second timeout so it NEVER hangs indefinitely
+      const querySnapshot = await withTimeout(getDocs(collectionRef), 6000);
 
       const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
       const itemsToSave: any[] = [];
@@ -224,7 +280,7 @@ class SyncService {
         for (const localItem of localItems) {
           if (!localItem || !localItem.id) continue;
           if (!remoteDocIds.has(localItem.id)) {
-            // Do not delete if the user/item has a pending local CREATE mutation
+            // Do not delete if the item has a pending local CREATE mutation
             const hasPendingCreate = queue.some(
               (q) => q.entityType === storeName && q.entityId === localItem.id && q.operation === 'CREATE'
             );
@@ -247,26 +303,30 @@ class SyncService {
       }
 
       // If Firestore has 0 documents for this collection, but local store has items,
-      // upload local items to Firestore using high-speed writeBatch (chunked)
+      // upload local items to Firestore using high-speed writeBatch (chunked) with timeout
       if (querySnapshot.empty) {
         const localItems = await getAllFromStore<any>(storeName);
         if (localItems.length > 0) {
-          for (let i = 0; i < localItems.length; i += 400) {
+          for (let i = 0; i < localItems.length; i += 300) {
             const batch = writeBatch(firebaseClients.firestore);
-            const chunk = localItems.slice(i, i + 400);
+            const chunk = localItems.slice(i, i + 300);
             for (const item of chunk) {
               if (item && item.id) {
-                const cleanItem = { ...item, _syncStatus: 'SYNCED', _lastSyncedAt: new Date().toISOString() };
+                const cleanItem = cleanFirestoreData({
+                  ...item,
+                  _syncStatus: 'SYNCED',
+                  _lastSyncedAt: new Date().toISOString()
+                });
                 const docRef = doc(firebaseClients.firestore, collectionName, item.id);
                 batch.set(docRef, cleanItem, { merge: true });
               }
             }
-            await batch.commit();
+            await withTimeout(batch.commit(), 6000);
           }
         }
       }
-    } catch (e) {
-      console.warn(`[SyncService] Failed to sync collection ${collectionName}:`, e);
+    } catch (e: any) {
+      console.warn(`[SyncService] Note on syncing collection ${collectionName}: (${e?.message || 'timeout'})`);
     }
   }
 
@@ -287,14 +347,30 @@ class SyncService {
     this.stats.connectionState = 'SYNCING';
     this.notify();
 
-    try {
-      const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
-      const pendingItems = queue.filter((q) => q.status === 'PENDING' || q.status === 'RETRYING');
+    // Absolute Watchdog Timer: Guarantees sync lock releases after 12s no matter what
+    if (this.watchdogTimer) clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = setTimeout(() => {
+      if (this.isSyncRunning) {
+        console.warn('[SyncService] Watchdog timer triggered: force-releasing sync lock.');
+        this.isSyncRunning = false;
+        this.detectConnection();
+      }
+    }, 12000);
 
-      // 1. Push: Process pending local queue mutations
-      for (const item of pendingItems) {
+    try {
+      // Ensure Firebase client is authenticated if configured
+      if (isFirebaseConfigured()) {
+        await ensureFirebaseAuth().catch(() => {});
+      }
+
+      const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
+      // Process pending and retrying items
+      const itemsToProcess = queue.filter((q) => q.status === 'PENDING' || q.status === 'RETRYING');
+
+      // 1. Push: Process pending local queue mutations with strict per-item timeout
+      for (const item of itemsToProcess) {
         try {
-          await this.syncSingleItem(item);
+          await withTimeout(this.syncSingleItem(item), 5000);
           // Remove from queue upon success
           await deleteFromStore('syncQueue', item.operationId);
           this.stats.syncedCount += 1;
@@ -312,10 +388,10 @@ class SyncService {
             }
           }
         } catch (err: any) {
-          console.warn(`Sync failed for item ${item.entityId}:`, err);
+          console.warn(`[SyncService] Sync push notice for item ${item.entityId}:`, err?.message);
           item.retryCount += 1;
-          item.lastError = err.message || 'Network error';
-          if (item.retryCount >= 3) {
+          item.lastError = err?.message || 'Network error';
+          if (item.retryCount >= 4) {
             item.status = 'FAILED';
           } else {
             item.status = 'RETRYING';
@@ -342,23 +418,30 @@ class SyncService {
           { col: 'settings', store: 'settings' },
         ];
 
-        // Process in parallel for speed!
-        await Promise.all(
+        // Process in parallel with fast timeouts
+        await Promise.allSettled(
           collectionsToSync.map(({ col, store }) => this.pullCollectionFromFirestore(col, store))
         );
       }
 
       this.stats.lastSuccessfulSync = new Date().toISOString();
+      this.stats.lastError = null;
       await this.refreshCounts();
 
       // Trigger background integrity validation scan post-sync
       import('./integrityValidationService').then(({ integrityValidationService }) => {
-        integrityValidationService.runValidationScan().catch((e) => console.warn('[SyncService] Post-sync validation scan error:', e));
+        integrityValidationService.runValidationScan().catch((e) =>
+          console.warn('[SyncService] Post-sync validation scan notice:', e?.message)
+        );
       });
     } catch (error: any) {
-      console.error('Error during synchronization:', error);
-      this.stats.lastError = error.message;
+      console.error('[SyncService] Error during synchronization:', error);
+      this.stats.lastError = error?.message || 'Sync error';
     } finally {
+      if (this.watchdogTimer) {
+        clearTimeout(this.watchdogTimer);
+        this.watchdogTimer = null;
+      }
       this.isSyncRunning = false;
       this.detectConnection();
     }
@@ -366,7 +449,6 @@ class SyncService {
 
   // Sync a single queued mutation
   private async syncSingleItem(item: SyncQueueItem): Promise<void> {
-    // If Firebase Firestore is configured, write to Firestore
     if (isFirebaseConfigured() && firebaseClients.firestore) {
       const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
       const docRef = doc(firebaseClients.firestore, item.entityType, item.entityId);
@@ -374,12 +456,16 @@ class SyncService {
       if (item.operation === 'DELETE') {
         await deleteDoc(docRef);
       } else {
-        const payloadToUpload = { ...item.payload, _lastSyncedAt: new Date().toISOString() };
+        const payloadToUpload = cleanFirestoreData({
+          ...item.payload,
+          _lastSyncedAt: new Date().toISOString(),
+          _syncStatus: 'SYNCED',
+        });
         await setDoc(docRef, payloadToUpload, { merge: true });
       }
     } else {
-      // In local-only or LAN server mode, simulate realistic network handshake & verify integrity
-      await new Promise((r) => setTimeout(r, 80));
+      // In local-only mode, simulate swift local confirmation
+      await new Promise((r) => setTimeout(r, 40));
     }
   }
 
@@ -388,13 +474,29 @@ class SyncService {
     const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
     for (const item of queue) {
       if (item.status === 'FAILED') {
-        item.status = 'RETRYING';
+        item.status = 'PENDING';
         item.retryCount = 0;
+        item.lastError = undefined;
         await putToStore('syncQueue', item);
       }
     }
+    this.stats.failedCount = 0;
+    this.stats.lastError = null;
     await this.refreshCounts();
     await this.runAutomaticSync();
+  }
+
+  // Clear failed queue if needed
+  public async clearFailedQueue(): Promise<void> {
+    const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
+    for (const item of queue) {
+      if (item.status === 'FAILED') {
+        await deleteFromStore('syncQueue', item.operationId);
+      }
+    }
+    this.stats.failedCount = 0;
+    this.stats.lastError = null;
+    await this.refreshCounts();
   }
 
   // Resolve sync conflict
@@ -446,14 +548,14 @@ class SyncService {
     return [
       {
         id: 'synclog-1',
-        timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+        timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
         status: 'SUCCESS',
         count: 14,
-        message: 'Synchronized 14 local tickets and asset updates with hospital core server.',
+        message: 'Synchronized local tickets and asset updates with hospital database.',
       },
       {
         id: 'synclog-2',
-        timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
+        timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
         status: 'SUCCESS',
         count: 6,
         message: 'Routine maintenance logs synchronized without collisions.',

@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -363,6 +364,23 @@ All hospital personnel are reminded that patient health information (PHI) must n
           recommendedDistribution: "Circulate to All Clinical Department Heads, Ward In-Charges, Pharmacy Lead, Laboratory Supervisor, and Inpatient Noticeboards",
         },
       });
+    }
+  });
+
+  // Endpoint to persist live app preview data as default seed snapshot for GitHub commits
+  app.post("/api/save-seed-data", (req, res) => {
+    try {
+      const payload = req.body;
+      const seedFilePath = path.join(process.cwd(), "src", "data", "defaultSeedData.json");
+      const dirPath = path.dirname(seedFilePath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      fs.writeFileSync(seedFilePath, JSON.stringify(payload, null, 2), "utf8");
+      return res.json({ success: true, savedAt: new Date().toISOString() });
+    } catch (err: any) {
+      console.error("[HITOMS Server] Error writing defaultSeedData.json:", err);
+      return res.status(500).json({ success: false, error: err?.message });
     }
   });
 

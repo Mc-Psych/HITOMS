@@ -40,6 +40,7 @@ import { auditService } from './services/auditService';
 import { emergencyService } from './services/emergencyService';
 import { ticketSoundService } from './services/ticketSoundService';
 import { settingsService } from './services/settingsService';
+import { seedSnapshotService } from './services/seedSnapshotService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
 
 // Component Views
@@ -178,6 +179,8 @@ export default function App() {
           setCurrentUser(user);
           await refreshAllData();
           setInitialized(true);
+          // Snapshot current preview data to src/data/defaultSeedData.json for repository Git default
+          seedSnapshotService.triggerAutoSnapshot(2500);
         }
       } catch (err) {
         console.error('Bootstrap error:', err);

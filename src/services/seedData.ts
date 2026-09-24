@@ -26,6 +26,7 @@ import {
 import { memoService } from './memoService';
 import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
 import { collection, getDocs } from 'firebase/firestore';
+import defaultSeedJson from '../data/defaultSeedData.json';
 
 export async function ensureSuperAdminCourageKay(): Promise<void> {
   try {
@@ -156,6 +157,31 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   }
 
   setSkipSyncEnqueue(true);
+
+  // If defaultSeedData.json has saved repository snapshot data, prioritize it as the default seed
+  if (defaultSeedJson && defaultSeedJson.data && defaultSeedJson.data.users && defaultSeedJson.data.users.length > 0) {
+    try {
+      console.log('[SeedData] Hydrating default initial state from repository snapshot defaultSeedData.json...');
+      const d = defaultSeedJson.data;
+      if (d.users?.length) await putBatchToStore('users', d.users);
+      if (d.settings?.length) await putBatchToStore('settings', d.settings);
+      if (d.hospitalSystems?.length) await putBatchToStore('hospitalSystems', d.hospitalSystems);
+      if (d.assets?.length) await putBatchToStore('assets', d.assets);
+      if (d.tickets?.length) await putBatchToStore('tickets', d.tickets);
+      if (d.inventory?.length) await putBatchToStore('inventory', d.inventory);
+      if (d.maintenance?.length) await putBatchToStore('maintenance', d.maintenance);
+      if (d.incidents?.length) await putBatchToStore('incidents', d.incidents);
+      if (d.memos?.length) await putBatchToStore('memos', d.memos);
+      if (d.departments?.length) await putBatchToStore('departments', d.departments);
+
+      setSkipSyncEnqueue(false);
+      await ensureSuperAdminCourageKay();
+      await memoService.getMemos();
+      return;
+    } catch (err) {
+      console.warn('[SeedData] Error hydrating from defaultSeedData.json, falling back to static constants:', err);
+    }
+  }
 
   const deviceId = getDeviceId();
   const now = new Date().toISOString();

@@ -74,6 +74,7 @@ import { systemNotificationRingService } from '../services/ticketSoundService';
 import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadModal';
 import { UserEditModal } from './UserEditModal';
 import { LetterheadUploadModal } from './LetterheadUploadModal';
+import { AccountManagementTab } from './AccountManagementTab';
 
 interface AdministrationViewProps {
   currentUser: UserType | null;
@@ -99,7 +100,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onUserSwitch,
   onRefresh,
 }) => {
-  const [activeTab, setActiveTab] = useState<'FACILITY' | 'RBAC' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('FACILITY');
+  const [activeTab, setActiveTab] = useState<'ACCOUNT_MANAGEMENT' | 'FACILITY' | 'RBAC' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('ACCOUNT_MANAGEMENT');
   const [rbacSubTab, setRbacSubTab] = useState<'STAFF_DIRECTORY' | 'ROLE_MATRIX' | 'USER_OVERRIDES'>('STAFF_DIRECTORY');
   
   const [offlinePolicy, setOfflinePolicy] = useState<OfflineSecurityPolicy>(authService.getOfflinePolicy());
@@ -567,6 +568,18 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         {/* Tab Navigation */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
           <button
+            onClick={() => setActiveTab('ACCOUNT_MANAGEMENT')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'ACCOUNT_MANAGEMENT'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>Account Management</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('FACILITY')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'FACILITY'
@@ -615,6 +628,16 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* TAB 0: ACCOUNT MANAGEMENT */}
+      {activeTab === 'ACCOUNT_MANAGEMENT' && (
+        <AccountManagementTab
+          currentUser={currentUser}
+          allUsers={allUsers}
+          onUserSwitch={onUserSwitch}
+          onRefresh={onRefresh}
+        />
+      )}
 
       {/* TAB 1: FACILITY PROFILE & EMBLEM */}
       {activeTab === 'FACILITY' && (

@@ -996,6 +996,100 @@ class AuthService {
     );
   }
 
+  /**
+   * Bulk Deletes selected user accounts from IndexedDB and logs action
+   */
+  public async bulkDeleteUsers(
+    userIds: string[],
+    actor: User
+  ): Promise<{ deletedCount: number; skippedCount: number }> {
+    if (actor.role !== 'SUPER_ADMIN' && actor.role !== 'IT_ADMIN') {
+      throw new Error('Access Denied: Only Administrators can bulk-delete user profiles.');
+    }
+
+    let deletedCount = 0;
+    let skippedCount = 0;
+
+    for (const id of userIds) {
+      if (id === actor.id) {
+        skippedCount++;
+        continue;
+      }
+      const user = await getFromStore<User>('users', id);
+      if (!user) continue;
+
+      if (
+        user.role === 'SUPER_ADMIN' &&
+        (user.username?.toLowerCase() === 'kay' || user.fullName.toLowerCase().includes('courage kay'))
+      ) {
+        skippedCount++;
+        continue;
+      }
+
+      await deleteFromStore('users', id);
+      deletedCount++;
+    }
+
+    await auditService.logAction(
+      'BULK_DELETE_USERS',
+      'Administration',
+      actor.id,
+      null,
+      `Bulk deleted ${deletedCount} staff accounts (Skipped ${skippedCount} protected/self accounts)`
+    );
+
+    return { deletedCount, skippedCount };
+  }
+
+  /**
+   * Bulk update account status (Active, Suspended, Disabled) for multiple users
+   */
+  public async bulkSetUserStatus(
+    userIds: string[],
+    status: AccountStatus,
+    actor: User
+  ): Promise<number> {
+    if (actor.role !== 'SUPER_ADMIN' && actor.role !== 'IT_ADMIN') {
+      throw new Error('Access Denied: Only Administrators can bulk-update user status.');
+    }
+
+    let updatedCount = 0;
+    for (const id of userIds) {
+      if (id === actor.id && status !== 'Active') continue;
+      const user = await getFromStore<User>('users', id);
+      if (!user) continue;
+
+      user.status = status;
+      user.updatedAt = new Date().toISOString();
+      await putToStore('users', user);
+      updatedCount++;
+    }
+
+    await auditService.logAction(
+      'BULK_SET_USER_STATUS',
+      'Administration',
+      actor.id,
+      null,
+      `Bulk updated status to ${status} for ${updatedCount} accounts`
+    );
+
+    return updatedCount;
+  }
+
+  /**
+   * Force pull & reconcile users directly from Firestore into local IndexedDB
+   */
+  public async forceResyncUsersFromCloud(actor: User): Promise<{ totalPulled: number; purgedStale: number }> {
+    const { syncService } = await import('./syncService');
+    await syncService.runAutomaticSync();
+    
+    const users = await getAllFromStore<User>('users');
+    return {
+      totalPulled: users.length,
+      purgedStale: 0,
+    };
+  }
+
   public logout(): void {
     this.currentUser = null;
     localStorage.removeItem(SESSION_KEY);

@@ -14,6 +14,8 @@ import {
   Database,
   Shield,
   Activity,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import {
   type SyncQueueItem,
@@ -47,6 +49,7 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
 }) => {
   const [strategy, setStrategy] = useState<ConflictResolutionStrategy>(syncService.getConflictStrategy());
   const [simulatedOffline, setSimulatedOffline] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const handleStrategyChange = (newStrategy: ConflictResolutionStrategy) => {
     setStrategy(newStrategy);
@@ -56,13 +59,27 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
   const handleToggleSimulation = () => {
     const next = !simulatedOffline;
     setSimulatedOffline(next);
-    // Dispatch offline / online event on window
-    if (next) {
-      window.dispatchEvent(new Event('offline'));
-    } else {
-      window.dispatchEvent(new Event('online'));
+    syncService.toggleSimulatedOffline(next);
+  };
+
+  const handleRetryFailed = async () => {
+    setIsRetrying(true);
+    try {
+      await syncService.retryFailedSync();
+      onRefresh();
+    } finally {
+      setIsRetrying(false);
     }
   };
+
+  const handleClearFailed = async () => {
+    if (window.confirm('Clear all failed mutations from the queue?')) {
+      await syncService.clearFailedQueue();
+      onRefresh();
+    }
+  };
+
+  const failedItems = syncQueue.filter((q) => q.status === 'FAILED');
 
   return (
     <div className="space-y-6">
@@ -77,7 +94,29 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {failedItems.length > 0 && (
+            <>
+              <button
+                onClick={handleRetryFailed}
+                disabled={isRetrying || isSyncing}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
+                title="Retry all failed mutations"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
+                <span>Retry Failed ({failedItems.length})</span>
+              </button>
+              <button
+                onClick={handleClearFailed}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                title="Clear failed queue items"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Failed</span>
+              </button>
+            </>
+          )}
+
           {/* Outage simulator toggle */}
           <button
             onClick={handleToggleSimulation}
@@ -226,6 +265,7 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
                   <th className="px-4 py-3">Timestamp</th>
                   <th className="px-4 py-3">Entity Store</th>
                   <th className="px-4 py-3">Operation</th>
+                  <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Entity ID</th>
                   <th className="px-4 py-3">Retries</th>
                   <th className="px-4 py-3">Payload Summary</th>
@@ -238,19 +278,32 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
                       {new Date(item.createdAt).toLocaleTimeString()}
                     </td>
                     <td className="px-4 py-3 font-bold text-sky-600">
-                      {item.storeName}
+                      {item.entityType || (item as any).storeName}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           item.operation === 'CREATE'
-                            ? 'bg-emerald-100 text-emerald-800'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                             : item.operation === 'UPDATE'
-                            ? 'bg-sky-100 text-sky-800'
-                            : 'bg-rose-100 text-rose-800'
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                            : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                         }`}
                       >
                         {item.operation}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          item.status === 'FAILED'
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                            : item.status === 'RETRYING'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {item.status || 'PENDING'}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">
@@ -259,7 +312,7 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
                     <td className="px-4 py-3 font-mono">
                       {item.retryCount}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 max-w-xs truncate">
+                    <td className="px-4 py-3 text-slate-500 max-w-xs truncate font-mono text-[11px]">
                       {JSON.stringify(item.payload)}
                     </td>
                   </tr>
