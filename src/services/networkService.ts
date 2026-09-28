@@ -14,6 +14,7 @@ import {
 } from './localDatabaseService';
 import { auditService } from './auditService';
 import { syncService } from './syncService';
+import { authService } from './authService';
 
 class NetworkService {
   public async getDevices(): Promise<NetworkDevice[]> {
@@ -30,9 +31,9 @@ class NetworkService {
     data: Omit<NetworkDevice, 'id' | 'createdAt' | 'updatedAt' | '_syncStatus' | '_syncVersion' | '_lastSyncedAt' | '_deviceId'>,
     user: User
   ): Promise<NetworkDevice> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can add network topology hardware.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can add network topology hardware.');
     }
 
     const id = generateUUID();
@@ -107,9 +108,9 @@ class NetworkService {
     updates: Partial<Omit<NetworkDevice, 'id' | 'createdAt' | '_deviceId'>>,
     user: User
   ): Promise<NetworkDevice> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can modify topology nodes.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can modify topology nodes.');
     }
 
     const device = await getFromStore<NetworkDevice>('networkDevices', id);
@@ -220,9 +221,9 @@ class NetworkService {
     connectionType?: NetworkConnectionType,
     portSpeed?: string
   ): Promise<{ predecessor: NetworkDevice; successor: NetworkDevice }> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can connect topology nodes.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can connect topology nodes.');
     }
 
     const parent = await getFromStore<NetworkDevice>('networkDevices', predecessorId);
@@ -273,9 +274,9 @@ class NetworkService {
     successorId: string,
     user: User
   ): Promise<void> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can disconnect topology nodes.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can disconnect topology nodes.');
     }
 
     const parent = await getFromStore<NetworkDevice>('networkDevices', predecessorId);
@@ -314,9 +315,9 @@ class NetworkService {
   }
 
   public async deleteDevice(id: string, user: User): Promise<void> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can delete topology nodes.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can delete topology nodes.');
     }
 
     const device = await getFromStore<NetworkDevice>('networkDevices', id);
@@ -426,9 +427,9 @@ class NetworkService {
     user: User,
     overrides?: Partial<NetworkDevice>
   ): Promise<NetworkDevice> {
-    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN'];
-    if (!allowedRoles.includes(user.role)) {
-      throw new Error('Unauthorized: Only Super Administrators and IT Administrators can clone network devices.');
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can clone network devices.');
     }
 
     const source = await getFromStore<NetworkDevice>('networkDevices', sourceDeviceId);
