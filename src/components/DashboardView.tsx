@@ -70,6 +70,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Super Admin & IT Unit Access Check
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+  const isStaffUser = currentUser?.role === 'STAFF_USER';
+  const canViewInventory = !isStaffUser && authService.hasPermission('inventory.view', currentUser);
 
   // Compute Key Metrics
   const openTickets = safeTickets.filter((t) => t.status !== 'Closed' && t.status !== 'Resolved');
@@ -78,6 +80,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const lowStockItems = safeInventory.filter((item) => item.quantity <= item.minimumStock);
   const dueMaintenance = safeMaintenance.filter((m) => m.status === 'Scheduled' || m.status === 'Due' || m.status === 'Overdue');
   const resolvedCount = safeTickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length;
+
+  // Department-specific tickets for Staff User
+  const staffDeptTickets = safeTickets.filter(
+    (t) =>
+      (currentUser?.department && t.department?.toLowerCase() === currentUser.department.toLowerCase()) ||
+      (currentUser?.fullName && t.createdBy?.toLowerCase().includes(currentUser.fullName.toLowerCase()))
+  );
+  const staffDeptResolved = staffDeptTickets.filter((t) => t.status === 'Closed' || t.status === 'Resolved');
+  const staffDeptOpen = staffDeptTickets.filter((t) => t.status !== 'Closed' && t.status !== 'Resolved');
 
   // Compute departmental distribution
   const deptMap: Record<string, number> = {};
@@ -254,26 +265,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-1 text-[11px] text-slate-500">Scheduled checks & servicing</div>
         </div>
 
-        {/* Low Stock Alerts */}
-        <div
-          onClick={() => onNavigate('inventory')}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 shadow-2xs hover:shadow-md transition cursor-pointer"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Low Stock Consumables</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
-              <Package className="w-4 h-4" />
+        {/* Low Stock Alerts for Authorized Roles / Department Issues for Clinical & General Staff */}
+        {canViewInventory ? (
+          <div
+            onClick={() => onNavigate('inventory')}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 shadow-2xs hover:shadow-md transition cursor-pointer"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Low Stock Consumables</span>
+              <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
+                <Package className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{lowStockItems.length}</div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              {lowStockItems.length > 0 ? (
+                <span className="text-amber-600 font-medium">Requires reorder</span>
+              ) : (
+                <span className="text-emerald-600 font-medium">Adequate stock</span>
+              )}
             </div>
           </div>
-          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{lowStockItems.length}</div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            {lowStockItems.length > 0 ? (
-              <span className="text-amber-600 font-medium">Requires reorder</span>
-            ) : (
-              <span className="text-emerald-600 font-medium">Adequate stock</span>
-            )}
+        ) : (
+          <div
+            onClick={() => onNavigate('tickets')}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 shadow-2xs hover:shadow-md transition cursor-pointer"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                {currentUser?.department ? `${currentUser.department} Issues` : 'My Department Issues'}
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{staffDeptResolved.length}</div>
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+              <span className="text-emerald-600 font-semibold">{staffDeptResolved.length} resolved</span>
+              <span>| {staffDeptOpen.length} pending</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Operational Breakdown & Department Chart */}
