@@ -37,9 +37,11 @@ import {
 interface UserEditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  userToEdit: UserType | null; // null means creating a new user
+  userToEdit?: UserType | null; // null means creating a new user
+  user?: UserType | null; // Alias support for user prop
   currentUser: UserType | null;
-  onUserSaved: () => void;
+  onUserSaved?: () => void;
+  onSave?: () => void; // Alias support for onSave prop
   onUserDeleted?: () => void;
 }
 
@@ -79,12 +81,21 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   isOpen,
   onClose,
   userToEdit,
+  user,
   currentUser,
   onUserSaved,
+  onSave,
   onUserDeleted,
 }) => {
+  const targetUser = userToEdit !== undefined ? userToEdit : (user ?? null);
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
-  const isEditing = Boolean(userToEdit);
+  const isEditing = Boolean(targetUser);
+
+  // Safe callback helper
+  const notifyUserSaved = () => {
+    if (typeof onUserSaved === 'function') onUserSaved();
+    if (typeof onSave === 'function') onSave();
+  };
 
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -111,26 +122,26 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [showSuspendModal, setShowSuspendModal] = useState(false);
 
   useEffect(() => {
-    if (userToEdit) {
-      setFullName(userToEdit.fullName || '');
-      setUsername(userToEdit.username || extractSurname(userToEdit.fullName).toLowerCase());
-      setEmail(userToEdit.email || '');
-      setPhone(userToEdit.phone || '');
-      if (STANDARD_DEPARTMENTS.includes(userToEdit.department)) {
-        setDepartment(userToEdit.department);
+    if (targetUser) {
+      setFullName(targetUser.fullName || '');
+      setUsername(targetUser.username || extractSurname(targetUser.fullName).toLowerCase());
+      setEmail(targetUser.email || '');
+      setPhone(targetUser.phone || '');
+      if (STANDARD_DEPARTMENTS.includes(targetUser.department)) {
+        setDepartment(targetUser.department);
         setCustomDepartment('');
       } else {
         setDepartment('OTHER');
-        setCustomDepartment(userToEdit.department || '');
+        setCustomDepartment(targetUser.department || '');
       }
-      setJobTitle(userToEdit.jobTitle || '');
-      setRole(userToEdit.role || 'STAFF_USER');
-      setSpecialties(userToEdit.specialties || []);
-      setSpecialtyNotes(userToEdit.specialtyNotes || '');
-      setStatus(userToEdit.status || 'Active');
+      setJobTitle(targetUser.jobTitle || '');
+      setRole(targetUser.role || 'STAFF_USER');
+      setSpecialties(targetUser.specialties || []);
+      setSpecialtyNotes(targetUser.specialtyNotes || '');
+      setStatus(targetUser.status || 'Active');
       setPassword('');
-      setMustChangePassword(userToEdit.mustChangePasswordOnFirstLogin ?? false);
-      setOfflineAllowed(userToEdit.offlineAccessAllowed ?? true);
+      setMustChangePassword(targetUser.mustChangePasswordOnFirstLogin ?? false);
+      setOfflineAllowed(targetUser.offlineAccessAllowed ?? true);
     } else {
       // New user defaults
       setFullName('');
@@ -153,9 +164,34 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setShowSuspendModal(false);
     setDeleteConfirmText('');
     setCustomSpecialtyInput('');
-  }, [userToEdit, isOpen]);
+  }, [targetUser, isOpen]);
 
   if (!isOpen) return null;
+
+  // IT unit must not see nor edit super admin account
+  if (targetUser?.role === 'SUPER_ADMIN' && !isSuperAdmin) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+          <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+            <AlertTriangle className="w-6 h-6 shrink-0" />
+            <h3 className="font-bold text-base">Restricted Account</h3>
+          </div>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            Super Administrator accounts cannot be viewed or edited by IT Unit officers. Please contact a Super Administrator.
+          </p>
+          <div className="flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-700 cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleFullNameChange = (val: string) => {
     setFullName(val);
@@ -199,6 +235,10 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+    if (targetUser?.role === 'SUPER_ADMIN' && currentUser.role !== 'SUPER_ADMIN') {
+      setError('Access Denied: Only Super Admin can edit Super Admin accounts.');
+      return;
+    }
     setError(null);
     setLoading(true);
 
@@ -211,7 +251,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
         throw new Error('Please select or specify a hospital department.');
       }
 
-      if (isEditing && userToEdit) {
+      if (isEditing && targetUser) {
         const updates: Partial<UserType> = {
           fullName: fullName.trim(),
           username: username.trim().toLowerCase(),
@@ -231,7 +271,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           updates.password = password.trim();
         }
 
-        await authService.updateUser(userToEdit.id, updates, currentUser);
+        await authService.updateUser(targetUser.id, updates, currentUser);
       } else {
         await authService.createUser(
           {
@@ -253,7 +293,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
         );
       }
 
-      onUserSaved();
+      notifyUserSaved();
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to save staff profile.');
@@ -263,19 +303,19 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   };
 
   const handleToggleStatus = async (newStatus: AccountStatus) => {
-    if (!currentUser || !userToEdit) return;
+    if (!currentUser || !targetUser) return;
     setError(null);
     setLoading(true);
     try {
       await authService.setUserStatus(
-        userToEdit.id,
+        targetUser.id,
         newStatus,
         currentUser,
         suspensionReason.trim() || undefined
       );
       setStatus(newStatus);
       setShowSuspendModal(false);
-      onUserSaved();
+      notifyUserSaved();
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to change account status.');
@@ -285,7 +325,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   };
 
   const handleDeleteUser = async () => {
-    if (!currentUser || !userToEdit) return;
+    if (!currentUser || !targetUser) return;
     if (deleteConfirmText.trim().toLowerCase() !== 'delete') {
       setError('Please type "delete" to confirm removal of this staff account.');
       return;
@@ -294,9 +334,9 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setError(null);
     setLoading(true);
     try {
-      await authService.deleteUser(userToEdit.id, currentUser);
+      await authService.deleteUser(targetUser.id, currentUser);
       if (onUserDeleted) onUserDeleted();
-      else onUserSaved();
+      else notifyUserSaved();
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to delete user.');
@@ -305,11 +345,11 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     }
   };
 
-  const isSelf = currentUser?.id === userToEdit?.id;
+  const isSelf = currentUser?.id === targetUser?.id;
   const isProtectedAdmin =
-    userToEdit?.role === 'SUPER_ADMIN' &&
-    (userToEdit?.username?.toLowerCase() === 'kay' ||
-      userToEdit?.fullName.toLowerCase().includes('courage kay'));
+    targetUser?.role === 'SUPER_ADMIN' &&
+    (targetUser?.username?.toLowerCase() === 'kay' ||
+      targetUser?.fullName.toLowerCase().includes('courage kay'));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
@@ -507,7 +547,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   onChange={(e) => setRole(e.target.value as Role)}
                   className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:opacity-75"
                 >
-                  {ALL_ROLES.map((r) => (
+                  {(isSuperAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== 'SUPER_ADMIN')).map((r) => (
                     <option key={r} value={r}>
                       {ROLE_DESCRIPTIONS[r].title} ({r})
                     </option>

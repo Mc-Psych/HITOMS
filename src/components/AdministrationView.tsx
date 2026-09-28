@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Shield,
   Building2,
@@ -75,6 +75,7 @@ import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadMo
 import { UserEditModal } from './UserEditModal';
 import { LetterheadUploadModal } from './LetterheadUploadModal';
 import { AccountManagementTab } from './AccountManagementTab';
+import { DepartmentManagementTab } from './DepartmentManagementTab';
 
 interface AdministrationViewProps {
   currentUser: UserType | null;
@@ -100,8 +101,20 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onUserSwitch,
   onRefresh,
 }) => {
-  const [activeTab, setActiveTab] = useState<'ACCOUNT_MANAGEMENT' | 'FACILITY' | 'RBAC' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('ACCOUNT_MANAGEMENT');
+  const [activeTab, setActiveTab] = useState<'ACCOUNT_MANAGEMENT' | 'FACILITY' | 'DEPARTMENTS' | 'RBAC' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('ACCOUNT_MANAGEMENT');
   const [rbacSubTab, setRbacSubTab] = useState<'STAFF_DIRECTORY' | 'ROLE_MATRIX' | 'USER_OVERRIDES'>('STAFF_DIRECTORY');
+  
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
+  // IT unit must not see nor edit super admin account under their administration & RBAC module but super admin can see and edit all users
+  const visibleUsers = useMemo(() => {
+    if (isSuperAdmin) return allUsers;
+    return allUsers.filter((u) => u.role !== 'SUPER_ADMIN');
+  }, [allUsers, isSuperAdmin]);
+
+  const availableRoles = useMemo(() => {
+    return isSuperAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== 'SUPER_ADMIN');
+  }, [isSuperAdmin]);
   
   const [offlinePolicy, setOfflinePolicy] = useState<OfflineSecurityPolicy>(authService.getOfflinePolicy());
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
@@ -156,8 +169,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
   // Letterhead modal state
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
-  
-  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const handleDirectSuspend = async () => {
     if (!currentUser || !userToSuspend) return;
@@ -592,6 +603,18 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('DEPARTMENTS')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'DEPARTMENTS'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Departments & Wards</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('RBAC')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'RBAC'
@@ -633,7 +656,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
       {activeTab === 'ACCOUNT_MANAGEMENT' && (
         <AccountManagementTab
           currentUser={currentUser}
-          allUsers={allUsers}
+          allUsers={visibleUsers}
           onUserSwitch={onUserSwitch}
           onRefresh={onRefresh}
         />
@@ -923,7 +946,15 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: STAFF DIRECTORY & PERMISSION MATRIX */}
+      {/* TAB 2: HOSPITAL DEPARTMENTS & WARDS */}
+      {activeTab === 'DEPARTMENTS' && (
+        <DepartmentManagementTab
+          currentUser={currentUser}
+          onRefresh={onRefresh}
+        />
+      )}
+
+      {/* TAB 3: STAFF DIRECTORY & PERMISSION MATRIX */}
       {activeTab === 'RBAC' && (
         <div className="space-y-6">
           {/* Sub-tabs for RBAC */}
@@ -1001,7 +1032,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </div>
                   <div>
                     <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Staff</div>
-                    <div className="text-lg font-black text-slate-900 dark:text-white">{allUsers.length}</div>
+                    <div className="text-lg font-black text-slate-900 dark:text-white">{visibleUsers.length}</div>
                   </div>
                 </div>
 
@@ -1012,7 +1043,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   <div>
                     <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Active Users</div>
                     <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
-                      {allUsers.filter((u) => u.status === 'Active' || !u.status).length}
+                      {visibleUsers.filter((u) => u.status === 'Active' || !u.status).length}
                     </div>
                   </div>
                 </div>
@@ -1024,7 +1055,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   <div>
                     <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Suspended</div>
                     <div className="text-lg font-black text-rose-600 dark:text-rose-400">
-                      {allUsers.filter((u) => u.status === 'Suspended' || u.status === 'Disabled').length}
+                      {visibleUsers.filter((u) => u.status === 'Suspended' || u.status === 'Disabled').length}
                     </div>
                   </div>
                 </div>
@@ -1036,7 +1067,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   <div>
                     <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">IT & Specialists</div>
                     <div className="text-lg font-black text-indigo-600 dark:text-indigo-400">
-                      {allUsers.filter((u) => u.role === 'SUPER_ADMIN' || u.role === 'IT_ADMIN' || u.role === 'IT_OFFICER' || (u.specialties && u.specialties.length > 0)).length}
+                      {visibleUsers.filter((u) => u.role === 'SUPER_ADMIN' || u.role === 'IT_ADMIN' || u.role === 'IT_OFFICER' || (u.specialties && u.specialties.length > 0)).length}
                     </div>
                   </div>
                 </div>
@@ -1074,7 +1105,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   <div>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
                       <Users className="w-4 h-4 text-sky-600" />
-                      <span>Hospital Staff Directory ({allUsers.length})</span>
+                      <span>Hospital Staff Directory ({visibleUsers.length})</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Full Super Admin CRUD: Edit user profiles, assign roles & specialties, reset passwords, suspend, or delete accounts.
@@ -1099,7 +1130,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
                     >
                       <option value="ALL">All Roles</option>
-                      {ALL_ROLES.map((r) => (
+                      {availableRoles.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_DESCRIPTIONS[r]?.title || r}
                         </option>
@@ -1160,7 +1191,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {allUsers
+                      {visibleUsers
                         .filter((u) => {
                           const query = staffSearchQuery.trim().toLowerCase();
                           if (query) {
@@ -2273,8 +2304,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         isOpen={isUserEditModalOpen}
         onClose={() => setIsUserEditModalOpen(false)}
         userToEdit={userToEdit}
+        user={userToEdit}
         currentUser={currentUser}
         onUserSaved={onRefresh}
+        onSave={onRefresh}
         onUserDeleted={onRefresh}
       />
 

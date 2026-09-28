@@ -121,6 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'emergency',
       label: 'Emergency Protocols & Alerts',
       icon: ShieldAlert,
+      rolesAllowed: ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'],
     },
     {
       id: 'inventory',

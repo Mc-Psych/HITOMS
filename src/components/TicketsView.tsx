@@ -33,6 +33,8 @@ import {
   CheckCheck,
   Layers,
   Wrench,
+  Trash2,
+  Lock,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -187,10 +189,45 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     (u) => u.role === 'IT_OFFICER' || u.role === 'IT_ADMIN' || u.role === 'SUPER_ADMIN'
   );
 
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const isCurrentUserIT =
     currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
+  const isITUnitStaff =
+    currentUser &&
+    (['IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role) ||
+      (currentUser.department && currentUser.department.toLowerCase().includes('it')));
   const canAssign = currentUser && ['SUPER_ADMIN', 'IT_ADMIN'].includes(currentUser.role);
   const canUpdateStatus = currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
+
+  // Ticket Deletion state (Super Admin only)
+  const [ticketToDelete, setTicketToDelete] = useState<Ticket | null>(null);
+  const [deleteTicketConfirmText, setDeleteTicketConfirmText] = useState('');
+  const [isDeletingTicket, setIsDeletingTicket] = useState(false);
+  const [deleteTicketError, setDeleteTicketError] = useState<string | null>(null);
+
+  const handleDeleteTicket = async () => {
+    if (!currentUser || currentUser.role !== 'SUPER_ADMIN' || !ticketToDelete) return;
+    if (deleteTicketConfirmText.trim().toLowerCase() !== 'delete') {
+      setDeleteTicketError('Please type "delete" to confirm ticket removal.');
+      return;
+    }
+
+    setIsDeletingTicket(true);
+    setDeleteTicketError(null);
+    try {
+      await ticketService.deleteTicket(ticketToDelete.id, currentUser);
+      if (selectedTicket?.id === ticketToDelete.id) {
+        setSelectedTicket(null);
+      }
+      setTicketToDelete(null);
+      setDeleteTicketConfirmText('');
+      onRefresh();
+    } catch (err: any) {
+      setDeleteTicketError(err.message || 'Failed to delete ticket.');
+    } finally {
+      setIsDeletingTicket(false);
+    }
+  };
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -397,6 +434,10 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
   const handleConfirmAndClose = async () => {
     if (!selectedTicket || !currentUser) return;
+    if (isITUnitStaff) {
+      setRatingError('IT unit personnel are not permitted to rate their own service. Confirmation and IT performance rating must be completed by unit staff.');
+      return;
+    }
     setIsConfirmingRating(true);
     setRatingError(null);
     try {
@@ -418,6 +459,9 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
   const handleAddComment = async () => {
     if (!selectedTicket || !commentText.trim() || !currentUser) return;
+    if (selectedTicket.status === 'Closed' && !isCurrentUserIT) {
+      return;
+    }
     try {
       const updated = await ticketService.addComment(selectedTicket.id, commentText.trim(), currentUser);
       setSelectedTicket(updated);
@@ -1007,17 +1051,34 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                           {ticket._syncStatus}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedTicket(ticket);
                           }}
-                          className="text-sky-600 hover:text-sky-700 font-semibold text-xs flex items-center justify-end gap-1 ml-auto cursor-pointer"
+                          className="text-sky-600 hover:text-sky-700 font-semibold text-xs inline-flex items-center gap-1 cursor-pointer"
                         >
                           <span>View</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
+
+                        {isSuperAdmin && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTicketToDelete(ticket);
+                              setDeleteTicketConfirmText('');
+                              setDeleteTicketError(null);
+                            }}
+                            className="text-rose-600 hover:text-rose-700 font-semibold text-xs inline-flex items-center gap-1 cursor-pointer ml-1 p-1 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition"
+                            title="Delete ticket (Super Admin)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Delete</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1057,12 +1118,29 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                   Status: {selectedTicket.status}
                 </span>
               </div>
-              <button
-                onClick={() => setSelectedTicket(null)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTicketToDelete(selectedTicket);
+                      setDeleteTicketConfirmText('');
+                      setDeleteTicketError(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition cursor-pointer"
+                    title="Permanently delete ticket"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Ticket</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedTicket(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Body */}
@@ -1145,7 +1223,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : isCurrentUserIT ? (
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-500 text-xs">
                     <Sparkles className="w-4 h-4 text-indigo-400" />
@@ -1171,7 +1249,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                     Run AI Analysis
                   </button>
                 </div>
-              )}
+              ) : null}
 
               {/* SLA Banner */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 text-sky-900 dark:text-sky-200">
@@ -1212,6 +1290,21 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
               {/* Unit Confirmation & IT Service Rating Block for Resolved Tickets */}
               {selectedTicket.status === 'Resolved' && (() => {
+                // IT Unit personnel must not have access to rate themselves
+                if (isITUnitStaff) {
+                  return (
+                    <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-medium">
+                        <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Ticket resolved by IT. Awaiting confirmation and performance rating from <strong>{selectedTicket.department}</strong> unit staff.</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100">
+                        Unit Rating Pending
+                      </span>
+                    </div>
+                  );
+                }
+
                 const isGeneral = Boolean(selectedTicket.isGeneralIssue);
                 const isSameUnit = currentUser?.department?.toLowerCase() === selectedTicket.department?.toLowerCase();
                 const isReporter = currentUser?.id === selectedTicket.reportedBy?.uid;
@@ -1312,8 +1405,8 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 );
               })()}
 
-              {/* Display Confirmed Rating if Closed */}
-              {selectedTicket.status === 'Closed' && selectedTicket.confirmationRating && (
+              {/* Display Confirmed Rating if Rated */}
+              {selectedTicket.confirmationRating && (
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
@@ -1452,23 +1545,30 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 </div>
 
                 {/* Add Comment Input */}
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="text"
-                    placeholder="Add an internal note or clinical staff update..."
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                    className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
-                  />
-                  <button
-                    onClick={handleAddComment}
-                    disabled={!commentText.trim()}
-                    className="p-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 cursor-pointer"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
+                {selectedTicket.status === 'Closed' && !isCurrentUserIT ? (
+                  <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span>This ticket is closed and archived. Staff comments are disabled for closed tickets.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 pt-2">
+                    <input
+                      type="text"
+                      placeholder="Add an internal note or clinical staff update..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+                      className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
+                    />
+                    <button
+                      onClick={handleAddComment}
+                      disabled={!commentText.trim()}
+                      className="p-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 cursor-pointer"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1806,6 +1906,68 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE TICKET CONFIRMATION */}
+      {ticketToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-rose-200 dark:border-rose-900/50 w-full max-w-md p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/60">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  Delete Helpdesk Ticket
+                </h3>
+                <p className="text-[11px] text-slate-500 font-mono">
+                  {ticketToDelete.ticketNumber}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete ticket <strong className="text-slate-900 dark:text-white">&ldquo;{ticketToDelete.title}&rdquo;</strong> reported from {ticketToDelete.department}? This will erase the ticket and all activity history.
+            </p>
+
+            {deleteTicketError && (
+              <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-semibold">
+                {deleteTicketError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Type <span className="font-mono text-rose-600 font-bold">delete</span> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteTicketConfirmText}
+                onChange={(e) => setDeleteTicketConfirmText(e.target.value)}
+                placeholder="delete"
+                className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setTicketToDelete(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteTicket}
+                disabled={isDeletingTicket || deleteTicketConfirmText.trim().toLowerCase() !== 'delete'}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl transition cursor-pointer disabled:opacity-40 shadow-sm"
+              >
+                {isDeletingTicket ? 'Deleting...' : 'Confirm Deletion'}
+              </button>
+            </div>
           </div>
         </div>
       )}

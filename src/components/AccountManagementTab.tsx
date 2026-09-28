@@ -91,9 +91,19 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const isItAdmin = currentUser?.role === 'IT_ADMIN' || isSuperAdmin;
 
+  // IT unit must not see nor edit super admin account under their administration & RBAC module but super admin can see and edit all users
+  const visibleUsers = useMemo(() => {
+    if (isSuperAdmin) return allUsers;
+    return allUsers.filter((u) => u.role !== 'SUPER_ADMIN');
+  }, [allUsers, isSuperAdmin]);
+
+  const availableRoles = useMemo(() => {
+    return isSuperAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== 'SUPER_ADMIN');
+  }, [isSuperAdmin]);
+
   // Filtered Users
   const filteredUsers = useMemo(() => {
-    return allUsers.filter((u) => {
+    return visibleUsers.filter((u) => {
       // Role filter
       if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
       // Status filter
@@ -116,7 +126,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
       }
       return true;
     });
-  }, [allUsers, roleFilter, statusFilter, searchQuery]);
+  }, [visibleUsers, roleFilter, statusFilter, searchQuery]);
 
   const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
     setNotification({ type, message });
@@ -307,8 +317,8 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
     }
   };
 
-  const activeCount = allUsers.filter((u) => u.status === 'Active').length;
-  const suspendedCount = allUsers.filter((u) => u.status === 'Suspended').length;
+  const activeCount = visibleUsers.filter((u) => u.status === 'Active').length;
+  const suspendedCount = visibleUsers.filter((u) => u.status === 'Suspended').length;
 
   return (
     <div className="space-y-6">
@@ -425,7 +435,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
           <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
             <div className="text-[11px] text-slate-500 dark:text-slate-400">Total Registered Staff</div>
             <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
-              {allUsers.length}
+              {visibleUsers.length}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">IndexedDB local records</div>
           </div>
@@ -530,10 +540,10 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
               onChange={(e) => setRoleFilter(e.target.value as Role | 'ALL')}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-sky-500"
             >
-              <option value="ALL">All System Roles ({allUsers.length})</option>
-              {ALL_ROLES.map((r) => (
+              <option value="ALL">All System Roles ({visibleUsers.length})</option>
+              {availableRoles.map((r) => (
                 <option key={r} value={r}>
-                  {r.replace('_', ' ')} ({allUsers.filter((u) => u.role === r).length})
+                  {r.replace('_', ' ')} ({visibleUsers.filter((u) => u.role === r).length})
                 </option>
               ))}
             </select>
@@ -1024,12 +1034,19 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
       <UserEditModal
         isOpen={isUserEditModalOpen}
         user={editingUser}
+        userToEdit={editingUser}
         currentUser={currentUser}
         onClose={() => {
           setIsUserEditModalOpen(false);
           setEditingUser(null);
         }}
         onSave={() => {
+          setIsUserEditModalOpen(false);
+          setEditingUser(null);
+          onRefresh();
+          showNotification('success', 'Staff profile updated successfully.');
+        }}
+        onUserSaved={() => {
           setIsUserEditModalOpen(false);
           setEditingUser(null);
           onRefresh();

@@ -391,6 +391,11 @@ class TicketService {
     const ticket = await this.getTicketById(ticketId);
     if (!ticket) throw new Error('Ticket not found');
 
+    const isIT = ['IT_ADMIN', 'IT_OFFICER'].includes(actor.role) || (actor.department && actor.department.toLowerCase().includes('it'));
+    if (isIT) {
+      throw new Error('Access Denied: IT unit personnel cannot rate IT service. Confirmation and rating must be submitted by the unit staff.');
+    }
+
     const isGeneral = Boolean(ticket.isGeneralIssue);
     const isSameDept = actor.department.toLowerCase() === ticket.department.toLowerCase();
     const isReporter = actor.id === ticket.reportedBy.uid;
@@ -453,6 +458,13 @@ class TicketService {
     const ticket = await this.getTicketById(ticketId);
     if (!ticket) throw new Error('Ticket not found');
 
+    if (ticket.status === 'Closed') {
+      const isIT = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(user.role);
+      if (!isIT) {
+        throw new Error('This ticket is closed. Staff comments cannot be added to closed tickets.');
+      }
+    }
+
     const comment: TicketComment = {
       id: generateUUID(),
       userId: user.id,
@@ -477,6 +489,21 @@ class TicketService {
 
     await syncService.enqueueOperation('tickets', ticket.id, 'UPDATE', ticket);
     return ticket;
+  }
+
+  public async deleteTicket(id: string, currentUser?: User | null): Promise<void> {
+    const existing = await this.getTicketById(id);
+    if (!existing) return;
+
+    await deleteFromStore('tickets', id);
+
+    await auditService.logAction('DELETE_TICKET', 'Tickets', id, existing, {
+      ticketNumber: existing.ticketNumber,
+      title: existing.title,
+      deletedBy: currentUser?.fullName || 'Super Admin',
+    });
+
+    await syncService.enqueueOperation('tickets', id, 'DELETE', { id, ticketNumber: existing.ticketNumber });
   }
 }
 

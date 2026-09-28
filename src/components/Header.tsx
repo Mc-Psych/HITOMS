@@ -57,6 +57,8 @@ export const Header: React.FC<HeaderProps> = ({
   const [showNotifs, setShowNotifs] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
+  const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+
   const notifsRef = useRef<HTMLDivElement>(null);
   const roleMenuRef = useRef<HTMLDivElement>(null);
 
@@ -211,13 +213,13 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Emergency IT Protocol Center Button */}
-          {onOpenEmergencyCenter && (
+          {/* Emergency IT Protocol Center Button - IT Unit & Super Admin only */}
+          {onOpenEmergencyCenter && isSuperAdminOrIT && (
             <button
               id="emergency-center-btn"
               onClick={onOpenEmergencyCenter}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition cursor-pointer shadow-sm hover:shadow border border-rose-500/50"
-              title="Hospital IT Emergency Protocols & Broadcasts"
+              title="Hospital IT Emergency & Disaster Protocol Center"
             >
               <ShieldAlert className="w-4 h-4 text-white animate-pulse" />
               <span className="hidden lg:inline">Emergency IT</span>
@@ -281,11 +283,9 @@ export const Header: React.FC<HeaderProps> = ({
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={async () => {
-                          await ticketSoundService.testBellSound();
-                        }}
-                        className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] rounded-lg transition cursor-pointer shadow-xs"
-                        title="Test phone/PC bell chime and grant browser sound permission"
+                        disabled={true}
+                        className="px-2 py-1 bg-slate-700 text-slate-400 font-bold text-[10px] rounded-lg transition cursor-not-allowed opacity-50 shadow-xs"
+                        title="Test Bell button disabled"
                       >
                         Test Bell
                       </button>
@@ -367,38 +367,32 @@ export const Header: React.FC<HeaderProps> = ({
 
             {showRoleMenu && (
               <div className="absolute right-0 mt-2 w-72 sm:w-80 max-w-[90vw] rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Switch Hospital Role</p>
-                    <p className="text-[10px] text-slate-500">Fast role switching for QA & operations</p>
+                {/* User Profile Card (Switch Hospital Role is Disabled) */}
+                <div className="px-3 py-2.5 border-b border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">User Profile & Role</p>
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                      Switching Disabled
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-sky-700 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-inner">
+                      {getUserInitials(currentUser?.fullName || '')}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-xs text-white truncate">{currentUser?.fullName}</div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {currentUser?.department} • <span className="text-sky-300 font-semibold">{currentUser?.role?.replace('_', ' ')}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                        @{currentUser?.username || ''}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-1 max-h-56 overflow-y-auto space-y-1">
-                  {allUsers.map((u) => (
-                    <button
-                      key={u.id}
-                      onClick={() => {
-                        onSwitchUser(u.id);
-                        setShowRoleMenu(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
-                        currentUser?.id === u.id
-                          ? 'bg-sky-900/60 text-sky-200 border border-sky-700'
-                          : 'hover:bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <div className="min-w-0 pr-2">
-                        <div className="font-semibold truncate">{u.fullName}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{u.department} - <span className="text-sky-300">{u.role}</span></div>
-                      </div>
-                      {currentUser?.id === u.id && <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Login Portal, Password & Sign Out Footer */}
-                <div className="pt-2 mt-2 border-t border-slate-800 space-y-1">
+                {/* Password & Sign Out Footer */}
+                <div className="pt-2 mt-1 space-y-1">
                   {onOpenChangePassword && currentUser && (
                     <button
                       onClick={() => {
@@ -409,19 +403,6 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                       <span>Change My Password</span>
-                    </button>
-                  )}
-
-                  {onOpenLoginModal && (
-                    <button
-                      onClick={() => {
-                        setShowRoleMenu(false);
-                        onOpenLoginModal();
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-sky-300 hover:bg-sky-950/60 hover:text-sky-200 transition cursor-pointer"
-                    >
-                      <KeyRound className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                      <span>Open Staff Login Portal</span>
                     </button>
                   )}
 
