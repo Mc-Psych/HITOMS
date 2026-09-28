@@ -254,7 +254,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'incidents.view', 'incidents.create', 'incidents.update', 'incidents.close',
     'inventory.view', 'inventory.create', 'inventory.update', 'inventory.adjust',
     'procurement.manage',
-    'network.view', 'network.create', 'network.update', 'network.manage',
+    'network.view', 'network.create', 'network.update', 'network.delete', 'network.manage',
     'systems.ping',
     'reports.view',
   ],

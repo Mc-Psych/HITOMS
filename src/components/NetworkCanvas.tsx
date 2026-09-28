@@ -54,6 +54,7 @@ import {
   type User as UserType,
 } from '../types';
 import { networkService } from '../services/networkService';
+import { authService } from '../services/authService';
 
 interface NetworkCanvasProps {
   devices: NetworkDevice[];
@@ -63,6 +64,7 @@ interface NetworkCanvasProps {
   onCloneDevice: (device: NetworkDevice) => void;
   onDeleteDevice: (device: NetworkDevice) => void;
   onRefresh: () => void;
+  onAddDevice?: () => void;
 }
 
 interface Point {
@@ -382,6 +384,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   onCloneDevice,
   onDeleteDevice,
   onRefresh,
+  onAddDevice,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -449,7 +452,15 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [showTierGuide, setShowTierGuide] = useState(false);
 
-  const canManage = Boolean(currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'SYSTEM_ADMIN'].includes(currentUser.role));
+  const canManage = Boolean(
+    currentUser &&
+      (
+        ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER', 'SYSTEM_ADMIN'].includes(currentUser.role) ||
+        authService.isSuperAdminOrIT(currentUser) ||
+        authService.hasPermission('network.create', currentUser) ||
+        authService.hasPermission('network.manage', currentUser)
+      )
+  );
 
   // Spacebar listener for temporary Hand Pan tool
   useEffect(() => {
@@ -1672,6 +1683,17 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
           {/* Save Topology & Export Controls */}
           {canManage && (
             <div className="flex items-center gap-1.5">
+              {onAddDevice && (
+                <button
+                  onClick={onAddDevice}
+                  title="Add new network switch, router, server, or workstation node"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-sm transition cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Node</span>
+                </button>
+              )}
+
               <button
                 onClick={handleManualSaveTopology}
                 disabled={isSavingTopology}

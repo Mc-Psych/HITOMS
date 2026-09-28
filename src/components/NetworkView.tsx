@@ -591,6 +591,10 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
               onCloneDevice={(device) => openCloneModal(device)}
               onDeleteDevice={(device) => setDeleteConfirmId(device.id)}
               onRefresh={onRefresh}
+              onAddDevice={() => {
+                resetAddForm();
+                setAddModalOpen(true);
+              }}
             />
           )}
 

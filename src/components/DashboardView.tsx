@@ -68,10 +68,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const safeSystems = (systems && systems.length > 0) ? systems : (hospitalSystems || []);
   const safeInventory = (inventory && inventory.length > 0) ? inventory : (inventoryItems || []);
 
-  // Super Admin & IT Unit Access Check
+  // Super Admin, IT Unit & Procurement Access Check
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
-  const isStaffUser = currentUser?.role === 'STAFF_USER';
-  const canViewInventory = !isStaffUser && authService.hasPermission('inventory.view', currentUser);
+  const isStaffOrClinical =
+    !currentUser ||
+    currentUser.role === 'STAFF_USER' ||
+    currentUser.role === 'DEPARTMENT_HEAD' ||
+    (!isSuperAdminOrIT && currentUser.role !== 'PROCUREMENT_OFFICER');
+
+  // Staff and clinical members must not see Low Stock Consumables on dashboard
+  const canViewInventory = !isStaffOrClinical && authService.hasPermission('inventory.view', currentUser);
 
   // Compute Key Metrics
   const openTickets = safeTickets.filter((t) => t.status !== 'Closed' && t.status !== 'Resolved');
