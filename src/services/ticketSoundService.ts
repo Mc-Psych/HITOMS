@@ -6,25 +6,85 @@ import { settingsService } from './settingsService';
 const MUTE_KEY = 'hitoms_ticket_bell_muted';
 const LAST_RING_MAP_KEY = 'hitoms_ticket_bell_last_rings';
 const BROADCAST_CHANNEL_NAME = 'hitoms_ticket_bell_channel';
+const REMOTE_STORAGE_RING_KEY = 'hitoms_remote_ticket_ring';
 
 class SystemNotificationRingService {
   private broadcastChannel: BroadcastChannel | null = null;
   private intervalId: number | null = null;
   private audioCtx: AudioContext | null = null;
+  private isAudioUnlocked: boolean = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
+      // 1. BroadcastChannel across same-origin tabs
       if ('BroadcastChannel' in window) {
-        this.broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-        this.broadcastChannel.onmessage = (event) => {
-          if (event.data?.type === 'RING_TICKET_BELL') {
-            this.handleRemoteRingEvent(event.data.ticketNumber, event.data.title, event.data.reason);
-          } else if (event.data?.type === 'RING_EMERGENCY_ALERT') {
-            this.playEmergencyAlertTone();
-          }
-        };
+        try {
+          this.broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+          this.broadcastChannel.onmessage = (event) => {
+            if (event.data?.type === 'RING_TICKET_BELL') {
+              this.handleRemoteRingEvent(
+                event.data.ticketNumber,
+                event.data.title,
+                event.data.priority,
+                event.data.reason
+              );
+            } else if (event.data?.type === 'RING_EMERGENCY_ALERT') {
+              this.playEmergencyAlertTone();
+            }
+          };
+        } catch (e) {
+          console.warn('[TicketSoundService] BroadcastChannel unavailable:', e);
+        }
       }
+
+      // 2. Cross-tab storage event listener fallback
+      window.addEventListener('storage', (e) => {
+        if (e.key === REMOTE_STORAGE_RING_KEY && e.newValue) {
+          try {
+            const data = JSON.parse(e.newValue);
+            this.handleRemoteRingEvent(data.ticketNumber, data.title, data.priority, 'STORAGE_SYNC');
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      // 3. User interaction listener to unlock AudioContext autoplay
+      this.initUserGestureUnlock();
     }
+  }
+
+  /**
+   * Unlock Web Audio API context on first user gesture
+   */
+  private initUserGestureUnlock(): void {
+    if (typeof window === 'undefined') return;
+    const unlock = async () => {
+      if (this.isAudioUnlocked) return;
+      try {
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioContextClass) {
+          if (!this.audioCtx || this.audioCtx.state === 'closed') {
+            this.audioCtx = new AudioContextClass();
+          }
+          if (this.audioCtx.state === 'suspended') {
+            await this.audioCtx.resume();
+          }
+          this.isAudioUnlocked = true;
+        }
+      } catch {
+        // ignore
+      }
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+    };
+
+    window.addEventListener('click', unlock, { once: true, passive: true });
+    window.addEventListener('keydown', unlock, { once: true, passive: true });
+    window.addEventListener('touchstart', unlock, { once: true, passive: true });
   }
 
   /**
@@ -37,7 +97,12 @@ class SystemNotificationRingService {
       return true;
     }
     const dept = (user.department || '').toLowerCase();
-    return dept.includes('it') || dept.includes('information technology') || dept.includes('tech support') || dept.includes('biomedical');
+    return (
+      dept.includes('it') ||
+      dept.includes('information technology') ||
+      dept.includes('tech support') ||
+      dept.includes('biomedical')
+    );
   }
 
   /**
@@ -98,7 +163,8 @@ class SystemNotificationRingService {
         await this.audioCtx.resume();
       }
 
-      const durationSec = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+      const durationSec =
+        customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
       const pulseInterval = isCritical ? 0.35 : 0.45;
       const repetitions = Math.max(2, Math.round(durationSec / pulseInterval));
       const now = this.audioCtx.currentTime;
@@ -119,8 +185,8 @@ class SystemNotificationRingService {
 
         // Bell strike envelope (fast attack, natural exponential ring decay)
         gain.gain.setValueAtTime(0.001, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.6, startTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + (pulseInterval * 0.9));
+        gain.gain.exponentialRampToValueAtTime(0.65, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + pulseInterval * 0.9);
 
         osc1.connect(gain);
         osc2.connect(gain);
@@ -141,7 +207,7 @@ class SystemNotificationRingService {
         navigator.vibrate(pattern);
       }
     } catch (err) {
-      console.warn('[TicketSoundService] Audio playback hindered by browser autoplay policy:', err);
+      console.warn('[TicketSoundService] Audio playback hindered by browser policy:', err);
     }
   }
 
@@ -165,7 +231,8 @@ class SystemNotificationRingService {
         await this.audioCtx.resume();
       }
 
-      const durationSec = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+      const durationSec =
+        customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
       const cycleLength = 0.45;
       const repetitions = Math.max(3, Math.round(durationSec / cycleLength));
       const now = this.audioCtx.currentTime;
@@ -182,7 +249,7 @@ class SystemNotificationRingService {
 
         gain.gain.setValueAtTime(0.01, startTime);
         gain.gain.linearRampToValueAtTime(0.5, startTime + 0.05);
-        gain.gain.linearRampToValueAtTime(0.01, startTime + (cycleLength * 0.9));
+        gain.gain.linearRampToValueAtTime(0.01, startTime + cycleLength * 0.9);
 
         osc.connect(gain);
         gain.connect(this.audioCtx.destination);
@@ -216,27 +283,20 @@ class SystemNotificationRingService {
   ): Promise<void> {
     if (typeof window === 'undefined') return;
 
-    // Check permission
-    if ('Notification' in window && Notification.permission !== 'granted') {
-      try {
-        await Notification.requestPermission();
-      } catch {
-        // ignore
-      }
-    }
+    // Request notification permission if not yet decided
+    await this.requestNotificationPermission();
 
     const notifOptions: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
       body: options.body,
       icon: options.icon || '/icon.svg',
       badge: options.badge || '/icon.svg',
-      tag: options.tag || 'hitoms-system-ring',
+      tag: options.tag || `hitoms-${Date.now()}`,
       requireInteraction: options.requireInteraction ?? true,
       vibrate: options.vibrate || [300, 100, 300, 100, 600],
       data: options.data || { url: '/' },
     };
 
-    // 1. First attempt: ServiceWorkerRegistration showNotification
-    // This allows background & closed-app delivery in PWAs and modern browsers
+    // 1. ServiceWorker showNotification for background & closed-app delivery
     if ('serviceWorker' in navigator) {
       try {
         const registration = await navigator.serviceWorker.getRegistration();
@@ -266,8 +326,12 @@ class SystemNotificationRingService {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'granted') return true;
       if (Notification.permission !== 'denied') {
-        const result = await Notification.requestPermission();
-        return result === 'granted';
+        try {
+          const result = await Notification.requestPermission();
+          return result === 'granted';
+        } catch {
+          return false;
+        }
       }
     }
     return false;
@@ -280,29 +344,48 @@ class SystemNotificationRingService {
     // Record initial ring timestamp
     this.updateTicketLastRingTime(ticket.id);
 
-    // Broadcast across open tabs
+    // 1. Broadcast across open tabs via BroadcastChannel
     if (this.broadcastChannel) {
-      this.broadcastChannel.postMessage({
-        type: 'RING_TICKET_BELL',
-        ticketNumber: ticket.ticketNumber,
-        title: ticket.title,
-        reason: 'NEW_TICKET',
-      });
+      try {
+        this.broadcastChannel.postMessage({
+          type: 'RING_TICKET_BELL',
+          ticketNumber: ticket.ticketNumber,
+          title: ticket.title,
+          priority: ticket.priority,
+          reason: 'NEW_TICKET',
+        });
+      } catch (e) {
+        console.warn('[TicketSoundService] Broadcast error:', e);
+      }
     }
 
-    // Play audible ringtone
+    // 2. Broadcast via storage event for other windows
+    try {
+      localStorage.setItem(
+        REMOTE_STORAGE_RING_KEY,
+        JSON.stringify({
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          title: ticket.title,
+          priority: ticket.priority,
+          department: ticket.department,
+          timestamp: Date.now(),
+        })
+      );
+    } catch {
+      // ignore
+    }
+
+    // 3. Play audible ringtone immediately
     await this.playBellRingtone(ticket.priority === 'Critical');
 
-    // Deliver OS system notification even if app is backgrounded or closed
-    await this.showSystemNotification(
-      `🔔 Ticket #${ticket.ticketNumber} Logged`,
-      {
-        body: `${ticket.title} [${ticket.category} - ${ticket.priority} Priority] reported in ${ticket.department}`,
-        tag: `ticket-${ticket.id}`,
-        requireInteraction: ticket.priority === 'Critical',
-        vibrate: ticket.priority === 'Critical' ? [400, 150, 400, 150, 800] : [300, 100, 300],
-      }
-    );
+    // 4. Deliver OS system notification even if app is backgrounded or minimized
+    await this.showSystemNotification(`🔔 Ticket #${ticket.ticketNumber} Logged`, {
+      body: `${ticket.title} [${ticket.category} - ${ticket.priority} Priority] reported in ${ticket.department}`,
+      tag: `ticket-${ticket.id}`,
+      requireInteraction: ticket.priority === 'Critical',
+      vibrate: ticket.priority === 'Critical' ? [400, 150, 400, 150, 800] : [300, 100, 300],
+    });
   }
 
   /**
@@ -315,11 +398,15 @@ class SystemNotificationRingService {
   ): Promise<void> {
     // Broadcast across open tabs
     if (this.broadcastChannel) {
-      this.broadcastChannel.postMessage({
-        type: 'RING_EMERGENCY_ALERT',
-        title,
-        severity,
-      });
+      try {
+        this.broadcastChannel.postMessage({
+          type: 'RING_EMERGENCY_ALERT',
+          title,
+          severity,
+        });
+      } catch {
+        // ignore
+      }
     }
 
     // Play emergency siren audio
@@ -385,7 +472,10 @@ class SystemNotificationRingService {
       await this.playBellRingtone(criticalFound, ringDurationSeconds);
 
       // Deliver OS system notification even if app is closed
-      const ticketListStr = dueTickets.slice(0, 3).map((t) => `#${t.ticketNumber}`).join(', ');
+      const ticketListStr = dueTickets
+        .slice(0, 3)
+        .map((t) => `#${t.ticketNumber}`)
+        .join(', ');
       const extraCount = dueTickets.length > 3 ? ` +${dueTickets.length - 3} more` : '';
 
       await this.showSystemNotification(
@@ -455,7 +545,8 @@ class SystemNotificationRingService {
    */
   public async testSystemNotificationRing(customDurationSec?: number): Promise<void> {
     await this.requestNotificationPermission();
-    const duration = customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
+    const duration =
+      customDurationSec !== undefined ? customDurationSec : this.getConfiguredRingDurationSeconds();
     await this.playBellRingtone(true, duration);
     await this.showSystemNotification('🔔 HITOMS System Notification Ring Test', {
       body: `Verified: Ring duration set to ${duration}s. Notification ring is active for alerts and tickets even when the app is closed!`,
@@ -472,9 +563,19 @@ class SystemNotificationRingService {
     return this.testSystemNotificationRing();
   }
 
-  private handleRemoteRingEvent(ticketNumber: string, title: string, reason: string): void {
+  private handleRemoteRingEvent(
+    ticketNumber: string,
+    title: string,
+    priority: string = 'Normal',
+    reason: string = 'REMOTE'
+  ): void {
     console.log(`[TicketSoundService] Remote bell event received: ${ticketNumber} (${reason})`);
-    this.playBellRingtone(false);
+    this.playBellRingtone(priority === 'Critical');
+    this.showSystemNotification(`🔔 Ticket #${ticketNumber} Logged`, {
+      body: `${title} [${priority} Priority] reported. Tap to open.`,
+      tag: `remote-${ticketNumber}`,
+      requireInteraction: priority === 'Critical',
+    });
   }
 
   private updateTicketLastRingTime(ticketId: string): void {

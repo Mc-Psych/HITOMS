@@ -984,6 +984,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       await networkService.updatePositions(updates);
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastSavedAt(timeStr);
+      setHasUnsavedChanges(false);
       showToast(`Topology layout saved successfully at ${timeStr}`);
       onRefresh();
     } catch (err) {
@@ -1027,19 +1028,318 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     showToast('Topology configuration JSON snapshot exported');
   };
 
+  // Collect All Physical / Logical Cable Edges with natural port endpoints
+  const edges = useMemo(() => {
+    const list: {
+      id: string;
+      sourceId: string;
+      targetId: string;
+      type: NetworkConnectionType;
+      speed?: string;
+      path: string;
+      sourcePos: AnchorPoint;
+      targetPos: AnchorPoint;
+    }[] = [];
+
+    devices.forEach((dev) => {
+      const predId = dev.predecessorId || dev.uplinkDeviceId;
+      if (predId && deviceMap.has(predId) && positions[predId] && positions[dev.id]) {
+        const p1 = positions[predId];
+        const p2 = positions[dev.id];
+        const cableInfo = getBestCableEndpoints(p1, p2);
+
+        list.push({
+          id: `${predId}->${dev.id}`,
+          sourceId: predId,
+          targetId: dev.id,
+          type: dev.connectionType || 'Ethernet Cat6',
+          speed: dev.portSpeed || '1 Gbps',
+          path: cableInfo.path,
+          sourcePos: cableInfo.source,
+          targetPos: cableInfo.target,
+        });
+      }
+    });
+
+    return list;
+  }, [devices, positions, deviceMap]);
+
+  // High-Resolution Direct Canvas Generator for PDF & JPEG Export
+  const generateTopologyCanvas = useCallback((): HTMLCanvasElement => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    devices.forEach((d) => {
+      const pos = positions[d.id] || { x: d.canvasX || 100, y: d.canvasY || 100 };
+      if (pos.x < minX) minX = pos.x;
+      if (pos.y < minY) minY = pos.y;
+      if (pos.x + 240 > maxX) maxX = pos.x + 240;
+      if (pos.y + 130 > maxY) maxY = pos.y + 130;
+    });
+
+    if (minX === Infinity) {
+      minX = 0;
+      minY = 0;
+      maxX = 1200;
+      maxY = 800;
+    }
+
+    const padding = 70;
+    const headerHeight = 65;
+    const footerHeight = 35;
+    const contentW = Math.max(1200, maxX - minX + padding * 2);
+    const contentH = Math.max(700, maxY - minY + padding * 2);
+    const totalW = contentW;
+    const totalH = contentH + headerHeight + footerHeight;
+
+    const scale = 2; // 2x Retina resolution
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(totalW * scale);
+    canvas.height = Math.round(totalH * scale);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to create canvas context');
+
+    ctx.scale(scale, scale);
+
+    // Deep Dark Canvas Background
+    ctx.fillStyle = '#020617'; // slate-950
+    ctx.fillRect(0, 0, totalW, totalH);
+
+    // Subtle Dot Grid
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    for (let x = 0; x < totalW; x += 24) {
+      for (let y = headerHeight; y < totalH - footerHeight; y += 24) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const offsetX = padding - minX;
+    const offsetY = headerHeight + padding - minY;
+
+    const roundRect = (
+      c: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number
+    ) => {
+      c.beginPath();
+      c.moveTo(x + r, y);
+      c.lineTo(x + w - r, y);
+      c.quadraticCurveTo(x + w, y, x + w, y + r);
+      c.lineTo(x + w, y + h - r);
+      c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      c.lineTo(x + r, y + h);
+      c.quadraticCurveTo(x, y + h, x, y + h - r);
+      c.lineTo(x, y + r);
+      c.quadraticCurveTo(x, y, x + r, y);
+      c.closePath();
+    };
+
+    // 1. Draw Network Cables (Edges)
+    edges.forEach((edge) => {
+      const p1 = positions[edge.sourceId] || { x: 100, y: 100 };
+      const p2 = positions[edge.targetId] || { x: 100, y: 100 };
+
+      const x1 = p1.x + 110 + offsetX;
+      const y1 = p1.y + 55 + offsetY;
+      const x2 = p2.x + 110 + offsetX;
+      const y2 = p2.y + 55 + offsetY;
+
+      const cfg = CABLE_CONFIGS[edge.type] || { stroke: '#38bdf8', strokeDash: 'none' };
+      const strokeColor = cfg.stroke || '#38bdf8';
+
+      ctx.save();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2.5;
+      if (cfg.strokeDash && cfg.strokeDash !== 'none') {
+        ctx.setLineDash([6, 4]);
+      } else {
+        ctx.setLineDash([]);
+      }
+
+      // Smooth Bezier curve connecting nodes
+      const midY = (y1 + y2) / 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
+      ctx.stroke();
+
+      // Directional arrow head
+      const angle = Math.atan2(y2 - midY, x2 - x1);
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
+      ctx.closePath();
+      ctx.fill();
+
+      // Cable Label Pill
+      const labelX = (x1 + x2) / 2;
+      const labelY = (y1 + y2) / 2;
+      const labelText = `${edge.type} • ${edge.speed || '1 Gbps'}`;
+      ctx.font = 'bold 8.5px monospace';
+      const textMetrics = ctx.measureText(labelText);
+      const pillW = textMetrics.width + 12;
+      const pillH = 15;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      roundRect(ctx, labelX - pillW / 2, labelY - pillH / 2, pillW, pillH, 4);
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labelText, labelX, labelY);
+      ctx.restore();
+    });
+
+    // 2. Draw Device Nodes
+    devices.forEach((dev) => {
+      const pos = positions[dev.id] || { x: dev.canvasX || 100, y: dev.canvasY || 100 };
+      const nodeX = pos.x + offsetX;
+      const nodeY = pos.y + offsetY;
+      const nodeW = 220;
+      const nodeH = 105;
+
+      const isOnline = dev.status === 'Online' || dev.status === 'In Service';
+      const isFailover = dev.status === 'Degraded' || dev.status === 'Failover';
+      const statusColor = isOnline ? '#10b981' : isFailover ? '#f59e0b' : '#f43f5e';
+
+      ctx.save();
+      // Node background
+      ctx.fillStyle = '#0f172a';
+      roundRect(ctx, nodeX, nodeY, nodeW, nodeH, 10);
+      ctx.fill();
+
+      // Node border
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, nodeX, nodeY, nodeW, nodeH, 10);
+      ctx.stroke();
+
+      // Header Bar
+      ctx.fillStyle = '#1e293b';
+      roundRect(ctx, nodeX, nodeY, nodeW, 26, 10);
+      ctx.fill();
+      ctx.fillRect(nodeX, nodeY + 16, nodeW, 10);
+
+      // Status indicator dot
+      ctx.fillStyle = statusColor;
+      ctx.beginPath();
+      ctx.arc(nodeX + 12, nodeY + 13, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Device Type Text
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 9.5px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(dev.deviceType.toUpperCase(), nodeX + 22, nodeY + 13);
+
+      // Status text right-aligned
+      ctx.fillStyle = statusColor;
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(dev.status.toUpperCase(), nodeX + nodeW - 8, nodeY + 13);
+
+      // Device Name
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      const truncatedName = dev.deviceName.length > 24 ? dev.deviceName.slice(0, 22) + '...' : dev.deviceName;
+      ctx.fillText(truncatedName, nodeX + 10, nodeY + 42);
+
+      // IP Address
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(dev.ipAddress || 'DHCP Dynamic', nodeX + 10, nodeY + 58);
+
+      // Location
+      ctx.fillStyle = '#64748b';
+      ctx.font = '9px sans-serif';
+      const locText = dev.location ? `Loc: ${dev.location.slice(0, 24)}` : 'Department: IT';
+      ctx.fillText(locText, nodeX + 10, nodeY + 74);
+
+      // Ports / MAC
+      ctx.fillStyle = '#475569';
+      ctx.font = '8.5px monospace';
+      const portInfo = dev.portsCount ? `${dev.activePorts || 0}/${dev.portsCount} Ports` : (dev.macAddress || '');
+      ctx.fillText(portInfo, nodeX + 10, nodeY + 89);
+
+      ctx.restore();
+    });
+
+    // 3. Executive Header Bar
+    ctx.save();
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, totalW, headerHeight);
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, headerHeight);
+    ctx.lineTo(totalW, headerHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('HOSPITAL IT OPERATIONS & NETWORK TOPOLOGY DIAGRAM', 24, 24);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '10px sans-serif';
+    const dateStr = new Date().toLocaleString();
+    const subText = `Generated: ${dateStr} | Hardware Nodes: ${devices.length} | Physical Links: ${edges.length} | Exported by: ${currentUser?.fullName || 'Super Administrator'}`;
+    ctx.fillText(subText, 24, 46);
+
+    // HITOMS Infrastructure Badge
+    ctx.fillStyle = '#0284c7';
+    roundRect(ctx, totalW - 200, 16, 176, 32, 8);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('HITOMS INFRASTRUCTURE', totalW - 112, 32);
+
+    // 4. Executive Footer Bar
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, totalH - footerHeight, totalW, footerHeight);
+    ctx.strokeStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.moveTo(0, totalH - footerHeight);
+    ctx.lineTo(totalW, totalH - footerHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('CONFIDENTIAL & PROPRIETARY — Hospital Infrastructure & Telemetry Management System (HITOMS) Offline-First Architecture', 24, totalH - footerHeight / 2);
+
+    ctx.textAlign = 'right';
+    ctx.fillText(`Verified by ${currentUser?.role || 'SUPER_ADMIN'} • Page 1 of 1`, totalW - 24, totalH - footerHeight / 2);
+
+    ctx.restore();
+
+    return canvas;
+  }, [devices, positions, edges, currentUser]);
+
   // Export Topology as PDF Document (Super Admin / IT Unit)
   const handleExportPDF = async () => {
-    if (!containerRef.current) return;
     setIsExporting('pdf');
     showToast('Generating Network Topology High-Resolution PDF...');
     try {
-      const canvas = await html2canvas(containerRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#020617',
-        logging: false,
-      });
-
+      const canvas = generateTopologyCanvas();
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const pdf = new jsPDF({
         orientation: 'landscape',
@@ -1050,29 +1350,9 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      // Executive Header Bar
-      pdf.setFillColor(15, 23, 42); // slate-900
-      pdf.rect(0, 0, pdfWidth, 18, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(11);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('HOSPITAL IT OPERATIONS & NETWORK TOPOLOGY DIAGRAM', 10, 11);
-
-      pdf.setFontSize(8);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setTextColor(148, 163, 184); // slate-400
-      const dateStr = new Date().toLocaleString();
-      pdf.text(
-        `Generated: ${dateStr} | Total Nodes: ${devices.length} | Exported by: ${currentUser?.fullName || 'Super Admin'}`,
-        pdfWidth - 10,
-        11,
-        { align: 'right' }
-      );
-
-      // Embedded High-Res Diagram Canvas
-      const margin = 8;
+      const margin = 6;
       const availableW = pdfWidth - margin * 2;
-      const availableH = pdfHeight - 24 - margin;
+      const availableH = pdfHeight - margin * 2;
       const canvasRatio = canvas.width / canvas.height;
       let renderW = availableW;
       let renderH = availableW / canvasRatio;
@@ -1083,18 +1363,9 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       }
 
       const xOffset = margin + (availableW - renderW) / 2;
-      const yOffset = 22 + (availableH - renderH) / 2;
+      const yOffset = margin + (availableH - renderH) / 2;
 
       pdf.addImage(imgData, 'JPEG', xOffset, yOffset, renderW, renderH);
-
-      // Security & Compliance Footer
-      pdf.setFontSize(7);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text(
-        'CONFIDENTIAL & PROPRIETARY — Hospital Infrastructure & Telemetry Management System (HITOMS) Offline-First Architecture',
-        10,
-        pdfHeight - 4
-      );
 
       const fileName = `hospital-network-topology-${new Date().toISOString().slice(0, 10)}.pdf`;
       pdf.save(fileName);
@@ -1109,17 +1380,10 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   // Export Topology as High-Resolution JPEG Image (Super Admin / IT Unit)
   const handleExportJPEG = async () => {
-    if (!containerRef.current) return;
     setIsExporting('jpeg');
     showToast('Generating Network Topology JPEG image...');
     try {
-      const canvas = await html2canvas(containerRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#020617',
-        logging: false,
-      });
-
+      const canvas = generateTopologyCanvas();
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', imgData);
@@ -1219,42 +1483,6 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       showToast(err.message || 'Failed to update cable');
     }
   };
-
-  // Collect All Physical / Logical Cable Edges with natural port endpoints
-  const edges = useMemo(() => {
-    const list: {
-      id: string;
-      sourceId: string;
-      targetId: string;
-      type: NetworkConnectionType;
-      speed?: string;
-      path: string;
-      sourcePos: AnchorPoint;
-      targetPos: AnchorPoint;
-    }[] = [];
-
-    devices.forEach((dev) => {
-      const predId = dev.predecessorId || dev.uplinkDeviceId;
-      if (predId && deviceMap.has(predId) && positions[predId] && positions[dev.id]) {
-        const p1 = positions[predId];
-        const p2 = positions[dev.id];
-        const cableInfo = getBestCableEndpoints(p1, p2);
-
-        list.push({
-          id: `${predId}->${dev.id}`,
-          sourceId: predId,
-          targetId: dev.id,
-          type: dev.connectionType || 'Ethernet Cat6',
-          speed: dev.portSpeed || '1 Gbps',
-          path: cableInfo.path,
-          sourcePos: cableInfo.source,
-          targetPos: cableInfo.target,
-        });
-      }
-    });
-
-    return list;
-  }, [devices, positions, deviceMap]);
 
   // Compute smooth curved cubic bezier path for rubberband connection
   const getLiveRubberbandPath = (sourcePos: Point, mouse: Point) => {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   UserPlus,
@@ -23,13 +23,23 @@ import {
   Info,
   Layers,
   ArrowRightLeft,
+  Sliders,
+  RotateCcw,
+  Save,
 } from 'lucide-react';
 import {
   type User,
   type Role,
   type AccountStatus,
 } from '../types';
-import { authService, extractSurname } from '../services/authService';
+import {
+  authService,
+  extractSurname,
+  type Permission,
+  type PermissionDefinition,
+  PERMISSION_DEFINITIONS,
+  ROLE_DESCRIPTIONS,
+} from '../services/authService';
 import { syncService } from '../services/syncService';
 import { seedSnapshotService } from '../services/seedSnapshotService';
 import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadModal';
@@ -154,8 +164,66 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
     }
   };
 
+  // Sub-tab: Staff Directory vs Role Permission Matrix
+  const [accountSubTab, setAccountSubTab] = useState<'DIRECTORY' | 'PERMISSION_MATRIX'>('DIRECTORY');
+
+  // Role Permission Matrix State
+  const [selectedRoleForMatrix, setSelectedRoleForMatrix] = useState<Role>('IT_ADMIN');
+  const [rolePermissions, setRolePermissions] = useState<Permission[]>(
+    authService.getRolePermissions('IT_ADMIN')
+  );
+  const [matrixSaveSuccess, setMatrixSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    setRolePermissions(authService.getRolePermissions(selectedRoleForMatrix));
+  }, [selectedRoleForMatrix]);
+
+  const permissionsByCategory = useMemo(() => {
+    const grouped: Record<string, PermissionDefinition[]> = {};
+    PERMISSION_DEFINITIONS.forEach((p) => {
+      if (!grouped[p.category]) grouped[p.category] = [];
+      grouped[p.category].push(p);
+    });
+    return grouped;
+  }, []);
+
+  const handleToggleRolePermission = (permKey: Permission) => {
+    if (!isSuperAdmin) return;
+    setRolePermissions((prev) =>
+      prev.includes(permKey) ? prev.filter((p) => p !== permKey) : [...prev, permKey]
+    );
+  };
+
+  const handleSaveRolePermissions = async () => {
+    if (!currentUser || !isSuperAdmin) return;
+    try {
+      await authService.updateRolePermissions(selectedRoleForMatrix, rolePermissions, currentUser);
+      setMatrixSaveSuccess(true);
+      setTimeout(() => setMatrixSaveSuccess(false), 3000);
+      onRefresh();
+      showNotification('success', `Role permissions for ${ROLE_DESCRIPTIONS[selectedRoleForMatrix].title} updated successfully.`);
+    } catch (err: any) {
+      showNotification('error', err.message || 'Failed to update role permissions.');
+    }
+  };
+
+  const handleResetRolePermissions = async () => {
+    if (!currentUser || !isSuperAdmin) return;
+    if (!window.confirm('Reset all role permissions to system defaults?')) return;
+    await authService.resetPermissionsToDefault(currentUser);
+    setRolePermissions(authService.getRolePermissions(selectedRoleForMatrix));
+    setMatrixSaveSuccess(true);
+    setTimeout(() => setMatrixSaveSuccess(false), 3000);
+    onRefresh();
+    showNotification('success', 'All role permissions reset to system defaults.');
+  };
+
   // 1. Force Cloud Sync & Reconcile Deletions
   const handleForceCloudSync = async () => {
+    if (!isSuperAdmin) {
+      showNotification('error', 'Only Super Administrator has authority to force cloud re-sync.');
+      return;
+    }
     setIsSyncing(true);
     try {
       await syncService.runAutomaticSync();
@@ -341,73 +409,102 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
             </div>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
-            <button
-              onClick={handleForceCloudSync}
-              disabled={isSyncing || isLoading}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 disabled:opacity-50"
-              title="Pull latest master users from Firestore and purge deleted local users"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-sky-600' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Force Cloud Re-Sync'}</span>
-            </button>
+        {/* Navigation Sub-Tabs */}
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit">
+          <button
+            type="button"
+            onClick={() => setAccountSubTab('DIRECTORY')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              accountSubTab === 'DIRECTORY'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Staff Accounts Directory ({visibleUsers.length})</span>
+          </button>
 
-            {isSuperAdmin && (
-              <>
-                <button
-                  onClick={handleSaveAsGitSeed}
-                  disabled={isLoading}
-                  className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-900 disabled:opacity-50"
-                  title="Persist live app preview data as default seed snapshot for GitHub commits"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Set As Git Default Seed</span>
-                </button>
+          <button
+            type="button"
+            onClick={() => setAccountSubTab('PERMISSION_MATRIX')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              accountSubTab === 'PERMISSION_MATRIX'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Role-Based Permission Matrix</span>
+          </button>
+        </div>
 
-                <button
-                  onClick={() => seedSnapshotService.downloadCurrentSeedBackup()}
-                  disabled={isLoading}
-                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 disabled:opacity-50"
-                  title="Download complete JSON snapshot backup of all local stores"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Export Seed JSON</span>
-                </button>
+        {/* Quick Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
+          {isSuperAdmin && (
+            <>
+              <button
+                onClick={handleForceCloudSync}
+                disabled={isSyncing || isLoading}
+                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 disabled:opacity-50"
+                title="Pull latest master users from Firestore and purge deleted local users"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-sky-600' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Force Cloud Re-Sync'}</span>
+              </button>
 
-                <button
-                  onClick={() => setIsPurgeModalOpen(true)}
-                  disabled={isLoading}
-                  className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-rose-200 dark:border-rose-900 disabled:opacity-50"
-                  title="Wipe stale cached accounts and pull clean state"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>Reset Cache</span>
-                </button>
-              </>
-            )}
+              <button
+                onClick={handleSaveAsGitSeed}
+                disabled={isLoading}
+                className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-900 disabled:opacity-50"
+                title="Persist live app preview data as default seed snapshot for GitHub commits"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Set As Git Default Seed</span>
+              </button>
 
-            <button
-              onClick={() => setIsBulkUploadModalOpen(true)}
-              disabled={isLoading}
-              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Bulk CSV Import</span>
-            </button>
+              <button
+                onClick={() => seedSnapshotService.downloadCurrentSeedBackup()}
+                disabled={isLoading}
+                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 disabled:opacity-50"
+                title="Download complete JSON snapshot backup of all local stores"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Seed JSON</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setEditingUser(null);
-                setIsUserEditModalOpen(true);
-              }}
-              disabled={isLoading}
-              className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Add Staff User</span>
-            </button>
-          </div>
+              <button
+                onClick={() => setIsPurgeModalOpen(true)}
+                disabled={isLoading}
+                className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-rose-200 dark:border-rose-900 disabled:opacity-50"
+                title="Wipe stale cached accounts and pull clean state"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Reset Cache</span>
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={() => setIsBulkUploadModalOpen(true)}
+            disabled={isLoading}
+            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Bulk CSV Import</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEditingUser(null);
+              setIsUserEditModalOpen(true);
+            }}
+            disabled={isLoading}
+            className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Add Staff User</span>
+          </button>
+        </div>
         </div>
 
         {/* Status Notification Toast */}
@@ -430,8 +527,140 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
           </div>
         )}
 
-        {/* Stats Metrics Counters */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+        {/* Subtab conditional rendering */}
+      </div>
+
+      {accountSubTab === 'PERMISSION_MATRIX' ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-sky-600" />
+                <span>Role-Based Access Control (RBAC) Permission Matrix</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Super Admin authority: Define and customize operational capabilities for each hospital user role.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedRoleForMatrix}
+                onChange={(e) => setSelectedRoleForMatrix(e.target.value as Role)}
+                className="px-3 py-1.5 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-hidden text-slate-900 dark:text-white"
+              >
+                {availableRoles.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_DESCRIPTIONS[r].title} ({r})
+                  </option>
+                ))}
+              </select>
+
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={handleResetRolePermissions}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
+                  title="Reset all roles to defaults"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Defaults</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Role Summary Banner */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-900 dark:text-white">
+                {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title}
+              </span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                Active Permissions: {rolePermissions.length} / {PERMISSION_DEFINITIONS.length}
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              {ROLE_DESCRIPTIONS[selectedRoleForMatrix].description}
+            </p>
+          </div>
+
+          {/* Permission Categories Grid */}
+          <div className="space-y-4">
+            {(Object.entries(permissionsByCategory) as [string, PermissionDefinition[]][]).map(([category, perms]) => (
+              <div
+                key={category}
+                className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
+              >
+                <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                    {category} ({perms.filter((p) => rolePermissions.includes(p.key)).length}/{perms.length})
+                  </span>
+                </div>
+
+                <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  {perms.map((p) => {
+                    const isGranted = rolePermissions.includes(p.key);
+                    return (
+                      <div
+                        key={p.key}
+                        onClick={() => handleToggleRolePermission(p.key)}
+                        className={`p-2.5 rounded-lg border transition flex items-start gap-2.5 ${
+                          isSuperAdmin ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'
+                        } ${
+                          isGranted
+                            ? 'bg-sky-50/50 dark:bg-sky-950/20 border-sky-300 dark:border-sky-800'
+                            : 'border-slate-200 dark:border-slate-800/80 opacity-60'
+                        }`}
+                      >
+                        <div className="mt-0.5">
+                          {isGranted ? (
+                            <CheckSquare className="w-4 h-4 text-sky-600 shrink-0" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                          )}
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span>{p.label}</span>
+                            <span className="font-mono text-[10px] text-slate-400 font-normal">({p.key})</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Save Role Permissions Footer */}
+          {isSuperAdmin && (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              {matrixSaveSuccess ? (
+                <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Role permissions updated successfully!</span>
+                </span>
+              ) : <span />}
+
+              <button
+                type="button"
+                onClick={handleSaveRolePermissions}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md cursor-pointer transition"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title} Permissions</span>
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Stats Metrics Counters */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
           <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
             <div className="text-[11px] text-slate-500 dark:text-slate-400">Total Registered Staff</div>
             <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
@@ -789,6 +1018,8 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
           </table>
         </div>
       </div>
+      </>
+      )}
 
       {/* MODAL: Bulk Delete Confirmation */}
       {isBulkDeleteModalOpen && (

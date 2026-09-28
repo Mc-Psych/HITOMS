@@ -1109,6 +1109,46 @@ class AuthService {
     };
   }
 
+  /**
+   * Purges orphaned user overrides, stale cache, and ensures integrity of user references
+   */
+  public async purgeOrphanedUserData(): Promise<{ purgedOverrides: number; purgedStaleSession: boolean }> {
+    const validUsers = await getAllFromStore<User>('users');
+    const validUserIds = new Set(validUsers.map((u) => u.id));
+    let purgedOverrides = 0;
+    let purgedStaleSession = false;
+
+    try {
+      const stored = localStorage.getItem(USER_PERMS_KEY);
+      if (stored) {
+        const allOverrides = JSON.parse(stored);
+        let modified = false;
+        for (const userId of Object.keys(allOverrides)) {
+          if (!validUserIds.has(userId)) {
+            delete allOverrides[userId];
+            purgedOverrides++;
+            modified = true;
+          }
+        }
+        if (modified) {
+          localStorage.setItem(USER_PERMS_KEY, JSON.stringify(allOverrides));
+        }
+      }
+    } catch (e) {
+      console.warn('Error purging orphaned user overrides:', e);
+    }
+
+    const currentSessionId = localStorage.getItem(SESSION_KEY);
+    if (currentSessionId && !validUserIds.has(currentSessionId)) {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+      this.currentUser = null;
+      purgedStaleSession = true;
+    }
+
+    return { purgedOverrides, purgedStaleSession };
+  }
+
   public logout(): void {
     this.currentUser = null;
     localStorage.removeItem(SESSION_KEY);

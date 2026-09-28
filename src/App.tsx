@@ -111,6 +111,7 @@ export default function App() {
   // Load all local data from IndexedDB
   const refreshAllData = useCallback(async () => {
     try {
+      await authService.purgeOrphanedUserData();
       const [
         loadedTickets,
         loadedAssets,
@@ -232,6 +233,13 @@ export default function App() {
     const newUser = await authService.loginAs(userId);
     if (newUser) {
       setCurrentUser(newUser);
+      const isSuperOrIT = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(newUser.role);
+      if (!isSuperOrIT && ['admin', 'emergency', 'sync', 'backups'].includes(currentView)) {
+        setCurrentView('dashboard');
+      }
+      if (isSuperOrIT) {
+        ticketSoundService.requestNotificationPermission().catch(() => {});
+      }
       await refreshAllData();
     }
   };
@@ -239,11 +247,19 @@ export default function App() {
   const handleLogout = () => {
     authService.logout();
     setCurrentUser(null);
+    setCurrentView('dashboard');
     setLoginModalOpen(true);
   };
 
   const handleLoginSuccess = async (user: User, mustChangePassword: boolean) => {
     setCurrentUser(user);
+    const isSuperOrIT = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(user.role);
+    if (!isSuperOrIT && ['admin', 'emergency', 'sync', 'backups'].includes(currentView)) {
+      setCurrentView('dashboard');
+    }
+    if (isSuperOrIT) {
+      ticketSoundService.requestNotificationPermission().catch(() => {});
+    }
     setLoginModalOpen(false);
     await refreshAllData();
     if (mustChangePassword) {
@@ -251,6 +267,20 @@ export default function App() {
       setChangePasswordModalOpen(true);
     }
   };
+
+  // Enforce role-based view guarding so logging in as staff resets restricted views
+  useEffect(() => {
+    if (!currentUser) {
+      if (['admin', 'emergency', 'sync', 'backups'].includes(currentView)) {
+        setCurrentView('dashboard');
+      }
+      return;
+    }
+    const isSuperOrIT = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role);
+    if (!isSuperOrIT && ['admin', 'emergency', 'sync', 'backups'].includes(currentView)) {
+      setCurrentView('dashboard');
+    }
+  }, [currentUser, currentView]);
 
   // Report issue directly for scanned or selected asset
   const handleReportIssueForAsset = (asset: Asset) => {
@@ -554,7 +584,7 @@ export default function App() {
               />
             )}
 
-            {currentView === 'admin' && (
+            {currentView === 'admin' && currentUser && ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'].includes(currentUser.role) && (
               <AdministrationView
                 currentUser={currentUser}
                 allUsers={allUsers}
