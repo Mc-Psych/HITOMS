@@ -26,6 +26,10 @@ import {
   Sliders,
   RotateCcw,
   Save,
+  LayoutGrid,
+  ListFilter,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   type User,
@@ -168,6 +172,9 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
   const [accountSubTab, setAccountSubTab] = useState<'DIRECTORY' | 'PERMISSION_MATRIX'>('DIRECTORY');
 
   // Role Permission Matrix State
+  const [matrixViewMode, setMatrixViewMode] = useState<'GRID' | 'INSPECTOR'>('GRID');
+  const [matrixSearchQuery, setMatrixSearchQuery] = useState('');
+  const [matrixCategoryFilter, setMatrixCategoryFilter] = useState<string>('ALL');
   const [selectedRoleForMatrix, setSelectedRoleForMatrix] = useState<Role>('IT_ADMIN');
   const [rolePermissions, setRolePermissions] = useState<Permission[]>(
     authService.getRolePermissions('IT_ADMIN')
@@ -178,20 +185,72 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
     setRolePermissions(authService.getRolePermissions(selectedRoleForMatrix));
   }, [selectedRoleForMatrix]);
 
+  const categoriesList = useMemo(() => {
+    const cats = new Set<string>();
+    PERMISSION_DEFINITIONS.forEach((p) => cats.add(p.category));
+    return Array.from(cats);
+  }, []);
+
   const permissionsByCategory = useMemo(() => {
     const grouped: Record<string, PermissionDefinition[]> = {};
     PERMISSION_DEFINITIONS.forEach((p) => {
+      // Filter by search
+      if (matrixSearchQuery.trim()) {
+        const q = matrixSearchQuery.toLowerCase();
+        const match =
+          p.label.toLowerCase().includes(q) ||
+          p.key.toLowerCase().includes(q) ||
+          p.description.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q);
+        if (!match) return;
+      }
+      // Filter by category
+      if (matrixCategoryFilter !== 'ALL' && p.category !== matrixCategoryFilter) return;
+
       if (!grouped[p.category]) grouped[p.category] = [];
       grouped[p.category].push(p);
     });
     return grouped;
-  }, []);
+  }, [matrixSearchQuery, matrixCategoryFilter]);
 
   const handleToggleRolePermission = (permKey: Permission) => {
     if (!isSuperAdmin) return;
     setRolePermissions((prev) =>
       prev.includes(permKey) ? prev.filter((p) => p !== permKey) : [...prev, permKey]
     );
+  };
+
+  const handleToggleCellGrid = async (role: Role, permKey: Permission) => {
+    if (!isSuperAdmin) return;
+    const currentPerms = authService.getRolePermissions(role);
+    const updated = currentPerms.includes(permKey)
+      ? currentPerms.filter((p) => p !== permKey)
+      : [...currentPerms, permKey];
+
+    await authService.updateRolePermissions(role, updated, currentUser || undefined);
+    if (role === selectedRoleForMatrix) {
+      setRolePermissions(updated);
+    }
+    onRefresh();
+  };
+
+  const handleGrantCategory = (categoryName: string) => {
+    if (!isSuperAdmin) return;
+    const catPerms = PERMISSION_DEFINITIONS.filter((p) => p.category === categoryName).map((p) => p.key);
+    setRolePermissions((prev) => Array.from(new Set([...prev, ...catPerms])));
+  };
+
+  const handleRevokeCategory = (categoryName: string) => {
+    if (!isSuperAdmin) return;
+    const catPermKeys = new Set(PERMISSION_DEFINITIONS.filter((p) => p.category === categoryName).map((p) => p.key));
+    setRolePermissions((prev) => prev.filter((p) => !catPermKeys.has(p)));
+  };
+
+  const handleCopyPermissionsFromRole = (sourceRole: Role) => {
+    if (!isSuperAdmin) return;
+    const sourcePerms = authService.getRolePermissions(sourceRole);
+    setRolePermissions([...sourcePerms]);
+    showNotification('info', `Copied permissions from ${ROLE_DESCRIPTIONS[sourceRole].title}. Click Save to persist.`);
   };
 
   const handleSaveRolePermissions = async () => {
@@ -532,36 +591,54 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
 
       {accountSubTab === 'PERMISSION_MATRIX' ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-5">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          {/* Permission Matrix Header & Control Toolbar */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-sky-600" />
+                <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
                 <span>Role-Based Access Control (RBAC) Permission Matrix</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Super Admin authority: Define and customize operational capabilities for each hospital user role.
+                Audit and configure operational capability maps across all hospital roles.
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedRoleForMatrix}
-                onChange={(e) => setSelectedRoleForMatrix(e.target.value as Role)}
-                className="px-3 py-1.5 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-hidden text-slate-900 dark:text-white"
-              >
-                {availableRoles.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLE_DESCRIPTIONS[r].title} ({r})
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* View Switcher: Cross-Role Grid vs Single Role Inspector */}
+              <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setMatrixViewMode('GRID')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    matrixViewMode === 'GRID'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>2D Cross-Role Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatrixViewMode('INSPECTOR')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    matrixViewMode === 'INSPECTOR'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Role Inspector</span>
+                </button>
+              </div>
 
+              {/* Reset to Defaults (Super Admin Only) */}
               {isSuperAdmin && (
                 <button
                   type="button"
                   onClick={handleResetRolePermissions}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
-                  title="Reset all roles to defaults"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer transition"
+                  title="Reset all role permissions to system defaults"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Reset Defaults</span>
@@ -570,89 +647,304 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
             </div>
           </div>
 
-          {/* Role Summary Banner */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-xs text-slate-900 dark:text-white">
-                {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title}
-              </span>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
-                Active Permissions: {rolePermissions.length} / {PERMISSION_DEFINITIONS.length}
-              </span>
+          {/* Search & Category Filter Toolbar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={matrixSearchQuery}
+                onChange={(e) => setMatrixSearchQuery(e.target.value)}
+                placeholder="Search permission capability, key, or category..."
+                className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs focus:outline-hidden text-slate-900 dark:text-white"
+              />
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              {ROLE_DESCRIPTIONS[selectedRoleForMatrix].description}
-            </p>
-          </div>
 
-          {/* Permission Categories Grid */}
-          <div className="space-y-4">
-            {(Object.entries(permissionsByCategory) as [string, PermissionDefinition[]][]).map(([category, perms]) => (
-              <div
-                key={category}
-                className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
-              >
-                <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                    {category} ({perms.filter((p) => rolePermissions.includes(p.key)).length}/{perms.length})
-                  </span>
-                </div>
-
-                <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                  {perms.map((p) => {
-                    const isGranted = rolePermissions.includes(p.key);
-                    return (
-                      <div
-                        key={p.key}
-                        onClick={() => handleToggleRolePermission(p.key)}
-                        className={`p-2.5 rounded-lg border transition flex items-start gap-2.5 ${
-                          isSuperAdmin ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'
-                        } ${
-                          isGranted
-                            ? 'bg-sky-50/50 dark:bg-sky-950/20 border-sky-300 dark:border-sky-800'
-                            : 'border-slate-200 dark:border-slate-800/80 opacity-60'
-                        }`}
-                      >
-                        <div className="mt-0.5">
-                          {isGranted ? (
-                            <CheckSquare className="w-4 h-4 text-sky-600 shrink-0" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-400 shrink-0" />
-                          )}
-                        </div>
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                            <span>{p.label}</span>
-                            <span className="font-mono text-[10px] text-slate-400 font-normal">({p.key})</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Save Role Permissions Footer */}
-          {isSuperAdmin && (
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              {matrixSaveSuccess ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Role permissions updated successfully!</span>
-                </span>
-              ) : <span />}
-
+            {/* Category Filter Badges */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
               <button
                 type="button"
-                onClick={handleSaveRolePermissions}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md cursor-pointer transition"
+                onClick={() => setMatrixCategoryFilter('ALL')}
+                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap cursor-pointer transition ${
+                  matrixCategoryFilter === 'ALL'
+                    ? 'bg-sky-600 text-white shadow-2xs'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                }`}
               >
-                <Save className="w-4 h-4" />
-                <span>Save {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title} Permissions</span>
+                All ({PERMISSION_DEFINITIONS.length})
               </button>
+              {categoriesList.map((cat) => {
+                const count = PERMISSION_DEFINITIONS.filter((p) => p.category === cat).length;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setMatrixCategoryFilter(cat)}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap cursor-pointer transition ${
+                      matrixCategoryFilter === cat
+                        ? 'bg-sky-600 text-white shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* MODE 1: 2D CROSS-ROLE MATRIX GRID VIEW */}
+          {matrixViewMode === 'GRID' && (
+            <div className="space-y-4">
+              <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xs">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200">
+                      <th className="p-3 font-bold sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 min-w-[260px] max-w-[320px] shadow-xs">
+                        Permission Capability & Key
+                      </th>
+                      {availableRoles.map((role) => {
+                        const count = authService.getRolePermissions(role).length;
+                        const pct = Math.round((count / PERMISSION_DEFINITIONS.length) * 100);
+                        return (
+                          <th key={role} className="p-2.5 font-bold text-center min-w-[110px] max-w-[130px] border-l border-slate-200 dark:border-slate-800">
+                            <div className="space-y-1">
+                              <div className="truncate font-black text-[11px] text-slate-900 dark:text-white" title={ROLE_DESCRIPTIONS[role].title}>
+                                {role}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 font-medium">
+                                {count} / {PERMISSION_DEFINITIONS.length} ({pct}%)
+                              </div>
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
+                    {Object.keys(permissionsByCategory).length === 0 ? (
+                      <tr>
+                        <td colSpan={availableRoles.length + 1} className="p-8 text-center text-slate-400">
+                          No permissions match search query or category filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      (Object.entries(permissionsByCategory) as [string, PermissionDefinition[]][]).map(([category, perms]) => (
+                        <React.Fragment key={category}>
+                          {/* Category Subheader Row */}
+                          <tr className="bg-slate-50 dark:bg-slate-800/40 font-bold text-[11px] uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                            <td colSpan={availableRoles.length + 1} className="px-3 py-2 border-y border-slate-200 dark:border-slate-800">
+                              <div className="flex items-center gap-2">
+                                <Shield className="w-3.5 h-3.5 text-sky-600" />
+                                <span>{category} ({perms.length} capabilities)</span>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Permission Rows */}
+                          {perms.map((p) => (
+                            <tr key={p.key} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition">
+                              <td className="p-3 sticky left-0 z-10 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
+                                <div className="space-y-0.5">
+                                  <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                    <span>{p.label}</span>
+                                    <span className="font-mono text-[10px] text-slate-400 font-normal">({p.key})</span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
+                                </div>
+                              </td>
+
+                              {availableRoles.map((role) => {
+                                const isGranted = authService.getRolePermissions(role).includes(p.key);
+                                return (
+                                  <td
+                                    key={role}
+                                    onClick={() => handleToggleCellGrid(role, p.key)}
+                                    className={`p-2.5 text-center border-l border-slate-200 dark:border-slate-800 select-none ${
+                                      isSuperAdmin ? 'cursor-pointer hover:bg-sky-50 dark:hover:bg-sky-950/30' : 'cursor-default'
+                                    }`}
+                                    title={
+                                      isSuperAdmin
+                                        ? `Click to ${isGranted ? 'revoke' : 'grant'} ${p.label} for ${role}`
+                                        : `${p.label} is ${isGranted ? 'ENABLED' : 'DISABLED'} for ${role}`
+                                    }
+                                  >
+                                    <div className="flex justify-center items-center">
+                                      {isGranted ? (
+                                        <span className="inline-flex items-center justify-center p-1 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center justify-center p-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600">
+                                          <Square className="w-3.5 h-3.5" />
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* MODE 2: SINGLE ROLE INSPECTOR VIEW */}
+          {matrixViewMode === 'INSPECTOR' && (
+            <div className="space-y-5">
+              {/* Role Selection & Batch Copy Bar */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-sm text-slate-900 dark:text-white">
+                      {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                      {rolePermissions.length} / {PERMISSION_DEFINITIONS.length} Active ({Math.round((rolePermissions.length / PERMISSION_DEFINITIONS.length) * 100)}%)
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    {ROLE_DESCRIPTIONS[selectedRoleForMatrix].description}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto shrink-0">
+                  <select
+                    value={selectedRoleForMatrix}
+                    onChange={(e) => setSelectedRoleForMatrix(e.target.value as Role)}
+                    className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-hidden text-slate-900 dark:text-white"
+                  >
+                    {availableRoles.map((r) => (
+                      <option key={r} value={r}>
+                        Inspect Role: {ROLE_DESCRIPTIONS[r].title} ({r})
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Copy Permissions Dropdown */}
+                  {isSuperAdmin && (
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) handleCopyPermissionsFromRole(e.target.value as Role);
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-hidden text-slate-700 dark:text-slate-300"
+                    >
+                      <option value="">Clone Permissions From Role...</option>
+                      {availableRoles
+                        .filter((r) => r !== selectedRoleForMatrix)
+                        .map((r) => (
+                          <option key={r} value={r}>
+                            Copy from {ROLE_DESCRIPTIONS[r].title}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Permission Categories Accordion Cards */}
+              <div className="space-y-4">
+                {(Object.entries(permissionsByCategory) as [string, PermissionDefinition[]][]).map(([category, perms]) => {
+                  const activeInCat = perms.filter((p) => rolePermissions.includes(p.key)).length;
+                  const allActive = activeInCat === perms.length;
+
+                  return (
+                    <div
+                      key={category}
+                      className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-2xs"
+                    >
+                      <div className="px-4 py-2.5 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                        <span className="font-bold text-xs text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                          <Shield className="w-3.5 h-3.5 text-sky-600" />
+                          <span>{category} ({activeInCat}/{perms.length})</span>
+                        </span>
+
+                        {isSuperAdmin && (
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => handleGrantCategory(category)}
+                              className="text-sky-600 dark:text-sky-400 hover:underline font-bold cursor-pointer"
+                            >
+                              Grant All in Category
+                            </button>
+                            <span className="text-slate-300">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeCategory(category)}
+                              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
+                            >
+                              Revoke Category
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        {perms.map((p) => {
+                          const isGranted = rolePermissions.includes(p.key);
+                          return (
+                            <div
+                              key={p.key}
+                              onClick={() => handleToggleRolePermission(p.key)}
+                              className={`p-2.5 rounded-lg border transition flex items-start gap-2.5 ${
+                                isSuperAdmin ? 'cursor-pointer hover:border-sky-400' : 'cursor-default'
+                              } ${
+                                isGranted
+                                  ? 'bg-sky-50/60 dark:bg-sky-950/20 border-sky-300 dark:border-sky-800'
+                                  : 'border-slate-200 dark:border-slate-800/80 opacity-60'
+                              }`}
+                            >
+                              <div className="mt-0.5">
+                                {isGranted ? (
+                                  <CheckSquare className="w-4 h-4 text-sky-600 shrink-0" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                                )}
+                              </div>
+                              <div className="space-y-0.5">
+                                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <span>{p.label}</span>
+                                  <span className="font-mono text-[10px] text-slate-400 font-normal">({p.key})</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 leading-snug">{p.description}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Save Role Permissions Footer */}
+              {isSuperAdmin && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  {matrixSaveSuccess ? (
+                    <span className="text-emerald-600 font-bold flex items-center gap-1 text-xs">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Role permissions updated successfully!</span>
+                    </span>
+                  ) : <span />}
+
+                  <button
+                    type="button"
+                    onClick={handleSaveRolePermissions}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md cursor-pointer transition"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title} Permissions</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -248,7 +248,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'facility.manage',
   ],
   IT_OFFICER: [
-    'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.resolve',
+    'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close',
     'assets.view', 'assets.create', 'assets.update',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
     'incidents.view', 'incidents.create', 'incidents.update', 'incidents.close',
