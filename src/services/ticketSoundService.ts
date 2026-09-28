@@ -505,18 +505,28 @@ class SystemNotificationRingService {
     unclosedCount: number;
     unclosedTickets: Ticket[];
   }> {
-    if (!this.isItOrSuperAdmin(currentUser)) {
-      return { ringTriggered: false, unclosedCount: 0, unclosedTickets: [] };
-    }
-
     const intervalMinutes = this.getConfiguredReNotificationMinutes();
     const ringDurationSeconds = this.getConfiguredRingDurationSeconds();
     const allTickets = await ticketService.getTickets();
 
     // Unclosed tickets = status NOT 'Closed' and NOT 'Resolved'
-    const unclosedTickets = allTickets.filter(
+    let unclosedTickets = allTickets.filter(
       (t) => t.status !== 'Closed' && t.status !== 'Resolved'
     );
+
+    // If currentUser is non-IT staff, filter for tickets reported by or assigned to them or in their department
+    if (currentUser && !this.isItOrSuperAdmin(currentUser)) {
+      unclosedTickets = unclosedTickets.filter(
+        (t) =>
+          t.reportedBy?.uid === currentUser.id ||
+          t.assignedTo?.uid === currentUser.id ||
+          (t.department && currentUser.department && t.department.toLowerCase() === currentUser.department.toLowerCase())
+      );
+    }
+
+    if (unclosedTickets.length === 0) {
+      return { ringTriggered: false, unclosedCount: 0, unclosedTickets: [] };
+    }
 
     const now = Date.now();
     const intervalMs = intervalMinutes * 60 * 1000;
@@ -527,10 +537,10 @@ class SystemNotificationRingService {
 
     for (const ticket of unclosedTickets) {
       const ticketCreatedTime = new Date(ticket.createdAt).getTime();
-      const lastRingTime = lastRings[ticket.id] || ticketCreatedTime;
+      const lastRingTime = lastRings[ticket.id];
 
-      // If ticket has been unclosed for at least the configured interval since last bell ring
-      if (now - lastRingTime >= intervalMs) {
+      // If ticket has been unclosed for at least the configured interval since last bell ring, or never rung before
+      if (!lastRingTime || (now - lastRingTime >= intervalMs)) {
         shouldRing = true;
         dueTickets.push(ticket);
         if (ticket.priority === 'Critical') {
@@ -547,7 +557,7 @@ class SystemNotificationRingService {
       // Play bell ringtone with configured duration
       await this.playBellRingtone(criticalFound, ringDurationSeconds);
 
-      // Deliver OS system notification even if app is closed
+      // Deliver OS system notification even if app is closed/minimized
       const ticketListStr = dueTickets
         .slice(0, 3)
         .map((t) => `#${t.ticketNumber}`)
@@ -558,19 +568,19 @@ class SystemNotificationRingService {
         `🔔 ${intervalMinutes}-Min Unresolved Ticket Alert (${dueTickets.length})`,
         {
           body: `Pending unresolved tickets: ${ticketListStr}${extraCount}. Please attend to them!`,
-          tag: 'hitoms-recurring-reminder',
+          tag: `hitoms-recurring-reminder-${now}`,
           requireInteraction: criticalFound,
           vibrate: [300, 100, 300, 100, 600],
         }
       );
 
-      // Post in-app recurring notification alert for IT staff
+      // Post in-app recurring notification alert for IT & staff
       await notificationService.notify(
         `🔔 ${intervalMinutes}-Min Unresolved Ticket Alert (${dueTickets.length})`,
         `The following ticket(s) have been open for over ${intervalMinutes} minutes without being resolved: ${ticketListStr}${extraCount}. Please review!`,
         criticalFound ? 'error' : 'warning',
         'Tickets',
-        'ALL'
+        currentUser ? currentUser.id : 'ALL'
       );
     }
 
@@ -594,16 +604,21 @@ class SystemNotificationRingService {
   public startRecurringBellMonitor(getCurrentUser: () => User | null, onRefresh?: () => void): void {
     if (this.intervalId !== null) return;
 
-    // Check every 30 seconds for tickets crossing the threshold
-    this.intervalId = window.setInterval(async () => {
+    const runCheck = async () => {
       const user = getCurrentUser();
-      if (this.isItOrSuperAdmin(user)) {
-        const res = await this.evaluateRecurringTicketAlerts(user);
-        if (res.ringTriggered && onRefresh) {
-          onRefresh();
-        }
+      const res = await this.evaluateRecurringTicketAlerts(user);
+      if (res.ringTriggered && onRefresh) {
+        onRefresh();
       }
-    }, 30000);
+    };
+
+    // Trigger immediate check after startup
+    setTimeout(() => {
+      runCheck().catch((e) => console.warn('[TicketSoundService] Startup re-notification check notice:', e));
+    }, 2000);
+
+    // Check every 30 seconds for tickets crossing the threshold
+    this.intervalId = window.setInterval(runCheck, 30000);
   }
 
   /**

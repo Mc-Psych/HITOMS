@@ -558,23 +558,59 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     [zoomLevel]
   );
 
-  // Center canvas viewport on devices
+  // Center canvas viewport on devices (mobile & desktop)
   const centerCanvasView = useCallback(() => {
     if (!containerRef.current || devices.length === 0) return;
     const currentPositions = positionsRef.current;
     const devPositions = devices.map((d) => currentPositions[d.id] || { x: 400, y: 300 });
-    const avgX = devPositions.reduce((acc, p) => acc + p.x, 0) / devPositions.length;
-    const avgY = devPositions.reduce((acc, p) => acc + p.y, 0) / devPositions.length;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    devPositions.forEach((p) => {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    });
+
+    const centerX = (minX + maxX) / 2 + NODE_WIDTH / 2;
+    const centerY = (minY + maxY) / 2 + NODE_HEIGHT / 2;
 
     const viewportW = containerRef.current.clientWidth;
     const viewportH = containerRef.current.clientHeight;
 
+    const targetLeft = Math.max(0, centerX * zoomLevel - viewportW / 2);
+    const targetTop = Math.max(0, centerY * zoomLevel - viewportH / 2);
+
     containerRef.current.scrollTo({
-      left: Math.max(0, avgX * zoomLevel - viewportW / 2 + (NODE_WIDTH * zoomLevel) / 2),
-      top: Math.max(0, avgY * zoomLevel - viewportH / 2 + (NODE_HEIGHT * zoomLevel) / 2),
+      left: targetLeft,
+      top: targetTop,
       behavior: 'smooth',
     });
   }, [devices, zoomLevel]);
+
+  // Auto-center canvas on initial load, mobile layout mount, and screen resize
+  useEffect(() => {
+    if (devices.length > 0) {
+      const t1 = setTimeout(() => centerCanvasView(), 150);
+      const t2 = setTimeout(() => centerCanvasView(), 600);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [devices.length, centerCanvasView]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      centerCanvasView();
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, [centerCanvasView]);
 
   // Canvas Mouse Down: Starts Canvas Panning OR Marquee Box Selection on background
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
