@@ -488,6 +488,14 @@ class TicketService {
     });
 
     await syncService.enqueueOperation('tickets', ticket.id, 'UPDATE', ticket);
+
+    // Trigger bell ring sound & notification when a comment is written on a ticket
+    try {
+      await ticketSoundService.ringTicketCommentAlert(ticket, commentText, user);
+    } catch (e) {
+      console.warn('[TicketService] Failed to ring comment alert:', e);
+    }
+
     return ticket;
   }
 

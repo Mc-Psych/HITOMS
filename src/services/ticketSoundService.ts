@@ -338,6 +338,82 @@ class SystemNotificationRingService {
   }
 
   /**
+   * Trigger bell ring alert and notification when an assigned staff / user writes a comment on a ticket
+   */
+  public async ringTicketCommentAlert(
+    ticket: Ticket,
+    commentText: string,
+    author: User
+  ): Promise<void> {
+    // 1. Play bell chime sound tone
+    await this.playBellRingtone(ticket.priority === 'Critical', 3);
+
+    // 2. Identify target recipients (reporter who logged ticket + assigned technician)
+    const notificationTitle = `💬 Comment on Ticket #${ticket.ticketNumber}`;
+    const snippet = commentText.length > 90 ? commentText.slice(0, 90) + '...' : commentText;
+    const notificationBody = `${author.fullName}: "${snippet}"`;
+
+    // Notify ticket reporter (staff user who logged the ticket)
+    if (ticket.reportedBy?.uid && ticket.reportedBy.uid !== author.id) {
+      await notificationService.notify(
+        notificationTitle,
+        notificationBody,
+        'info',
+        'Tickets',
+        ticket.reportedBy.uid,
+        ticket.id
+      );
+    }
+
+    // Notify assigned officer if different from author
+    if (ticket.assignedTo?.uid && ticket.assignedTo.uid !== author.id) {
+      await notificationService.notify(
+        notificationTitle,
+        notificationBody,
+        'info',
+        'Tickets',
+        ticket.assignedTo.uid,
+        ticket.id
+      );
+    }
+
+    // If author is general staff, also broadcast notification to IT team
+    if (author.role === 'STAFF_USER' || author.role === 'DEPARTMENT_HEAD') {
+      await notificationService.notify(
+        notificationTitle,
+        notificationBody,
+        'info',
+        'Tickets',
+        'ALL',
+        ticket.id
+      );
+    }
+
+    // 3. Trigger native OS System Notification (rings bell/vibrates even if app is minimized)
+    await this.showSystemNotification(`💬 Ticket #${ticket.ticketNumber} Comment`, {
+      body: `${author.fullName}: "${snippet}"`,
+      tag: `ticket-comment-${ticket.id}-${Date.now()}`,
+      requireInteraction: false,
+      vibrate: [200, 100, 200],
+    });
+
+    // 4. Broadcast across open tabs
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({
+          type: 'RING_TICKET_BELL',
+          ticketNumber: ticket.ticketNumber,
+          title: `Comment by ${author.fullName}`,
+          priority: ticket.priority,
+          reason: 'COMMENT_ADDED',
+        });
+      } catch (e) {
+        console.warn('[TicketSoundService] Broadcast error:', e);
+      }
+    }
+  }
+
+  /**
    * Trigger notification ring when a new ticket is submitted or updated
    */
   public async ringNewTicketAlert(ticket: Ticket, currentUser: User | null): Promise<void> {

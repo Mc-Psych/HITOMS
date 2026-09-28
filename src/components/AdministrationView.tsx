@@ -17,6 +17,7 @@ import {
   Sparkles,
   Plus,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import {
   type User as UserType,
@@ -156,6 +157,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         return s;
       })
     );
+  };
+
+  const handleRemoveOfficerFromMonth = (officerId: string) => {
+    setMonthlySpecialties((prev) => prev.filter((s) => s.userId !== officerId));
   };
 
   const handleAddOfficerToMonth = () => {
@@ -1221,6 +1226,14 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                           className="px-3 py-1 rounded-lg border text-xs font-semibold cursor-pointer border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                         >
                           {officer.isActive ? 'Mark Inactive' : 'Activate'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOfficerFromMonth(officer.userId)}
+                          className="p-1 rounded-lg border text-xs font-semibold cursor-pointer border-rose-200 dark:border-rose-900/60 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                          title="Remove officer from monthly roster"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

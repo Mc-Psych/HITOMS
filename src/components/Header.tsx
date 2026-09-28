@@ -265,54 +265,6 @@ export const Header: React.FC<HeaderProps> = ({
                   )}
                 </div>
 
-                {/* IT Bell Sound & 30-Min Reminder Control Panel */}
-                {ticketSoundService.isItOrSuperAdmin(currentUser) && (
-                  <div className="my-2 p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-center justify-between text-xs text-indigo-200">
-                    <div className="flex items-center gap-2">
-                      <Bell className="w-4 h-4 text-amber-400 animate-bounce" />
-                      <div>
-                        <div className="font-bold text-[11px] text-indigo-100">
-                          IT Helpdesk Bell Ringer
-                        </div>
-                        <div className="text-[10px] text-indigo-300">
-                          Rings on new tickets & every 30m if unclosed
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        disabled={true}
-                        className="px-2 py-1 bg-slate-700 text-slate-400 font-bold text-[10px] rounded-lg transition cursor-not-allowed opacity-50 shadow-xs"
-                        title="Test Bell button disabled"
-                      >
-                        Test Bell
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentMuted = ticketSoundService.isMuted();
-                          ticketSoundService.setMuted(!currentMuted);
-                          setNotifications([...notifications]); // trigger re-render
-                        }}
-                        className={`p-1 rounded-lg border transition cursor-pointer ${
-                          ticketSoundService.isMuted()
-                            ? 'bg-rose-950/60 border-rose-500/50 text-rose-300'
-                            : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
-                        }`}
-                        title={ticketSoundService.isMuted() ? 'Bell Sound Muted - Click to Unmute' : 'Bell Sound Active - Click to Mute'}
-                      >
-                        {ticketSoundService.isMuted() ? (
-                          <VolumeX className="w-3.5 h-3.5" />
-                        ) : (
-                          <Volume2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
                 <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
                   {notifications.length === 0 ? (
                     <p className="text-xs text-slate-500 py-4 text-center">No notifications</p>

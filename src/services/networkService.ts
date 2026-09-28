@@ -517,8 +517,11 @@ class NetworkService {
           canvasX: pos.canvasX,
           canvasY: pos.canvasY,
           updatedAt: now,
+          _syncStatus: 'PENDING_SYNC',
+          _syncVersion: (dev._syncVersion || 1) + 1,
         };
         await putToStore('networkDevices', updated);
+        await syncService.enqueueOperation('networkDevices', pos.id, 'UPDATE', updated);
       }
     }
   }

@@ -272,6 +272,11 @@ class SyncService {
               new CustomEvent('hitoms_users_synced', { detail: { count: itemsToSave.length } })
             );
           }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('hitoms_data_synced', { detail: { storeName, count: itemsToSave.length } })
+            );
+          }
         } finally {
           setSkipSyncEnqueue(false);
         }
@@ -421,6 +426,9 @@ class SyncService {
           { col: 'incidents', store: 'incidents' },
           { col: 'memos', store: 'memos' },
           { col: 'settings', store: 'settings' },
+          { col: 'networkDevices', store: 'networkDevices' },
+          { col: 'networkIncidents', store: 'networkIncidents' },
+          { col: 'departments', store: 'departments' },
         ];
 
         // Process in parallel with fast timeouts

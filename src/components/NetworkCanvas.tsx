@@ -790,12 +790,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         });
 
         if (updatesToSave.length > 0) {
-          await networkService.updatePositions(updatesToSave);
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setLastSavedAt(timeStr);
-          setHasUnsavedChanges(false);
-          onRefresh();
-          showToast(`Saved new layout position for ${updatesToSave.length} device(s)`);
+          setHasUnsavedChanges(true);
         }
       }
     }
@@ -831,21 +826,15 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   }, [isMarqueeDragging]);
 
   // Apply Strict Hierarchical Predecessor-Successor Order (Default Layout)
-  const applyHierarchicalLayout = async () => {
+  const applyHierarchicalLayout = () => {
     const hierarchical = computeHierarchicalOrder(devices);
     setPositions(hierarchical);
-    const updates = (Object.entries(hierarchical) as [string, Point][]).map(([id, p]) => ({
-      id,
-      canvasX: p.x,
-      canvasY: p.y,
-    }));
-    await networkService.updatePositions(updates);
-    showToast('Arranged devices according to predecessor-successor hierarchy');
-    onRefresh();
+    setHasUnsavedChanges(true);
+    showToast('Arranged devices according to predecessor-successor hierarchy (Unsaved)');
   };
 
   // Preset Star Radial Layout
-  const applyStarLayout = async () => {
+  const applyStarLayout = () => {
     const hub =
       devices.find((d) => d.deviceType === 'Core Switch') ||
       devices.find((d) => d.deviceType === 'Router') ||
@@ -869,18 +858,12 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     });
 
     setPositions(nextPositions);
-    const updates = (Object.entries(nextPositions) as [string, Point][]).map(([id, p]) => ({
-      id,
-      canvasX: p.x,
-      canvasY: p.y,
-    }));
-    await networkService.updatePositions(updates);
-    showToast('Applied Star & Radial Hub Topology Layout');
-    onRefresh();
+    setHasUnsavedChanges(true);
+    showToast('Applied Star & Radial Hub Topology Layout (Unsaved)');
   };
 
   // Preset Grid Layout
-  const applyGridLayout = async () => {
+  const applyGridLayout = () => {
     const cols = 4;
     const spacingX = 290;
     const spacingY = 160;
@@ -898,58 +881,48 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     });
 
     setPositions(nextPositions);
-    const updates = (Object.entries(nextPositions) as [string, Point][]).map(([id, p]) => ({
-      id,
-      canvasX: p.x,
-      canvasY: p.y,
-    }));
-    await networkService.updatePositions(updates);
-    showToast('Arranged nodes in structured grid');
-    onRefresh();
+    setHasUnsavedChanges(true);
+    showToast('Arranged nodes in structured grid (Unsaved)');
   };
 
   // Bulk Alignment Tools for Selected Devices
-  const handleAlignSelectedHorizontally = async () => {
+  const handleAlignSelectedHorizontally = () => {
     if (selectedDeviceIds.size <= 1) return;
     const selectedList = Array.from(selectedDeviceIds) as string[];
     const firstY = positions[selectedList[0]]?.y ?? 100;
 
     const next = { ...positions };
-    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
 
     selectedList.forEach((id: string) => {
       if (next[id]) {
         next[id] = { ...next[id], y: firstY };
-        updates.push({ id, canvasX: next[id].x, canvasY: firstY });
       }
     });
 
     setPositions(next);
-    await networkService.updatePositions(updates);
-    showToast(`Aligned ${selectedDeviceIds.size} devices horizontally`);
+    setHasUnsavedChanges(true);
+    showToast(`Aligned ${selectedDeviceIds.size} devices horizontally (Unsaved)`);
   };
 
-  const handleAlignSelectedVertically = async () => {
+  const handleAlignSelectedVertically = () => {
     if (selectedDeviceIds.size <= 1) return;
     const selectedList = Array.from(selectedDeviceIds) as string[];
     const firstX = positions[selectedList[0]]?.x ?? 100;
 
     const next = { ...positions };
-    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
 
     selectedList.forEach((id: string) => {
       if (next[id]) {
         next[id] = { ...next[id], x: firstX };
-        updates.push({ id, canvasX: firstX, canvasY: next[id].y });
       }
     });
 
     setPositions(next);
-    await networkService.updatePositions(updates);
-    showToast(`Aligned ${selectedDeviceIds.size} devices vertically`);
+    setHasUnsavedChanges(true);
+    showToast(`Aligned ${selectedDeviceIds.size} devices vertically (Unsaved)`);
   };
 
-  const handleDistributeSelectedHorizontally = async () => {
+  const handleDistributeSelectedHorizontally = () => {
     if (selectedDeviceIds.size <= 2) return;
     const selectedList = (Array.from(selectedDeviceIds) as string[]).sort(
       (a: string, b: string) => (positions[a]?.x || 0) - (positions[b]?.x || 0)
@@ -960,19 +933,17 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     const step = (lastX - firstX) / (selectedList.length - 1);
 
     const next = { ...positions };
-    const updates: { id: string; canvasX: number; canvasY: number }[] = [];
 
     selectedList.forEach((id: string, idx: number) => {
       if (next[id]) {
         const newX = Math.round((firstX + idx * step) / 20) * 20;
         next[id] = { ...next[id], x: newX };
-        updates.push({ id, canvasX: newX, canvasY: next[id].y });
       }
     });
 
     setPositions(next);
-    await networkService.updatePositions(updates);
-    showToast(`Distributed ${selectedDeviceIds.size} devices evenly`);
+    setHasUnsavedChanges(true);
+    showToast(`Distributed ${selectedDeviceIds.size} devices evenly (Unsaved)`);
   };
 
   const handleSelectAll = () => {

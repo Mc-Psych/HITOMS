@@ -39,30 +39,23 @@ export function formatMonthName(monthKey: string): string {
 export function getDefaultSpecialtiesForMonth(monthKey: string): OfficerMonthlySpecialty[] {
   return [
     {
-      id: `spec-${monthKey}-officer-003`,
-      userId: 'usr-officer-003',
-      userName: 'Daniel Owusu',
-      month: monthKey,
-      specialties: ['Network', 'Internet'],
-      notes: 'Officer 1: Monthly Networking & Starlink Connectivity Lead',
-      isActive: true,
-    },
-    {
-      id: `spec-${monthKey}-itadmin-002`,
-      userId: 'usr-itadmin-002',
-      userName: 'Emmanuel Boateng',
-      month: monthKey,
-      specialties: ['Hardware', 'Printer'],
-      notes: 'Monthly Hardware, Workstations & Thermal Printers Specialist',
-      isActive: true,
-    },
-    {
       id: `spec-${monthKey}-admin-001`,
       userId: 'usr-admin-001',
       userName: 'Courage Kay',
       month: monthKey,
-      specialties: ['Hospital System', 'Software', 'Server', 'Security'],
-      notes: 'Super Admin: Clinical EMR / LHIMS, Server & Cyber Systems Lead',
+      specialties: [
+        'Network',
+        'Internet',
+        'Hardware',
+        'Printer',
+        'Software',
+        'Hospital System',
+        'Server',
+        'Security',
+        'Account/Login',
+        'Email',
+      ],
+      notes: 'Super Admin: Clinical EMR / LHIMS, Infrastructure & Cyber Systems Lead',
       isActive: true,
     },
   ];
@@ -75,7 +68,14 @@ class OfficerSpecialtyService {
   public async getAllMonthlySpecialties(): Promise<OfficerMonthlySpecialty[]> {
     const settings = await settingsService.getSettings();
     if (settings.officerMonthlySpecialties && settings.officerMonthlySpecialties.length > 0) {
-      return settings.officerMonthlySpecialties;
+      const filtered = settings.officerMonthlySpecialties.filter(
+        (s) =>
+          !s.userName.toLowerCase().includes('daniel owusu') &&
+          !s.userName.toLowerCase().includes('emmanuel boateng') &&
+          s.userId !== 'usr-officer-003' &&
+          s.userId !== 'usr-itadmin-002'
+      );
+      return filtered;
     }
     // Return default for current month
     const currentMonth = getCurrentMonthKey();
