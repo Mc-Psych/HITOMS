@@ -17,6 +17,8 @@ import {
   Wrench,
   AlertOctagon,
   Power,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import {
   type HospitalSystem,
@@ -105,6 +107,43 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
     }
   };
 
+  const handleMoveSystemOrder = async (sys: HospitalSystem, direction: 'UP' | 'DOWN') => {
+    if (!isSuperAdminOrIT) return;
+    const sorted = [...systems].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+    const currentIndex = sorted.findIndex((s) => s.id === sys.id);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === 'UP' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= sorted.length) return;
+
+    // Swap positions
+    const temp = sorted[currentIndex];
+    sorted[currentIndex] = sorted[targetIndex];
+    sorted[targetIndex] = temp;
+
+    // Assign explicit sequential displayOrder indices (0, 1, 2, 3...)
+    const now = new Date().toISOString();
+    for (let i = 0; i < sorted.length; i++) {
+      const itemToSave = {
+        ...sorted[i],
+        displayOrder: i,
+        updatedAt: now,
+        _syncStatus: 'PENDING_SYNC',
+      };
+      await putToStore('hospitalSystems', itemToSave);
+    }
+
+    await auditService.logAction(
+      'REARRANGE_CORE_SERVICES',
+      'Hospital Systems',
+      sys.id,
+      null,
+      `Rearranged ${sys.systemName} position (${direction})`
+    );
+
+    onRefresh();
+  };
+
   const handleOpenEdit = (sys: HospitalSystem) => {
     setEditingSystem(sys);
     setIsEditModalOpen(true);
@@ -115,7 +154,9 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const filteredSystems = systems.filter((sys) => {
+  const sortedSystems = [...systems].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+  const filteredSystems = sortedSystems.filter((sys) => {
     if (filterStatus === 'ALL') return true;
     return sys.status === filterStatus;
   });
@@ -249,13 +290,31 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
                     </span>
 
                     {isSuperAdminOrIT && (
-                      <button
-                        onClick={() => handleOpenEdit(sys)}
-                        className="p-1 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer"
-                        title="Edit System Status & Configuration"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                          <button
+                            onClick={() => handleMoveSystemOrder(sys, 'UP')}
+                            className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
+                            title="Move Service Order Up"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleMoveSystemOrder(sys, 'DOWN')}
+                            className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
+                            title="Move Service Order Down"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => handleOpenEdit(sys)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                          title="Edit System Status & Configuration"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

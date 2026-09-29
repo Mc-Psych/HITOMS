@@ -526,6 +526,7 @@ export default function App() {
                 systemSettings={systemSettings}
                 onNavigate={setCurrentView}
                 onOpenCreateTicket={() => setQuickTicketOpen(true)}
+                onRefresh={refreshAllData}
               />
             )}
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ShieldAlert, AlertTriangle, Radio, X, Check, ExternalLink, Volume2, ShieldCheck } from 'lucide-react';
+import { ShieldAlert, Radio, Volume2, ShieldCheck, Lock } from 'lucide-react';
 import { type EmergencyBroadcastAlert, type User } from '../types';
 import { emergencyService } from '../services/emergencyService';
+import { authService } from '../services/authService';
 
 interface EmergencyBroadcastBannerProps {
   alerts: EmergencyBroadcastAlert[];
@@ -21,22 +22,24 @@ export const EmergencyBroadcastBanner: React.FC<EmergencyBroadcastBannerProps> =
 
   if (activeAlerts.length === 0) return null;
 
-  const currentAlert = activeAlerts.find((a) => !dismissedLocally[a.id]);
+  // Super Admin and IT unit staff have authority to resolve the broadcast
+  const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+
+  // Staff cannot dismiss or close the broadcast banner locally
+  const currentAlert = activeAlerts.find((a) => isSuperAdminOrIT ? !dismissedLocally[a.id] : true);
   if (!currentAlert) return null;
 
-  const isUserAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'IT_ADMIN' || currentUser?.role === 'DEPARTMENT_HEAD';
-
-  const handleAcknowledge = async () => {
-    if (currentUser) {
-      await emergencyService.acknowledgeAlert(currentAlert.id, currentUser.id);
+  const handleResolve = async () => {
+    if (currentUser && isSuperAdminOrIT) {
+      await emergencyService.resolveBroadcast(currentAlert.id, currentUser);
+      onRefresh();
     }
-    setDismissedLocally((prev) => ({ ...prev, [currentAlert.id]: true }));
-    onRefresh();
   };
 
-  const handleResolve = async () => {
-    if (currentUser && isUserAdmin) {
-      await emergencyService.resolveBroadcast(currentAlert.id, currentUser);
+  const handleAcknowledgeITOnly = async () => {
+    if (currentUser && isSuperAdminOrIT) {
+      await emergencyService.acknowledgeAlert(currentAlert.id, currentUser.id);
+      setDismissedLocally((prev) => ({ ...prev, [currentAlert.id]: true }));
       onRefresh();
     }
   };
@@ -113,26 +116,24 @@ export const EmergencyBroadcastBanner: React.FC<EmergencyBroadcastBannerProps> =
             <span>Emergency IT Center</span>
           </button>
 
-          {isUserAdmin && (
-            <button
-              type="button"
-              onClick={handleResolve}
-              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-xs"
-              title="Mark Emergency Alert as Resolved"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-white" />
-              <span>Resolve Alert</span>
-            </button>
+          {isSuperAdminOrIT ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleResolve}
+                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-sm border border-emerald-400/50"
+                title="Mark Emergency Alert as Resolved (Ends Broadcast System-Wide)"
+              >
+                <ShieldCheck className="w-4 h-4 text-white" />
+                <span>Resolve Alert</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-rose-900/80 border border-rose-500/60 px-2.5 py-1 rounded-lg text-rose-100 text-[10px] font-bold shadow-xs">
+              <Lock className="w-3.5 h-3.5 text-rose-300 shrink-0" />
+              <span>MANDATORY BROADCAST — ACTIVE UNTIL IT RESOLUTION</span>
+            </div>
           )}
-
-          <button
-            type="button"
-            onClick={handleAcknowledge}
-            className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
-            title="Acknowledge & Hide Banner"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </div>

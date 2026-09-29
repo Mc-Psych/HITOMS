@@ -46,6 +46,10 @@ import {
   type Asset,
   type AiTriageResult,
 } from '../types';
+import {
+  analyzeTicketPriority,
+  formatResolutionInterval,
+} from '../utils/ticketPriorityAnalyzer';
 import { ticketService } from '../services/ticketService';
 import { aiTriageService } from '../services/aiTriageService';
 import { extractSurname } from '../services/authService';
@@ -400,12 +404,15 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
     setIsSubmitting(true);
     try {
+      // Analyze text to automatically assign priority based on clinical impact keywords
+      const autoAnalysis = analyzeTicketPriority(title.trim(), description.trim(), category);
+
       await ticketService.createTicket(
         {
           title: title.trim(),
           description: description.trim(),
           category,
-          priority,
+          priority: autoAnalysis.priority,
           department,
           location,
           isGeneralIssue,
@@ -1738,17 +1745,35 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Priority *</label>
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value as TicketPriority)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  >
-                    <option value="Low">Low (Non-clinical)</option>
-                    <option value="Medium">Medium (General)</option>
-                    <option value="High">High (Clinical Delay)</option>
-                    <option value="Critical">Critical (Immediate Patient Care Impact)</option>
-                  </select>
+                  <label className="block text-slate-500 font-semibold mb-1">Automated Priority Triage</label>
+                  {(() => {
+                    const previewAnalysis = analyzeTicketPriority(title, description, category);
+                    return (
+                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`px-2.5 py-0.5 rounded text-xs font-bold ${
+                              previewAnalysis.priority === 'Critical'
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 ring-1 ring-rose-500/50'
+                                : previewAnalysis.priority === 'High'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                : previewAnalysis.priority === 'Medium'
+                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                : 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {previewAnalysis.priority} Priority
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Auto-Assigned
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-tight">
+                          {previewAnalysis.reason}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

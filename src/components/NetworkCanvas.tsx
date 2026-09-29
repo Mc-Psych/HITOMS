@@ -497,6 +497,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSavingTopology, setIsSavingTopology] = useState(false);
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState(false);
   const [isExporting, setIsExporting] = useState<'pdf' | 'jpeg' | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -1619,7 +1620,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           {canManage && (
             <button
-              onClick={handleManualSaveTopology}
+              onClick={() => setShowSaveConfirmModal(true)}
               disabled={isSavingTopology}
               title="Save current layout positions and topology configuration"
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer ${
@@ -1668,32 +1669,6 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             </button>
           </div>
 
-          {/* Auto Layout Dropdown */}
-          <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700">
-            <button
-              onClick={applyHierarchicalLayout}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-sky-300 hover:text-white rounded-lg cursor-pointer"
-              title="Arrange in Hierarchical Tree"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-              <span>Hierarchy</span>
-            </button>
-            <button
-              onClick={applyStarLayout}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-slate-300 hover:text-white rounded-lg cursor-pointer"
-              title="Arrange in Radial Star Hub"
-            >
-              <span>Star</span>
-            </button>
-            <button
-              onClick={applyGridLayout}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-slate-300 hover:text-white rounded-lg cursor-pointer"
-              title="Arrange in Grid Matrix"
-            >
-              <span>Grid</span>
-            </button>
-          </div>
-
           {/* Grid Snap Toggle */}
           <button
             onClick={() => setSnapToGrid(!snapToGrid)}
@@ -1734,6 +1709,18 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* Add Node Button (Small button after zoom) */}
+          {canManage && (
+            <button
+              onClick={() => onAddDevice?.()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs active:scale-95 shrink-0"
+              title="Add New Network Device Node"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Node</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -2600,6 +2587,59 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                 className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
               >
                 Got It
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Topology Confirmation Modal */}
+      {showSaveConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 text-slate-200 space-y-4">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-400">
+                <Save className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Confirm Save Topology Layout
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Update canvas node coordinates in database
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to save the current device coordinates and layout positions to the system database?
+              <br /><br />
+              <span className="text-slate-400">
+                This will save the position of <strong>{devices.length}</strong> network nodes for all operators.
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setShowSaveConfirmModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowSaveConfirmModal(false);
+                  handleManualSaveTopology();
+                }}
+                disabled={isSavingTopology}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer transition shadow-md"
+              >
+                {isSavingTopology ? (
+                  <Activity className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                <span>Confirm &amp; Save</span>
               </button>
             </div>
           </div>

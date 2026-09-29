@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldAlert,
   Radio,
@@ -16,9 +16,13 @@ import {
   Lock,
   Flame,
   ShieldCheck,
+  Edit3,
+  Settings,
 } from 'lucide-react';
 import { type EmergencyBroadcastAlert, type User, type Asset, type SystemSettings } from '../types';
-import { emergencyService } from '../services/emergencyService';
+import { emergencyService, type QuickTriggerPreset, DEFAULT_QUICK_TRIGGERS } from '../services/emergencyService';
+import { authService } from '../services/authService';
+import { EditQuickTriggerModal } from './EditQuickTriggerModal';
 
 interface EmergencyProtocolCenterModalProps {
   isOpen: boolean;
@@ -42,6 +46,24 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
   if (!isOpen) return null;
 
   const [activeTab, setActiveTab] = useState<'TRIGGERS' | 'BROADCAST' | 'PRINT_PACK' | 'HISTORY'>('TRIGGERS');
+
+  // Quick Triggers Preset State
+  const [quickTriggers, setQuickTriggers] = useState<QuickTriggerPreset[]>(DEFAULT_QUICK_TRIGGERS);
+  const [editingTrigger, setEditingTrigger] = useState<QuickTriggerPreset | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+
+  const loadQuickTriggers = async () => {
+    const loaded = await emergencyService.getQuickTriggers();
+    setQuickTriggers(loaded);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadQuickTriggers();
+    }
+  }, [isOpen]);
 
   // Custom Broadcast Form State
   const [codeType, setCodeType] = useState<EmergencyBroadcastAlert['codeType']>('CODE_BLUE_IT');
@@ -338,135 +360,101 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
                 </div>
               </div>
 
-              {/* Grid of 4 Emergency Buttons */}
+              {/* Grid of Emergency Trigger Buttons */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 1. CODE BLUE IT */}
-                <div className="p-5 rounded-2xl bg-slate-800/80 border border-rose-500/40 hover:border-rose-500 transition space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-xl bg-rose-600 text-white font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shadow-md">
-                        <Flame className="w-4 h-4" />
-                        <span>CODE BLUE IT</span>
-                      </div>
-                      <span className="text-xs font-bold text-rose-300">ICU / OT Rapid Dispatch</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Dispatches immediate IT engineer rapid response to Intensive Care Units, Emergency Department, or Operating Theaters for patient-monitoring hardware failures.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() =>
-                      handleQuickTrigger(
-                        'CODE_BLUE_IT',
-                        '🚨 CODE BLUE IT: Rapid Response Dispatched to ICU / ER',
-                        'Critical patient monitoring or surgical telemetry system issue reported. On-call IT engineer dispatched immediately.',
-                        'CRITICAL'
-                      )
-                    }
-                    className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
-                  >
-                    <Radio className="w-4 h-4 animate-pulse" />
-                    <span>Dispatch CODE BLUE IT Alert</span>
-                  </button>
-                </div>
+                {quickTriggers.map((trig) => {
+                  const isBlue = trig.codeType === 'CODE_BLUE_IT';
+                  const isSky = trig.codeType === 'EHR_DOWNTIME';
+                  const isAmber = trig.codeType === 'CODE_RED_NETWORK';
+                  const isPurple = trig.codeType === 'CYBER_LOCKDOWN';
 
-                {/* 2. EHR DOWNTIME */}
-                <div className="p-5 rounded-2xl bg-slate-800/80 border border-sky-500/40 hover:border-sky-500 transition space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-xl bg-sky-600 text-white font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shadow-md">
-                        <FileText className="w-4 h-4" />
-                        <span>EHR DOWNTIME</span>
-                      </div>
-                      <span className="text-xs font-bold text-sky-300">Paper Chart Protocol</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Notifies all ward staff to switch to offline paper patient chart logging procedures due to unexpected Electronic Health Record database outage.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() =>
-                      handleQuickTrigger(
-                        'EHR_DOWNTIME',
-                        '🟧 EHR DOWNTIME PROTOCOL ACTIVE: Switch to Paper Charts',
-                        'Electronic Health Record database is undergoing emergency maintenance. Clinical ward staff must switch to offline paper logging procedures.',
-                        'HIGH'
-                      )
-                    }
-                    className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Activate EHR Downtime Protocol</span>
-                  </button>
-                </div>
+                  const colorStyles = isBlue
+                    ? {
+                        border: 'border-rose-500/40 hover:border-rose-500',
+                        badge: 'bg-rose-600 text-white',
+                        text: 'text-rose-300',
+                        btn: 'bg-rose-600 hover:bg-rose-500',
+                        icon: <Flame className="w-4 h-4" />,
+                      }
+                    : isSky
+                    ? {
+                        border: 'border-sky-500/40 hover:border-sky-500',
+                        badge: 'bg-sky-600 text-white',
+                        text: 'text-sky-300',
+                        btn: 'bg-sky-600 hover:bg-sky-500',
+                        icon: <FileText className="w-4 h-4" />,
+                      }
+                    : isAmber
+                    ? {
+                        border: 'border-amber-500/40 hover:border-amber-500',
+                        badge: 'bg-amber-600 text-white',
+                        text: 'text-amber-300',
+                        btn: 'bg-amber-600 hover:bg-amber-500',
+                        icon: <Activity className="w-4 h-4" />,
+                      }
+                    : {
+                        border: 'border-purple-500/40 hover:border-purple-500',
+                        badge: 'bg-purple-600 text-white',
+                        text: 'text-purple-300',
+                        btn: 'bg-purple-600 hover:bg-purple-500',
+                        icon: <Lock className="w-4 h-4" />,
+                      };
 
-                {/* 3. CODE RED NETWORK */}
-                <div className="p-5 rounded-2xl bg-slate-800/80 border border-amber-500/40 hover:border-amber-500 transition space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-xl bg-amber-600 text-white font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shadow-md">
-                        <Activity className="w-4 h-4" />
-                        <span>PACS / NETWORK OUTAGE</span>
-                      </div>
-                      <span className="text-xs font-bold text-amber-300">Radiology Gateway</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Alerts Radiology and ER departments of imaging gateway or core fiber switch failure, redirecting CT/MRI scans to local USB image stores.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() =>
-                      handleQuickTrigger(
-                        'CODE_RED_NETWORK',
-                        '⚠️ PACS Imaging Gateway Network Degradation',
-                        'Radiology PACS server link degraded. Use local DICOM viewer storage for urgent CT / Ultrasound imaging.',
-                        'HIGH'
-                      )
-                    }
-                    className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
-                  >
-                    <Activity className="w-4 h-4" />
-                    <span>Broadcast PACS Outage Alert</span>
-                  </button>
-                </div>
+                  return (
+                    <div
+                      key={trig.id}
+                      className={`p-5 rounded-2xl bg-slate-800/80 border ${colorStyles.border} transition space-y-3 relative`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`p-2 py-1 rounded-xl ${colorStyles.badge} font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shadow-md`}
+                          >
+                            {colorStyles.icon}
+                            <span>{trig.badgeTitle}</span>
+                          </div>
+                          <span className={`text-xs font-bold ${colorStyles.text}`}>
+                            {trig.subTitle}
+                          </span>
+                        </div>
 
-                {/* 4. CYBER LOCKDOWN */}
-                <div className="p-5 rounded-2xl bg-slate-800/80 border border-purple-500/40 hover:border-purple-500 transition space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-xl bg-purple-600 text-white font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shadow-md">
-                        <Lock className="w-4 h-4" />
-                        <span>CYBER LOCKDOWN</span>
+                        {isSuperAdminOrIT && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingTrigger(trig);
+                              setIsEditModalOpen(true);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-700/80 hover:bg-sky-600 text-slate-300 hover:text-white transition cursor-pointer flex items-center gap-1 text-[11px] font-bold border border-slate-600"
+                            title="Edit Quick Emergency Trigger Preset Configuration"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-sky-400" />
+                            <span>Edit Preset</span>
+                          </button>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-purple-300">Security Isolation</span>
+
+                      <p className="text-xs text-slate-300 leading-relaxed">{trig.description}</p>
+
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() =>
+                          handleQuickTrigger(
+                            trig.codeType,
+                            trig.defaultTitle,
+                            trig.defaultMessage,
+                            trig.severity
+                          )
+                        }
+                        className={`w-full py-2.5 px-4 ${colorStyles.btn} disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg`}
+                      >
+                        <Radio className="w-4 h-4 animate-pulse" />
+                        <span>Dispatch {trig.badgeTitle} Alert</span>
+                      </button>
                     </div>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Isolates non-essential subnet VLANs in response to suspected ransomware or unauthorized external network access attempts.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() =>
-                      handleQuickTrigger(
-                        'CYBER_LOCKDOWN',
-                        '🔒 CYBERSECURITY ISOLATION LOCKDOWN IN EFFECT',
-                        'Precautionary VLAN isolation active. Disconnect non-critical external USB devices and log out of external web portals.',
-                        'CRITICAL'
-                      )
-                    }
-                    className="w-full py-2.5 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>Initiate Cyber Lockdown Protocol</span>
-                  </button>
-                </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -664,6 +652,21 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
           </button>
         </div>
       </div>
+
+      {/* Edit Quick Emergency Trigger Preset Modal */}
+      <EditQuickTriggerModal
+        preset={editingTrigger}
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingTrigger(null);
+        }}
+        currentUser={currentUser}
+        onSaveSuccess={async () => {
+          await loadQuickTriggers();
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

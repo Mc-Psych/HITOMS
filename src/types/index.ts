@@ -383,6 +383,7 @@ export interface HospitalSystem extends SyncMetadata {
   leadAdmin?: string;
   vendorSupportHotline?: string;
   notes?: string;
+  displayOrder?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -792,6 +793,7 @@ export interface SystemSettings {
   systemNotificationRingEnabled?: boolean; // Active notification ring for alerts & tickets even if app is closed
   reNotificationIntervalMinutes?: number; // How often recurring bell rings for unresolved tickets (e.g. 5, 10, 15, 30, 45, 60, 120 mins; default: 30)
   ringToneDurationSeconds?: number; // How long audible alarm/chime sounds (e.g. 3, 5, 10, 15, 30, 60 seconds; default: 5)
+  intervalVisibleRoles?: Role[]; // User roles permitted to view ticket turnaround time intervals (controlled by Super Admin / IT)
   emergencyReNotificationMinutes?: number; // How often emergency broadcasts re-alert unacknowledged terminals (default: 15)
   officerMonthlySpecialties?: OfficerMonthlySpecialty[]; // Auto-assignment specialty roster per month
   customTexts?: Record<string, string>;
