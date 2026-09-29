@@ -408,6 +408,20 @@ export async function putBatchToStore<T extends { id?: string; operationId?: str
   });
 }
 
+export async function clearStore(storeName: StoreName): Promise<void> {
+  const db = await getDB();
+  if (!db.objectStoreNames.contains(storeName)) {
+    return;
+  }
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const request = store.clear();
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function deleteFromStore(storeName: StoreName, key: string): Promise<void> {
   recordTombstone(storeName, key);
   const db = await getDB();

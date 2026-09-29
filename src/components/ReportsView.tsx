@@ -188,6 +188,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
+  const handleDeleteAllSampleMemos = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL sample and stored memorandums from the hospital repository? This will clear all default memos.')) return;
+    try {
+      await memoService.deleteAllMemos(currentUser);
+      setMemos([]);
+      setSelectedMemoForDetail(null);
+    } catch (err) {
+      console.error('Failed to delete sample memos:', err);
+    }
+  };
+
+  const handleRestoreSampleMemos = async () => {
+    try {
+      const restored = await memoService.restoreSampleMemos(currentUser);
+      setMemos(restored);
+    } catch (err) {
+      console.error('Failed to restore sample memos:', err);
+    }
+  };
+
   const handleSavedMemo = (saved: HospitalMemo) => {
     setMemos((prev) => {
       const index = prev.findIndex((m) => m.id === saved.id);
@@ -340,6 +360,28 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
 
         {isITUser && (
           <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
+            {memos.length > 0 ? (
+              <button
+                type="button"
+                onClick={handleDeleteAllSampleMemos}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+                title="Delete all sample and seed memos from the repository"
+              >
+                <Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                <span>Delete Sample Memos</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleRestoreSampleMemos}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 text-slate-700 dark:text-slate-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+                title="Restore initial default sample memos"
+              >
+                <RefreshCw className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                <span>Restore Sample Memos</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setIsUploadArchiveModalOpen(true)}
@@ -540,6 +582,16 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                   <Plus className="w-4 h-4" />
                   <span>Draft New Memo</span>
                 </button>
+                {memos.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreSampleMemos}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-sky-500" />
+                    <span>Restore Sample Memos</span>
+                  </button>
+                )}
               </div>
             </div>
           ) : (

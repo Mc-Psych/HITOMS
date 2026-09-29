@@ -11,6 +11,7 @@ import {
   getFromStore,
   putToStore,
   deleteFromStore,
+  clearStore,
   generateUUID,
 } from './localDatabaseService';
 import { auditService } from './auditService';
@@ -22,13 +23,18 @@ class MemoService {
   async getMemos(): Promise<HospitalMemo[]> {
     try {
       const items = await getAllFromStore<HospitalMemo>('memos');
-      if (!items || items.length === 0) {
+      const settings = await getAllFromStore<any>('settings');
+      const isSeeded = settings.some((s) => s.id === 'memos_initialized') || localStorage.getItem('HITOMS_MEMOS_INITIALIZED') === 'true';
+
+      if ((!items || items.length === 0) && !isSeeded) {
+        await putToStore('settings', { id: 'memos_initialized', isInitialized: true });
+        localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
         return await this.seedInitialMemos();
       }
-      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return (items || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (err) {
-      console.warn('[MemoService] Could not read from IndexedDB, falling back to initial seed:', err);
-      return this.getInitialSeedMemos();
+      console.warn('[MemoService] Could not read from IndexedDB:', err);
+      return [];
     }
   }
 
@@ -86,6 +92,50 @@ class MemoService {
         null
       );
     }
+  }
+
+  /**
+   * Delete ALL sample and stored memos from the repository
+   */
+  async deleteAllMemos(currentUser?: User | null): Promise<void> {
+    const items = await getAllFromStore<HospitalMemo>('memos');
+    for (const item of items) {
+      await deleteFromStore('memos', item.id);
+    }
+    await clearStore('memos');
+    await putToStore('settings', { id: 'memos_initialized', isInitialized: true, clearedAt: new Date().toISOString() });
+    localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+
+    if (currentUser) {
+      await auditService.logAction(
+        'DELETE_ALL_SAMPLE_MEMOS',
+        'Hospital Memo Repository',
+        'memos',
+        null,
+        `Super Admin / IT Admin ${currentUser.fullName} deleted all sample memos from the hospital repository.`
+      );
+    }
+  }
+
+  /**
+   * Restore initial sample memos
+   */
+  async restoreSampleMemos(currentUser?: User | null): Promise<HospitalMemo[]> {
+    await clearStore('memos');
+    const seeded = await this.seedInitialMemos();
+    await putToStore('settings', { id: 'memos_initialized', isInitialized: true });
+    localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+
+    if (currentUser) {
+      await auditService.logAction(
+        'RESTORE_SAMPLE_MEMOS',
+        'Hospital Memo Repository',
+        'memos',
+        null,
+        `Restored ${seeded.length} sample hospital memos by ${currentUser.fullName}`
+      );
+    }
+    return seeded;
   }
 
   /**
