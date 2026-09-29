@@ -1341,17 +1341,18 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     return list;
   }, [devices, positions, deviceMap, activeNodeWidth, activeNodeHeight]);
 
-  // Export Topology as High-Resolution PDF & JPEG
+  // Export Topology as High-Resolution PDF & JPEG (100% Identical to Canvas)
   const handleExportPDF = async () => {
     setIsExporting('pdf');
     try {
-      downloadTopologyAsPDF(
+      await downloadTopologyAsPDF(
         {
           devices,
           positions,
           edges,
           notes: canvasNotes,
           isPacketTracer,
+          showPortLabels,
         },
         'st-mary-theresa-cisco-topology'
       );
@@ -1367,13 +1368,14 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const handleExportJPEG = async () => {
     setIsExporting('jpeg');
     try {
-      downloadTopologyAsJPEG(
+      await downloadTopologyAsJPEG(
         {
           devices,
           positions,
           edges,
           notes: canvasNotes,
           isPacketTracer,
+          showPortLabels,
         },
         'st-mary-theresa-cisco-topology'
       );
