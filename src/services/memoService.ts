@@ -22,7 +22,23 @@ class MemoService {
    */
   async getMemos(): Promise<HospitalMemo[]> {
     try {
-      const items = await getAllFromStore<HospitalMemo>('memos');
+      let items = await getAllFromStore<HospitalMemo>('memos');
+      
+      // Actively remove all sample/seeded memos from previous setups
+      let cleaned = false;
+      const remainingItems = [];
+      for (const item of items) {
+        if (item.id.startsWith('memo-00') || item.memoNumber.startsWith('MEMO-2026-00')) {
+          await deleteFromStore('memos', item.id);
+          cleaned = true;
+        } else {
+          remainingItems.push(item);
+        }
+      }
+      if (cleaned) {
+        items = remainingItems;
+      }
+
       const settings = await getAllFromStore<any>('settings');
       const isSeeded = settings.some((s) => s.id === 'memos_initialized') || localStorage.getItem('HITOMS_MEMOS_INITIALIZED') === 'true';
 
@@ -259,7 +275,8 @@ All clinical staff are reminded of patient privacy policies. Shared passwords an
   }
 
   getInitialSeedMemos(): HospitalMemo[] {
-    return [
+    return [];
+    const bypassSampleMemos = [
       {
         id: 'memo-001',
         memoNumber: 'MEMO-2026-001',

@@ -134,6 +134,10 @@ export async function syncLatestStaffAccounts(): Promise<User[]> {
             merged.department = u.department;
             updated = true;
           }
+          if ((u.role === 'SUPER_ADMIN' || u.role === 'IT_ADMIN') && !found.signature) {
+            merged.signature = found.fullName;
+            updated = true;
+          }
           if (updated) {
             usersToUpsert.push(merged as User);
             if (u.id) existingMap.set(u.id, merged as User);
@@ -243,6 +247,7 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
           updatedAt: now,
           lastLoginAt: now,
           offlineAccessAllowed: true,
+          signature: 'Courage Kekesi',
           password: '1234',
           _syncStatus: 'SYNCED',
           _syncVersion: 1,
@@ -263,6 +268,10 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
       }
       if (!courageKay.username) {
         courageKay.username = 'kay';
+        needsUpdate = true;
+      }
+      if (!courageKay.signature) {
+        courageKay.signature = courageKay.fullName;
         needsUpdate = true;
       }
       if (needsUpdate) {

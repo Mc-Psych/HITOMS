@@ -4,6 +4,90 @@ import { Shield, CheckCircle2, Clock, FileText, Printer, Edit3, X, Sparkles, Ima
 import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 
+const renderContentWithMarkdownTables = (text: string) => {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentParagraphLines: string[] = [];
+  let inTable = false;
+  let tableRows: string[][] = [];
+  let tableKey = 0;
+
+  const renderCurrentParagraph = () => {
+    if (currentParagraphLines.length > 0) {
+      elements.push(
+        <p key={`p-${elements.length}`} className="whitespace-pre-line text-justify mb-4">
+          {currentParagraphLines.join('\n')}
+        </p>
+      );
+      currentParagraphLines = [];
+    }
+  };
+
+  const renderCurrentTable = () => {
+    if (tableRows.length > 0) {
+      const hasSeparator = tableRows.length > 1 && tableRows[1].every(cell => cell.trim().match(/^:?-+:?$/) || cell.trim() === '');
+      
+      const headers = hasSeparator ? tableRows[0] : [];
+      const dataRows = hasSeparator ? tableRows.slice(2) : tableRows;
+
+      elements.push(
+        <div key={`table-container-${tableKey++}`} className="overflow-x-auto my-6" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+          <table className="min-w-full border border-slate-300 dark:border-slate-800 text-sm">
+            {headers.length > 0 && (
+              <thead>
+                <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-300">
+                  {headers.map((h, idx) => (
+                    <th key={`th-${idx}`} className="px-4 py-2 text-left font-bold text-slate-800 dark:text-slate-200 border-r border-slate-300">
+                      {h.trim()}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {dataRows.map((row, rowIdx) => (
+                <tr key={`tr-${rowIdx}`} className="border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-50/50">
+                  {row.map((cell, cellIdx) => (
+                    <td key={`td-${cellIdx}`} className="px-4 py-2 text-slate-700 dark:text-slate-300 border-r border-slate-200">
+                      {cell.trim()}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      tableRows = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isTableLine = line.trim().startsWith('|') && line.trim().endsWith('|');
+
+    if (isTableLine) {
+      renderCurrentParagraph();
+      inTable = true;
+      const cells = line.split('|').slice(1, -1);
+      tableRows.push(cells);
+    } else {
+      if (inTable) {
+        renderCurrentTable();
+        inTable = false;
+      }
+      currentParagraphLines.push(line);
+    }
+  }
+
+  renderCurrentParagraph();
+  renderCurrentTable();
+
+  return <>{elements}</>;
+};
+
 interface OfficialMemoLetterheadProps {
   memo: HospitalMemo;
   systemSettings?: SystemSettings | null;
@@ -392,229 +476,171 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
       )}
 
       {/* MEMO DOCUMENT PAPER CANVAS */}
-      <div ref={memoCanvasRef} className="p-8 sm:p-12 md:p-16 max-w-4xl mx-auto space-y-6 print:p-0 print:max-w-none print:w-full bg-white text-slate-900">
+      <div ref={memoCanvasRef} className="p-8 sm:p-12 md:p-16 max-w-4xl mx-auto space-y-6 print:p-8 print:max-w-none print:w-full bg-white text-slate-900">
         
-        {/* GRAPHIC BANNER OVERLAY MODE */}
-        {letterheadImage && (letterheadMode === 'CUSTOM_BANNER' || letterheadMode === 'HEADER_AND_BANNER') && (
-          <div className="w-full mb-6 border-b border-slate-200 pb-4 print:pb-0">
-            {isPdfLetterhead ? (
-              <div className="w-full h-44 sm:h-52 rounded-lg overflow-hidden border border-slate-200 bg-white">
-                <object
-                  data={letterheadImage}
-                  type="application/pdf"
-                  className="w-full h-full"
-                >
-                  <iframe
-                    src={`${letterheadImage}#toolbar=0&navpanes=0`}
-                    className="w-full h-full border-none"
-                    title="Hospital Letterhead PDF"
-                  />
-                </object>
-              </div>
-            ) : (
-              <img
-                src={letterheadImage}
-                alt="Official Letterhead Banner"
-                className="w-full max-h-44 object-contain sm:object-cover mx-auto"
-              />
-            )}
-          </div>
-        )}
-
         {/* DYNAMIC / STANDARD HEADER MODE */}
-        {(letterheadMode === 'DYNAMIC_HEADER' || letterheadMode === 'HEADER_AND_BANNER' || !letterheadImage) && (
-          <div className="border-b-2 border-slate-900 pb-3 mb-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              
-              {/* Left Column: Catholic Health Service Trust & Hospital Logos with green aligned text underneath */}
-              <div className="flex flex-col items-start gap-1.5 max-w-[450px] text-left">
-                <div className="flex items-center gap-3">
-                  {/* Logo 1: Catholic Health Service Trust Emblem */}
-                  <div className="w-16 h-16 sm:w-18 sm:h-18 shrink-0 flex items-center justify-center">
-                    <svg viewBox="0 0 100 100" className="w-full h-full">
-                      {/* Outer Green Ring */}
-                      <circle cx="50" cy="50" r="46" fill="none" stroke="#047857" strokeWidth="4" />
-                      {/* Inner Circle */}
-                      <circle cx="50" cy="50" r="38" fill="#f8fafc" stroke="#dc2626" strokeWidth="2" />
-                      {/* Red Cross Symbol */}
-                      <path d="M44 22 h12 v18 h18 v12 h-18 v22 h-12 v-22 h-18 v-12 h18 z" fill="#dc2626" />
-                      {/* Center Medical Emblem */}
-                      <circle cx="50" cy="50" r="7" fill="#047857" />
-                      <path d="M50 45 v10 M45 50 h10" stroke="#ffffff" strokeWidth="2" />
-                    </svg>
-                  </div>
-
-                  {/* Logo 2: St. Mary Theresa Portrait Image Badge */}
-                  {systemSettings?.hospitalLogo ? (
-                    <img
-                      src={systemSettings.hospitalLogo}
-                      alt="Hospital Logo"
-                      className="w-14 h-14 object-contain rounded-lg shrink-0 border border-slate-200"
-                    />
-                  ) : (
-                    <div className="w-12 h-16 sm:w-14 sm:h-18 shrink-0 flex items-center justify-center border-2 border-amber-500 rounded bg-slate-100 overflow-hidden shadow-xs relative">
-                      <div className="absolute inset-0 bg-gradient-to-tr from-amber-400 to-amber-200 opacity-60"></div>
-                      <svg viewBox="0 0 40 50" className="w-full h-full z-10">
-                        <circle cx="20" cy="18" r="10" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
-                        <path d="M10 22 c0 -10 6 -14 10 -14 s10 4 10 14 c0 6 -1 16 -3 18 h-14 c-2 -2 -3 -12 -3 -18 z" fill="#1e293b" />
-                        <ellipse cx="20" cy="20" rx="6" ry="8" fill="#ffedd5" />
-                        <path d="M14 24 q6 6 12 0" fill="#ffffff" />
-                        <circle cx="18" cy="18" r="0.7" fill="#0f172a" />
-                        <circle cx="22" cy="18" r="0.7" fill="#0f172a" />
-                        <path d="M18 22 q2 2 4 0" stroke="#0f172a" strokeWidth="0.5" fill="none" />
+        <div className="border-b-2 border-slate-900 pb-3 mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            
+            {/* Left Column: System Logo only (without additional texts underneath) */}
+            <div className="flex flex-col items-start text-left max-w-[170px]">
+              {(memo.hospitalLogo || systemSettings?.hospitalLogo) ? (
+                 <img
+                   src={memo.hospitalLogo || systemSettings?.hospitalLogo}
+                   alt="Hospital Logo"
+                   className="max-w-[160px] max-h-18 object-contain border-none"
+                 />
+              ) : (
+                /* Native high-fidelity HTML/CSS reconstruction of Proposed Logo2 as fallback */
+                <div className="border border-slate-200 rounded-xl p-1.5 bg-white text-center font-sans max-w-[80px] shadow-xs shrink-0 flex items-center justify-center">
+                  <div className="flex items-center justify-center gap-1.5">
+                    {/* Left: Catholic Health Circle Emblem */}
+                    <div className="w-6 h-6 shrink-0">
+                      <svg viewBox="0 0 100 100" className="w-full h-full">
+                        <circle cx="50" cy="50" r="46" fill="none" stroke="#047857" strokeWidth="4" />
+                        <circle cx="50" cy="50" r="38" fill="#f8fafc" stroke="#dc2626" strokeWidth="2" />
+                        <path d="M44 22 h12 v18 h18 v12 h-18 v22 h-12 v-22 h-18 v-12 h-18 z" fill="#dc2626" />
+                        <circle cx="50" cy="50" r="7" fill="#047857" />
+                        <path d="M50 45 v10 M45 50 h10" stroke="#ffffff" strokeWidth="2" />
                       </svg>
                     </div>
-                  )}
+
+                    {/* Divider */}
+                    <div className="h-5 w-[1px] bg-slate-400"></div>
+
+                    {/* Right: St. Mary Theresa Portrait fallback */}
+                    <div className="w-6 h-6 shrink-0 rounded bg-slate-100 border border-slate-300 overflow-hidden relative shadow-3xs">
+                      <div className="absolute inset-0 bg-gradient-to-tr from-amber-400 to-amber-200 opacity-40"></div>
+                      <svg viewBox="0 0 40 50" className="w-full h-full z-10">
+                        <circle cx="20" cy="18" r="10" fill="none" stroke="#d97706" strokeWidth="1.5" />
+                        <path d="M10 22 c0 -10 6 -14 10 -14 s10 4 10 14 c0 6 -1 16 -3 18 h-14 z" fill="#1e293b" />
+                        <ellipse cx="20" cy="20" rx="6" ry="8" fill="#ffedd5" />
+                      </svg>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Left Header Aligned Text - Forest Green Color */}
-                <div className="text-[10px] sm:text-[11px] font-sans font-extrabold uppercase leading-tight text-emerald-800 tracking-wider">
-                  <div className="font-black">CATHOLIC HEALTH</div>
-                  <div>SERVICE TRUST - GHANA</div>
-                  <div className="text-[9px] font-bold text-emerald-700">(JASIKAN DIOCESE)</div>
-                  <div className="font-black mt-1">{hospitalName}</div>
-                  <div>CATHOLIC HOSPITAL</div>
-                  <div className="text-[8px] font-bold tracking-tighter text-slate-600 mt-0.5 normal-case font-mono">{addressLine}</div>
-                </div>
-              </div>
-
-              {/* Right Column: IT Support Unit Title & Contact Details */}
-              <div className="text-left sm:text-right space-y-0.5">
-                <h1 className="text-sm sm:text-base md:text-lg font-serif font-bold italic text-slate-900 leading-tight">
-                  {unitTitle}
-                </h1>
-                <p className="text-xs font-sans text-slate-800">
-                  <span className="font-semibold">Tel:</span> {contactPhone}
-                </p>
-                <p className="text-xs font-sans text-slate-800">
-                  <span className="font-semibold">E-mail:</span>{' '}
-                  <a href={`mailto:${contactEmail}`} className="text-blue-900 underline font-medium hover:text-blue-700">
-                    {contactEmail}
-                  </a>
-                </p>
-              </div>
-
+              )}
             </div>
-          </div>
-        )}
 
-        {/* MEMO CENTERED HEADING WITH THICK UNDERLINE */}
-        <div className="text-center pt-2 pb-4">
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-black tracking-widest text-slate-950 uppercase inline-block border-b-4 border-slate-950 pb-1">
-            MEMO
-          </h1>
-        </div>
-
-        {/* METADATA BLOCK (TO, DATE, SUBJECT) */}
-        <div className="space-y-2 text-sm sm:text-base font-serif border-b border-slate-200 pb-4">
-          <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start">
-            <span className="font-bold text-slate-950">TO</span>
-            <div className="flex items-start">
-              <span className="font-bold mr-2">:</span>
-              <span className="font-bold uppercase tracking-wide text-slate-900">
-                {memo.targetAudience || 'THE HOSPITAL MANAGER'}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start">
-            <span className="font-bold text-slate-950">DATE</span>
-            <div className="flex items-start">
-              <span className="font-bold mr-2">:</span>
-              <span className="text-slate-900">{formattedDateStr}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start">
-            <span className="font-bold text-slate-950">SUBJECT</span>
-            <div className="flex items-start">
-              <span className="font-bold mr-2">:</span>
-              <span className="font-bold uppercase tracking-wide text-slate-950 underline decoration-2 underline-offset-2">
-                {memo.title}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* MEMO BODY CONTENT */}
-        <div className="space-y-6 pt-2 text-slate-900 text-sm sm:text-base font-serif leading-relaxed">
-          
-          {/* Main Content / Executive Summary */}
-          {memo.executiveSummary && (
-            <p className="whitespace-pre-line text-justify">
-              {memo.executiveSummary}
-            </p>
-          )}
-
-          {/* Background and Operational Context */}
-          {memo.backgroundAndContext && (
-            <div className="space-y-2">
-              <h3 className="font-bold underline text-slate-950 text-base sm:text-lg">
-                Background & Context
-              </h3>
-              <p className="whitespace-pre-line text-justify">
-                {memo.backgroundAndContext}
+            {/* Right Column: IT Support Unit Title & Contact Details */}
+            <div className="text-left sm:text-right space-y-0.5">
+              <h1 className="text-sm sm:text-base md:text-lg font-serif font-bold italic text-slate-900 leading-tight">
+                {memo.headerUnitName || unitTitle}
+              </h1>
+              <p className="text-xs font-sans text-slate-800">
+                <span className="font-semibold">Tel:</span> {memo.headerPhone || contactPhone}
+              </p>
+              <p className="text-xs font-sans text-slate-800">
+                <span className="font-semibold">E-mail:</span>{' '}
+                <a href={`mailto:${memo.headerEmail || contactEmail}`} className="text-blue-900 underline font-medium hover:text-blue-700">
+                  {memo.headerEmail || contactEmail}
+                </a>
               </p>
             </div>
-          )}
 
-          {/* Technical & Operational Directives / Specifications */}
-          {memo.detailedFindingsOrBody && (
-            <div className="space-y-2">
-              {/* Look for specification or main text */}
-              {!memo.detailedFindingsOrBody.toLowerCase().includes('specification') && (
-                <h3 className="font-bold underline text-slate-950 text-base sm:text-lg">
-                  Specification
-                </h3>
-              )}
-              <div className="whitespace-pre-line leading-relaxed font-serif text-slate-900">
-                {memo.detailedFindingsOrBody}
-              </div>
-            </div>
-          )}
-
-          {/* Action Required / Checklist Items */}
-          {memo.actionRequiredOrChecklist && memo.actionRequiredOrChecklist.length > 0 && (
-            <div className="space-y-2 pt-2">
-              <h3 className="font-bold underline text-slate-950 text-base sm:text-lg">
-                Action Required
-              </h3>
-              <ul className="list-disc pl-6 space-y-1">
-                {memo.actionRequiredOrChecklist.map((item, idx) => (
-                  <li key={idx} className="text-slate-900">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-        </div>
-
-        {/* CLOSING & SIGNATURE BLOCK */}
-        <div className="pt-8 space-y-6 font-serif">
-          <p className="text-base text-slate-900">
-            Thank you.
-          </p>
-
-          <div className="pt-4 space-y-1">
-            {/* Signature Space / Line */}
-            <div className="h-10 border-b border-dashed border-slate-300 w-48 mb-2 opacity-50"></div>
-            
-            <p className="font-bold text-slate-950 text-base sm:text-lg leading-tight">
-              {memo.fromSender?.name || 'Courage Kekesi'}
-            </p>
-            <p className="text-slate-800 text-sm sm:text-base font-semibold leading-tight">
-              {memo.fromSender?.title || 'Snr. IT Officer'}
-            </p>
           </div>
         </div>
 
-        {/* OFFICIAL FOOTER / CONFIDENTIALITY LINE */}
-        <div className="pt-12 border-t border-slate-200 text-center font-sans">
-          <p className="text-[10px] sm:text-[11px] font-mono text-slate-500 uppercase tracking-wider">
-            {systemSettings?.letterheadFooterText || 'ST. MARY THERESA CATHOLIC HOSPITAL — DEPARTMENT OF INFORMATION TECHNOLOGY'}
-          </p>
+        {/* Content below header in Times New Roman */}
+        <div style={{ fontFamily: "'Times New Roman', Times, serif" }} className="space-y-6">
+          {/* MEMO CENTERED HEADING */}
+          <div className="text-center pt-2 pb-4">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-black tracking-widest text-slate-950 uppercase inline-block pb-1">
+              {memo.documentTypeText || 'MEMO'}
+            </h1>
+          </div>
+
+          {/* METADATA BLOCK (TO, DATE, SUBJECT) */}
+          <div className="space-y-2 text-sm sm:text-base border-b border-slate-200 pb-4" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+            <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start">
+              <span className="font-bold text-slate-950">TO</span>
+              <div className="flex items-start">
+                <span className="font-bold mr-2">:</span>
+                <span className="font-bold uppercase tracking-wide text-slate-900">
+                  {memo.targetAudience || 'THE HOSPITAL MANAGER'}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+              <span className="font-bold text-slate-950">DATE</span>
+              <div className="flex items-start">
+                <span className="font-bold mr-2">:</span>
+                <span className="text-slate-900">{memo.memoDate || formattedDateStr}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[80px_1fr] sm:grid-cols-[100px_1fr] items-start">
+              <span className="font-bold text-slate-950">SUBJECT</span>
+              <div className="flex items-start">
+                <span className="font-bold mr-2">:</span>
+                <span className="font-bold uppercase tracking-wide text-slate-950 underline decoration-2 underline-offset-2">
+                  {memo.title}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* MEMO BODY CONTENT */}
+          <div className="space-y-6 pt-2 text-slate-900 text-sm sm:text-base font-serif leading-relaxed">
+            
+            {/* Main Content / Executive Summary */}
+            {memo.executiveSummary && renderContentWithMarkdownTables(memo.executiveSummary)}
+
+            {/* Action Required / Checklist Items */}
+            {memo.actionRequiredOrChecklist && memo.actionRequiredOrChecklist.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <h3 className="font-bold underline text-slate-950 text-base sm:text-lg">
+                  Action Required
+                </h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  {memo.actionRequiredOrChecklist.map((item, idx) => (
+                    <li key={idx} className="text-slate-900">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          </div>
+
+          {/* CLOSING & SIGNATURE BLOCK */}
+          <div className="pt-8 space-y-6 font-serif">
+            <p className="text-base text-slate-900">
+              Thank you.
+            </p>
+
+            <div className="pt-4 space-y-1">
+              {/* Signature Space / Line */}
+              {memo.officerSignature ? (
+                memo.officerSignature.startsWith('data:image/') ? (
+                  <img src={memo.officerSignature} className="max-h-16 max-w-[200px] object-contain block mb-2" alt="Officer Signature" />
+                ) : (
+                  <div className="text-xl sm:text-2xl text-blue-800 dark:text-blue-900 font-serif italic tracking-wide font-black" style={{ fontFamily: "'Dancing Script', 'Cursive', 'Brush Script MT', serif" }}>
+                    {memo.officerSignature}
+                  </div>
+                )
+              ) : (
+                <div className="h-6"></div>
+              )}
+              <div className="border-b border-dashed border-slate-300 w-48 mb-2 opacity-50"></div>
+              
+              <p className="font-bold text-slate-950 text-base sm:text-lg leading-tight">
+                {memo.officerName || memo.fromSender?.name || 'Courage Kekesi'}
+              </p>
+              <p className="text-slate-800 text-sm sm:text-base font-semibold leading-tight">
+                {memo.officerTitle || memo.fromSender?.title || 'Snr. IT Officer'}
+              </p>
+            </div>
+          </div>
+
+          {/* OFFICIAL FOOTER / CONFIDENTIALITY LINE */}
+          <div className="pt-12 border-t border-slate-200 text-center">
+            <p className="text-[10px] sm:text-[11px] text-slate-500 uppercase tracking-wider">
+              {systemSettings?.letterheadFooterText || 'ST. MARY THERESA CATHOLIC HOSPITAL — DEPARTMENT OF INFORMATION TECHNOLOGY'}
+            </p>
+          </div>
         </div>
 
       </div>

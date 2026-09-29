@@ -37,6 +37,7 @@ export interface User extends SyncMetadata {
   updatedAt: string;
   lastLoginAt: string;
   offlineAccessAllowed?: boolean;
+  signature?: string;
   password?: string; // Direct password or initial default password
   passwordHash?: string; // Salted SHA-256 for offline auth
   passwordSalt?: string;
@@ -728,6 +729,14 @@ export interface HospitalMemo {
     title: string;
     approvedAt: string;
   };
+  headerUnitName?: string;
+  headerEmail?: string;
+  headerPhone?: string;
+  documentTypeText?: string; // e.g. "MEMO" or "REPORT"
+  officerSignature?: string; // Digital/graphic signature data URL or name
+  officerName?: string;
+  officerTitle?: string; // rank/grade
+  hospitalLogo?: string; // custom Base64 logo for this memo
 }
 
 export interface AiMemoRequest {
