@@ -116,7 +116,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             />
           ) : (
             <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center font-black text-xl shrink-0 shadow-md backdrop-blur-xs border border-white/20">
-              H
+              {(systemSettings?.systemName || 'HITOMS')[0]}
             </div>
           )}
           <div>

@@ -13,6 +13,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
 
   const cachedSettings = settingsService.getSettingsSync();
   const logo = cachedSettings?.hospitalLogo;
+  const sysName = cachedSettings?.systemName || 'HITOMS';
 
   // If already running as standalone PWA app
   if (isInstalled) {
@@ -20,7 +21,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
       return (
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-emerald-400 text-[11px] font-medium">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>PWA App Installed</span>
+          <span>{sysName} PWA Installed</span>
         </div>
       );
     }
@@ -45,7 +46,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
           id="pwa-install-sidebar-btn"
           onClick={handleInstallClick}
           className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-sm transition cursor-pointer"
-          title="Install HITOMS App for Offline Access"
+          title={`Install ${sysName} App for Offline Access`}
         >
           <div className="flex items-center gap-2">
             <Download className="w-4 h-4 text-white" />
@@ -58,7 +59,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
           id="pwa-install-btn"
           onClick={handleInstallClick}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-sm hover:shadow transition cursor-pointer"
-          title="Install HITOMS as Desktop or Mobile App for Offline Access"
+          title={`Install ${sysName} as Desktop or Mobile App for Offline Access`}
         >
           <Download className="w-3.5 h-3.5 text-white" />
           <span>Install App</span>
@@ -83,7 +84,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                   </div>
                 )}
                 <div>
-                  <h3 className="text-sm font-bold">Install HITOMS App</h3>
+                  <h3 className="text-sm font-bold">Install {sysName} App</h3>
                   <p className="text-[11px] text-slate-400">PWA Offline Asset & Ticket Management System</p>
                 </div>
               </div>
@@ -103,7 +104,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                   <ExternalLink className="w-4 h-4 text-sky-500" />
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                  PWAs install best directly from the browser address bar. Open HITOMS in a new browser tab to trigger the native browser <strong>Install</strong> prompt.
+                  PWAs install best directly from the browser address bar. Open {sysName} in a new browser tab to trigger the native browser <strong>Install</strong> prompt.
                 </p>
                 <button
                   type="button"
@@ -130,7 +131,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                     Chrome & Edge (Desktop & Android)
                   </div>
                   <p className="text-[11px] text-slate-600 dark:text-slate-400 pl-3.5 leading-relaxed">
-                    Look for the <strong>Install</strong> icon in the address bar (top right) or click the <strong>3-dots menu</strong> &rarr; select <strong>Save & Share / Install HITOMS</strong>.
+                    Look for the <strong>Install</strong> icon in the address bar (top right) or click the <strong>3-dots menu</strong> &rarr; select <strong>Save & Share / Install {sysName}</strong>.
                   </p>
                 </div>
 
@@ -149,7 +150,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
               <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 flex items-start gap-2 text-[11px] text-emerald-800 dark:text-emerald-300">
                 <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                 <p>
-                  Once installed, HITOMS operates fully standalone offline with local offline storage, auto-syncing, and background updates.
+                  Once installed, {sysName} operates fully standalone offline with local offline storage, auto-syncing, and background updates.
                 </p>
               </div>
             </div>

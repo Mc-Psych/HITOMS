@@ -8,11 +8,13 @@ import {
   restoreFullDatabase,
 } from './localDatabaseService';
 import { auditService } from './auditService';
+import { downloadJsonFile } from '../utils/fileDownloader';
+import { settingsService } from './settingsService';
 
 class BackupService {
   public async getBackups(): Promise<BackupRecord[]> {
     const list = await getAllFromStore<BackupRecord>('backups');
-    return list.sort((a, b) => new Date(b.lastBackup).getTime() - new Date(a.lastBackup).getTime());
+    return list.sort((a, b) => new Date(b.lastBackup || b.createdAt).getTime() - new Date(a.lastBackup || a.createdAt).getTime());
   }
 
   public async getBackupRecords(): Promise<BackupRecord[]> {
@@ -29,15 +31,26 @@ class BackupService {
     };
   }
 
-  public async createManualBackup(user: User): Promise<{ record: BackupRecord; data: Record<string, any> }> {
+  /**
+   * Generates a full manual backup snapshot, saves record to IndexedDB, and triggers file download
+   */
+  public async createManualBackup(
+    user: User,
+    autoDownload = true
+  ): Promise<{ record: BackupRecord; data: Record<string, any>; filename: string }> {
     const data = await exportFullDatabase();
     const jsonStr = JSON.stringify(data, null, 2);
     const sizeKb = (jsonStr.length / 1024).toFixed(1) + ' KB';
     const now = new Date().toISOString();
+    const dateFormatted = now.slice(0, 10);
+    const timeFormatted = now.slice(11, 19).replace(/:/g, '-');
+    const sysSettings = settingsService.getSettingsSync();
+    const sysName = sysSettings?.systemName || 'HITOMS';
+    const filename = `${sysName}-Hospital-Backup-${dateFormatted}_${timeFormatted}.json`;
 
     const record: BackupRecord = {
       id: generateUUID(),
-      system: 'HITOMS Local Hospital Server',
+      system: `${sysName} Local Hospital Server`,
       backupType: 'Full Database',
       frequency: 'Manual',
       destination: 'Local Hospital Storage / Browser Archive',
@@ -47,7 +60,7 @@ class BackupService {
       verified: true,
       verificationDate: now,
       performedBy: user.fullName,
-      notes: 'Full uncompressed JSON snapshot containing all 21 local IndexedDB stores.',
+      notes: `Full uncompressed JSON snapshot containing all local IndexedDB stores (${filename}).`,
       createdAt: now,
       _syncStatus: 'LOCAL_ONLY',
       _syncVersion: 1,
@@ -58,10 +71,39 @@ class BackupService {
     await putToStore('backups', record);
     await auditService.logAction('CREATE_LOCAL_BACKUP', 'Backups', record.id, null, {
       size: sizeKb,
+      filename,
       performedBy: user.fullName,
     });
 
-    return { record, data };
+    if (autoDownload) {
+      downloadJsonFile(filename, data);
+    }
+
+    return { record, data, filename };
+  }
+
+  /**
+   * Direct download of full live database snapshot
+   */
+  public async downloadFullDatabaseSnapshot(user?: User): Promise<{ success: boolean; filename: string }> {
+    const data = await exportFullDatabase();
+    const now = new Date().toISOString();
+    const dateFormatted = now.slice(0, 10);
+    const timeFormatted = now.slice(11, 19).replace(/:/g, '-');
+    const sysSettings = settingsService.getSettingsSync();
+    const sysName = sysSettings?.systemName || 'HITOMS';
+    const filename = `${sysName}-FullDatabase-Snapshot-${dateFormatted}_${timeFormatted}.json`;
+
+    const success = downloadJsonFile(filename, data);
+
+    if (user) {
+      await auditService.logAction('EXPORT_DATABASE_SNAPSHOT', 'Backups', 'SNAPSHOT_EXPORT', null, {
+        filename,
+        performedBy: user.fullName,
+      });
+    }
+
+    return { success, filename };
   }
 
   public async restoreFromSnapshot(snapshot: Record<string, any>, user: User): Promise<{ success: boolean; count: number }> {

@@ -56,7 +56,7 @@ export const MemoDetailModal: React.FC<MemoDetailModalProps> = ({
   const letterheadImage = systemSettings?.hospitalLetterheadImage;
   const letterheadSubTitle = systemSettings?.letterheadSubTitle || 'Department of Information Technology & Clinical Informatics';
   const letterheadAddressLine = systemSettings?.letterheadAddressLine || '104 Healthcare Boulevard, Ward 4 • Emergency: Ext 9911 / 222 • www.smthospital.local';
-  const letterheadFooterText = systemSettings?.letterheadFooterText || 'CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (HITOMS)';
+  const letterheadFooterText = systemSettings?.letterheadFooterText || `CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (${systemSettings?.systemName || 'HITOMS'})`;
   const letterheadMode = systemSettings?.letterheadMode || 'HEADER_AND_BANNER';
 
   const isITUser = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'IT_ADMIN' || currentUser?.role === 'IT_OFFICER';

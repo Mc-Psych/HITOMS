@@ -721,6 +721,9 @@ export type LetterheadMode = 'CUSTOM_BANNER' | 'DYNAMIC_HEADER' | 'HEADER_AND_BA
 
 export interface SystemSettings {
   id?: string;
+  systemName?: string; // e.g. "HITOMS" or user preferred name like "CENOTECH", "MEDITOMS"
+  systemFullName?: string; // e.g. "Hospital Information Technology & Operations Management System"
+  systemAcronym?: string; // e.g. "HITOMS"
   hospitalName: string;
   hospitalLogo?: string; // Base64 data URL or image path
   hospitalLetterheadImage?: string; // Base64 data URL for uploaded official letterhead header/banner

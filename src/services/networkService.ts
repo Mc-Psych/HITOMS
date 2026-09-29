@@ -360,7 +360,6 @@ class NetworkService {
 
     await deleteFromStore('networkDevices', id);
     await auditService.logAction('DELETE_NETWORK_DEVICE', 'Network', id, device, null);
-    await syncService.enqueueOperation('networkDevices', id, 'DELETE', { id, deviceName: device.deviceName });
   }
 
   public async updateDeviceStatus(

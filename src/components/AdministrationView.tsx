@@ -416,6 +416,91 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             )}
 
             <form onSubmit={handleSaveFacility} className="space-y-5">
+              {/* Global System Software Name & Brand Override (Super Admin Controlled) */}
+              <div className="p-5 rounded-2xl border-2 border-sky-200 dark:border-sky-800 bg-sky-50/60 dark:bg-sky-950/30 space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-sky-600" />
+                    <div>
+                      <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider block">
+                        Global System Name & Software Brand Identity
+                      </span>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        Super Admin master control: Change system name from <strong>HITOMS</strong> to any preferred name (e.g. <strong>CENOTECH</strong>). This change runs through the whole system — navigation sidebar, login terminal, browser title, backup packages, and reports.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-sky-100 dark:bg-sky-900/80 text-sky-800 dark:text-sky-200 border border-sky-300 dark:border-sky-700 whitespace-nowrap">
+                    Super Admin Master Control
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-200 font-bold mb-1">
+                      System Name / Acronym *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!isSuperAdmin}
+                      value={settings.systemName || 'HITOMS'}
+                      onChange={(e) => setSettings({ ...settings, systemName: e.target.value.toUpperCase() })}
+                      placeholder="e.g. CENOTECH, HITOMS, MEDITOMS"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-sky-400 dark:border-sky-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-black text-sky-700 dark:text-sky-300 text-sm tracking-wider shadow-inner"
+                    />
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                      <span className="font-semibold">Quick Presets:</span>
+                      {['HITOMS', 'CENOTECH', 'MEDITOMS', 'CARETECH', 'HOSPISYNC'].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          disabled={!isSuperAdmin}
+                          onClick={() => setSettings({ ...settings, systemName: preset })}
+                          className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold transition cursor-pointer ${
+                            (settings.systemName || 'HITOMS') === preset
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-sky-500 hover:text-white'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-200 font-bold mb-1">
+                      System Full Title / Description
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isSuperAdmin}
+                      value={settings.systemFullName || ''}
+                      onChange={(e) => setSettings({ ...settings, systemFullName: e.target.value })}
+                      placeholder="Healthcare Information Technology & Operations Management System"
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400">Formal subtitle rendered on report footers, splash screens, and audit headers</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-200 font-bold mb-1">
+                      Local LAN Hostname / Server URL
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isSuperAdmin}
+                      value={settings.hospitalLanUrl || ''}
+                      onChange={(e) => setSettings({ ...settings, hospitalLanUrl: e.target.value })}
+                      placeholder={`http://${(settings.systemName || 'hitoms').toLowerCase()}.local:3000`}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono text-emerald-600 dark:text-emerald-400 font-semibold"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400">On-premise offline terminal intranet URL indicator</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Logo Upload Section */}
               <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4">
                 <div className="flex items-center gap-2">

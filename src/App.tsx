@@ -369,9 +369,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [quickTicketOpen]);
 
+  // Sync document title dynamically with system name & hospital name
+  useEffect(() => {
+    const sysName = systemSettings?.systemName || 'HITOMS';
+    const hospName = systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
+    document.title = `${sysName} — ${hospName} | Hospital IT & Operations`;
+  }, [systemSettings?.systemName, systemSettings?.hospitalName]);
+
   if (!initialized) {
     const cachedSettings = settingsService.getSettingsSync();
     const launchLogo = cachedSettings?.hospitalLogo;
+    const sysName = cachedSettings?.systemName || 'HITOMS';
+    const initial = sysName[0] || 'H';
+    const lanUrl = cachedSettings?.hospitalLanUrl || `http://${sysName.toLowerCase()}.local:3000`;
 
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
@@ -383,14 +393,14 @@ export default function App() {
           />
         ) : (
           <div className="w-12 h-12 rounded-2xl bg-sky-600 flex items-center justify-center font-black text-2xl animate-pulse shadow-lg mb-4">
-            H
+            {initial}
           </div>
         )}
-        <h2 className="text-lg font-bold text-slate-100">HITOMS Local Server</h2>
+        <h2 className="text-lg font-bold text-slate-100">{sysName} Local Server</h2>
         <p className="text-xs text-slate-400 mt-1">Initializing local hospital storage & offline database...</p>
         <div className="mt-4 flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
           <Server className="w-3.5 h-3.5" />
-          <span>http://hitoms.local:3000</span>
+          <span>{lanUrl}</span>
         </div>
       </div>
     );
@@ -619,6 +629,7 @@ export default function App() {
             {currentView === 'backups' && (
               <BackupsView
                 currentUser={currentUser}
+                systemSettings={systemSettings}
                 onRefresh={refreshAllData}
                 onRestoreSuccess={refreshAllData}
               />
@@ -630,6 +641,7 @@ export default function App() {
                 isSyncing={syncStats.connectionState === 'SYNCING'}
                 syncQueue={syncQueue}
                 syncLogs={syncLogs}
+                systemSettings={systemSettings}
                 onTriggerSync={async () => {
                   await syncService.runAutomaticSync();
                   await refreshAllData();
@@ -830,6 +842,7 @@ export default function App() {
         currentUser={currentUser}
         alerts={emergencyAlerts}
         assets={assets}
+        systemSettings={systemSettings}
         onRefresh={refreshAllData}
       />
     </div>

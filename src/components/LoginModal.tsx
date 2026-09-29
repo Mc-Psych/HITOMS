@@ -145,7 +145,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               />
             ) : (
               <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center font-black text-lg backdrop-blur-xs border border-white/20">
-                H
+                {(systemSettings?.systemName || 'HITOMS')[0]}
               </div>
             )}
             <div>
@@ -154,7 +154,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </h2>
               <div className="flex items-center gap-2 text-[11px] text-sky-200 mt-0.5">
                 <Server className="w-3 h-3 text-emerald-300" />
-                <span className="font-mono">Local HITOMS Terminal Login</span>
+                <span className="font-mono">Local {systemSettings?.systemName || 'HITOMS'} Terminal Login</span>
                 <span>•</span>
                 <span>{facilityRegion ? `${facilityRegion} LAN` : 'Offline LAN Mode'}</span>
               </div>

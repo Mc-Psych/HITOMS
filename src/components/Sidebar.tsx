@@ -207,11 +207,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             ) : (
               <div className="w-5 h-5 bg-sky-600 rounded flex items-center justify-center text-white font-black text-[10px] shrink-0">
-                H
+                {(systemSettings?.systemName || 'HITOMS')[0]}
               </div>
             )}
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-              HITOMS Ops
+              {systemSettings?.systemName || 'HITOMS'} Ops
             </span>
           </div>
         ) : (

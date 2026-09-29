@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
             />
           ) : (
             <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-sky-600 text-white font-black text-sm sm:text-base shadow-sm shrink-0">
-              H
+              {(systemSettings?.systemName || 'HITOMS')[0]}
             </div>
           )}
           <div className="min-w-0">
@@ -146,7 +146,11 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400 truncate">
               <Server className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span className="font-mono text-emerald-300 text-[10px] sm:text-[11px]">hitoms.local</span>
+              <span className="font-mono text-emerald-300 text-[10px] sm:text-[11px]">
+                {systemSettings?.hospitalLanUrl
+                  ? systemSettings.hospitalLanUrl.replace(/^https?:\/\//, '')
+                  : `${(systemSettings?.systemName || 'hitoms').toLowerCase()}.local`}
+              </span>
               <span className="text-slate-600">|</span>
               <span className="hidden md:inline truncate">
                 {systemSettings?.regionOrDistrict ? `${systemSettings.regionOrDistrict} Facility` : 'Hospital LAN Active'}

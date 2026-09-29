@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { type Asset, type AssetCondition, type AssetStatus, type User } from '../types';
 import { assetService } from '../services/assetService';
+import { downloadTextFile } from '../utils/fileDownloader';
 
 interface AssetBulkUploadModalProps {
   isOpen: boolean;
@@ -85,15 +86,9 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
   // Download Sample CSV
   const handleDownloadSample = () => {
-    const blob = new Blob([SAMPLE_CSV_CONTENT], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'HITOMS_Asset_Bulk_Upload_Template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadTextFile('HITOMS_Asset_Bulk_Upload_Template.csv', SAMPLE_CSV_CONTENT, {
+      mimeType: 'text/csv;charset=utf-8',
+    });
   };
 
   // Helper to parse CSV string into objects

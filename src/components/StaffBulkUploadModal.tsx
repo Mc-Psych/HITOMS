@@ -22,6 +22,7 @@ import {
   extractSurname,
   getDefaultPasswordForSurname,
 } from '../services/authService';
+import { downloadTextFile } from '../utils/fileDownloader';
 
 interface StaffBulkUploadModalProps {
   isOpen: boolean;
@@ -65,15 +66,7 @@ export function downloadStaffTemplate(withSamples: boolean = true) {
     ? 'HITOMS_Staff_Upload_Template_Sample.csv'
     : 'HITOMS_Staff_Upload_Template_Blank.csv';
 
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadTextFile(filename, content, { mimeType: 'text/csv;charset=utf-8' });
 }
 
 export function normalizeStaffRole(roleStr?: string): Role {
@@ -164,20 +157,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
   // Download Sample Template CSV
   const handleDownloadTemplate = (withSamples: boolean = true) => {
-    const content = withSamples ? SAMPLE_CSV_CONTENT : BLANK_CSV_CONTENT;
-    const filename = withSamples
-      ? 'HITOMS_Staff_Upload_Template_Sample.csv'
-      : 'HITOMS_Staff_Upload_Template_Blank.csv';
-
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadStaffTemplate(withSamples);
   };
 
   // Export created accounts list
@@ -194,15 +174,9 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     ]);
 
     const csvData = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `HITOMS_Staff_Credentials_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadTextFile(`HITOMS_Staff_Credentials_${new Date().toISOString().split('T')[0]}.csv`, csvData, {
+      mimeType: 'text/csv;charset=utf-8',
+    });
   };
 
   // Parse raw text into structured staff records

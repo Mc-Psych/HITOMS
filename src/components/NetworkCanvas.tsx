@@ -55,6 +55,7 @@ import {
 } from '../types';
 import { networkService } from '../services/networkService';
 import { authService } from '../services/authService';
+import { settingsService } from '../services/settingsService';
 
 interface NetworkCanvasProps {
   devices: NetworkDevice[];
@@ -1334,14 +1335,18 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     const subText = `Generated: ${dateStr} | Hardware Nodes: ${devices.length} | Physical Links: ${edges.length} | Exported by: ${currentUser?.fullName || 'Super Administrator'}`;
     ctx.fillText(subText, 24, 46);
 
-    // HITOMS Infrastructure Badge
+    const sysSettings = settingsService.getSettingsSync();
+    const systemName = sysSettings?.systemName || 'HITOMS';
+    const systemFullName = sysSettings?.systemFullName || 'Hospital Infrastructure & Telemetry Management System';
+
+    // System Infrastructure Badge
     ctx.fillStyle = '#0284c7';
-    roundRect(ctx, totalW - 200, 16, 176, 32, 8);
+    roundRect(ctx, totalW - 220, 16, 196, 32, 8);
     ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('HITOMS INFRASTRUCTURE', totalW - 112, 32);
+    ctx.fillText(`${systemName} INFRASTRUCTURE`, totalW - 122, 32);
 
     // 4. Executive Footer Bar
     ctx.fillStyle = '#020617';
@@ -1355,7 +1360,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     ctx.fillStyle = '#64748b';
     ctx.font = '9px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('CONFIDENTIAL & PROPRIETARY — Hospital Infrastructure & Telemetry Management System (HITOMS) Offline-First Architecture', 24, totalH - footerHeight / 2);
+    ctx.fillText(`CONFIDENTIAL & PROPRIETARY — ${systemFullName} (${systemName}) Offline-First Architecture`, 24, totalH - footerHeight / 2);
 
     ctx.textAlign = 'right';
     ctx.fillText(`Verified by ${currentUser?.role || 'SUPER_ADMIN'} • Page 1 of 1`, totalW - 24, totalH - footerHeight / 2);

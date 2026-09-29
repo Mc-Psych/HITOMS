@@ -83,9 +83,10 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
             ? `${systemSettings.address} • Emergency: ${systemSettings.emergencyExtension || 'Ext 9911'} • ${systemSettings.hospitalLanUrl || 'hitoms.local'}`
             : '104 Healthcare Boulevard, Ward 4 • Emergency: Ext 9911 / 222 • www.smthospital.local')
       );
+      const sysName = systemSettings.systemName || 'HITOMS';
       setFooterText(
         systemSettings.letterheadFooterText ||
-          'CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (HITOMS)'
+          `CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (${sysName})`
       );
       setLetterheadMode(systemSettings.letterheadMode || 'HEADER_AND_BANNER');
     }
@@ -550,7 +551,7 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
                     type="text"
                     value={footerText}
                     onChange={(e) => setFooterText(e.target.value)}
-                    placeholder="CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (HITOMS)"
+                    placeholder={`CONFIDENTIAL & PROPRIETARY — HEALTHCARE INFORMATION TECHNOLOGY & OPERATIONS MANAGEMENT (${systemSettings?.systemName || 'HITOMS'})`}
                     className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

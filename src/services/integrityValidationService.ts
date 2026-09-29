@@ -4,6 +4,7 @@ import {
   putBatchToStore,
   deleteFromStore,
   type StoreName,
+  SYNCABLE_STORES,
   setSkipSyncEnqueue,
 } from './localDatabaseService';
 import { type SyncQueueItem } from '../types';
@@ -110,6 +111,11 @@ class IntegrityValidationService {
         incidents,
         memos,
         settings,
+        networkDevices,
+        hospitalSystems,
+        departments,
+        locations,
+        subscriptions,
         queue,
       ] = await Promise.all([
         getAllFromStore<any>('users'),
@@ -120,6 +126,11 @@ class IntegrityValidationService {
         getAllFromStore<any>('incidents'),
         getAllFromStore<any>('memos'),
         getAllFromStore<any>('settings'),
+        getAllFromStore<any>('networkDevices'),
+        getAllFromStore<any>('hospitalSystems'),
+        getAllFromStore<any>('departments'),
+        getAllFromStore<any>('locations'),
+        getAllFromStore<any>('subscriptions'),
         getAllFromStore<SyncQueueItem>('syncQueue'),
       ]);
 
@@ -131,6 +142,11 @@ class IntegrityValidationService {
       storeCounts['incidents'] = incidents.length;
       storeCounts['memos'] = memos.length;
       storeCounts['settings'] = settings.length;
+      storeCounts['networkDevices'] = networkDevices.length;
+      storeCounts['hospitalSystems'] = hospitalSystems.length;
+      storeCounts['departments'] = departments.length;
+      storeCounts['locations'] = locations.length;
+      storeCounts['subscriptions'] = subscriptions.length;
       storeCounts['syncQueue'] = queue.length;
 
       totalRecordsChecked =
@@ -142,6 +158,11 @@ class IntegrityValidationService {
         incidents.length +
         memos.length +
         settings.length +
+        networkDevices.length +
+        hospitalSystems.length +
+        departments.length +
+        locations.length +
+        subscriptions.length +
         queue.length;
 
       const userIds = new Set(users.map((u) => u.id));
@@ -220,8 +241,8 @@ class IntegrityValidationService {
         }
       });
 
-      // 4. Validate Sync Queue against Local Stores (Detect Orphan or Invalid Queue Operations)
-      const validStoreNames = ['users', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos', 'settings', 'hospitalSystems', 'departments'];
+      // 4. Validate Sync Queue against Local Stores
+      const validStoreNames: string[] = SYNCABLE_STORES;
       
       const mapStoreData: Record<string, Map<string, any>> = {
         users: new Map(users.map((item) => [item.id, item])),
@@ -232,6 +253,11 @@ class IntegrityValidationService {
         incidents: new Map(incidents.map((item) => [item.id, item])),
         memos: new Map(memos.map((item) => [item.id, item])),
         settings: new Map(settings.map((item) => [item.id, item])),
+        networkDevices: new Map(networkDevices.map((item) => [item.id, item])),
+        hospitalSystems: new Map(hospitalSystems.map((item) => [item.id, item])),
+        departments: new Map(departments.map((item) => [item.id, item])),
+        locations: new Map(locations.map((item) => [item.id, item])),
+        subscriptions: new Map(subscriptions.map((item) => [item.id, item])),
       };
 
       queue.forEach((qItem, idx) => {
@@ -258,6 +284,7 @@ class IntegrityValidationService {
         }
 
         // Check for orphan UPDATE operations where entity no longer exists locally
+        // (DELETE operations are intentionally for items that do not exist locally, so never flag DELETE as orphan!)
         if (qItem.operation === 'UPDATE' && mapStoreData[qItem.entityType]) {
           const exists = mapStoreData[qItem.entityType].has(qItem.entityId);
           if (!exists) {
@@ -335,7 +362,9 @@ class IntegrityValidationService {
       if (orphanQueueIds.length > 0) {
         const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
         for (const item of queue) {
-          if (!item.operationId || orphanQueueIds.includes(item.operationId) || orphanQueueIds.includes(item.entityId)) {
+          // Never prune legitimate pending DELETE operations
+          if (item.operation === 'DELETE') continue;
+          if (!item.operationId || orphanQueueIds.includes(item.operationId) || (item.entityId && orphanQueueIds.includes(item.entityId))) {
             await deleteFromStore('syncQueue', item.operationId);
             repairedCount++;
           }

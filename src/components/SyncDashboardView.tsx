@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   type SyncQueueItem,
+  type SystemSettings,
 } from '../types';
 import { syncService, type ConflictResolutionStrategy } from '../services/syncService';
 
@@ -35,6 +36,7 @@ interface SyncDashboardViewProps {
   isSyncing: boolean;
   syncQueue: SyncQueueItem[];
   syncLogs: SyncLog[];
+  systemSettings?: SystemSettings | null;
   onTriggerSync: () => void;
   onRefresh: () => void;
 }
@@ -44,6 +46,7 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
   isSyncing,
   syncQueue,
   syncLogs,
+  systemSettings,
   onTriggerSync,
   onRefresh,
 }) => {
@@ -195,7 +198,7 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
             IndexedDB
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            HITOMS_Local_v1 (Persistent)
+            {systemSettings?.systemName || 'HITOMS'}_Local_v1 (Persistent)
           </div>
         </div>
       </div>

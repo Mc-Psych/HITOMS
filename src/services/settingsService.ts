@@ -13,6 +13,9 @@ export const ST_MARY_THERESA_LETTERHEAD_IMAGE = `data:image/svg+xml;utf8,<svg xm
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   id: 'main',
+  systemName: 'HITOMS',
+  systemFullName: 'Healthcare Information Technology & Operations Management System',
+  systemAcronym: 'HITOMS',
   hospitalName: 'St. Mary Theresa Catholic Hospital',
   hospitalLogo: ST_MARY_THERESA_LOGO,
   hospitalLetterheadImage: ST_MARY_THERESA_LETTERHEAD_IMAGE,

@@ -676,7 +676,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                     onChange={(e) => setIncludeLiveData(e.target.checked)}
                     className="w-4 h-4 text-purple-600 rounded cursor-pointer"
                   />
-                  <span>Inject Live HITOMS Metrics</span>
+                  <span>Inject Live {systemSettings?.systemName || 'HITOMS'} Metrics</span>
                 </label>
               </div>
             </div>

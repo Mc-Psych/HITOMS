@@ -10,21 +10,27 @@ import {
   AlertTriangle,
   RefreshCw,
   FileCode,
+  Check,
 } from 'lucide-react';
-import { type BackupRecord, type User as UserType } from '../types';
+import { type BackupRecord, type User as UserType, type SystemSettings } from '../types';
 import { backupService } from '../services/backupService';
 
 interface BackupsViewProps {
   currentUser: UserType | null;
+  systemSettings?: SystemSettings | null;
   onRefresh?: () => void;
   onRestoreSuccess?: () => void;
 }
 
-export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh, onRestoreSuccess }) => {
+export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, systemSettings, onRefresh, onRestoreSuccess }) => {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
+  const [downloadSuccessMessage, setDownloadSuccessMessage] = useState<string | null>(null);
+
+  const systemName = systemSettings?.systemName || 'HITOMS';
 
   const notifyRefresh = () => {
     onRefresh?.();
@@ -43,14 +49,33 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
   const handleManualBackup = async () => {
     if (!currentUser) return;
     setIsCreating(true);
+    setDownloadSuccessMessage(null);
     try {
-      await backupService.createManualBackup(currentUser);
+      const res = await backupService.createManualBackup(currentUser, true);
       await loadBackups();
       notifyRefresh();
-    } catch (err) {
+      setDownloadSuccessMessage(`Backup generated and downloaded to your computer: ${res.filename} (${res.record.size})`);
+      setTimeout(() => setDownloadSuccessMessage(null), 8000);
+    } catch (err: any) {
       console.error(err);
+      setRestoreMessage(`Backup Error: ${err.message || 'Failed to generate backup'}`);
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleDownloadLiveSnapshot = async () => {
+    setIsDownloading(true);
+    try {
+      const res = await backupService.downloadFullDatabaseSnapshot(currentUser || undefined);
+      if (res.success) {
+        setDownloadSuccessMessage(`Full database snapshot downloaded: ${res.filename}`);
+        setTimeout(() => setDownloadSuccessMessage(null), 8000);
+      }
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -78,8 +103,31 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
     reader.readAsText(file);
   };
 
+  const getBackupFilename = (b: BackupRecord) => {
+    const match = b.notes?.match(/\((.*?\.json)\)/);
+    if (match?.[1]) return match[1];
+    const dateStr = (b.lastBackup || b.createdAt || new Date().toISOString()).slice(0, 10);
+    return `${systemName.toLowerCase()}-backup-${dateStr}-${b.id.slice(0, 6)}.json`;
+  };
+
   return (
     <div className="space-y-6">
+      {/* Download / Status Notification */}
+      {downloadSuccessMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs font-semibold flex items-center justify-between shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600" />
+            <span>{downloadSuccessMessage}</span>
+          </div>
+          <button
+            onClick={() => setDownloadSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 font-bold px-2 py-0.5 rounded cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -91,14 +139,26 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
           </p>
         </div>
 
-        <button
-          onClick={handleManualBackup}
-          disabled={isCreating}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
-        >
-          <Download className={`w-4 h-4 ${isCreating ? 'animate-bounce' : ''}`} />
-          <span>{isCreating ? 'Generating Snapshot...' : 'Run Immediate Backup'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadLiveSnapshot}
+            disabled={isDownloading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-200 dark:border-slate-700 transition cursor-pointer disabled:opacity-50"
+            title="Download uncompressed JSON export of all database tables"
+          >
+            <Download className={`w-3.5 h-3.5 ${isDownloading ? 'animate-bounce' : ''}`} />
+            <span>{isDownloading ? 'Exporting...' : 'Export JSON'}</span>
+          </button>
+
+          <button
+            onClick={handleManualBackup}
+            disabled={isCreating}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+          >
+            <Download className={`w-4 h-4 ${isCreating ? 'animate-bounce' : ''}`} />
+            <span>{isCreating ? 'Generating & Downloading...' : 'Run Backup & Download'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Backup Status Cards */}
@@ -111,7 +171,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
           <div className="text-base font-black text-slate-900 dark:text-white mt-2">
             Daily at 02:00 GMT
           </div>
-          <p className="text-xs text-slate-500 mt-1">Automatic cron task writes full snapshot to local SSD mirror</p>
+          <p className="text-xs text-slate-500 mt-1">Automatic cron task writes full snapshot to local storage</p>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs">
@@ -122,7 +182,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
           <div className="text-base font-black text-slate-900 dark:text-white mt-2">
             AES-256 Checksummed
           </div>
-          <p className="text-xs text-slate-500 mt-1">SHA-256 verified integrity hash per snapshot</p>
+          <p className="text-xs text-slate-500 mt-1">Integrity verified per JSON snapshot archive</p>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs">
@@ -147,7 +207,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
             Restore Database from Snapshot File
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-            Upload a valid HITOMS backup file (`.json`) to overwrite or rebuild local hospital operational state.
+            Upload a valid {systemName} backup file (`.json`) to overwrite or rebuild local hospital operational state.
           </p>
         </div>
 
@@ -165,8 +225,9 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
         </div>
 
         {restoreMessage && (
-          <div className="mt-3 p-3 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 text-xs font-medium max-w-lg mx-auto">
-            {restoreMessage}
+          <div className="mt-3 p-3 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 text-xs font-medium max-w-lg mx-auto flex items-center justify-between">
+            <span>{restoreMessage}</span>
+            <button onClick={() => setRestoreMessage(null)} className="text-sky-800 font-bold ml-2">✕</button>
           </div>
         )}
       </div>
@@ -189,41 +250,59 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ currentUser, onRefresh
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">File Size</th>
                 <th className="px-4 py-3">Created By</th>
-                <th className="px-4 py-3">Checksum</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {backups.map((b) => (
-                <tr key={b.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                  <td className="px-4 py-3 font-mono text-slate-500">
-                    {new Date(b.timestamp).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                    {b.filename}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
-                      {b.backupType}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">
-                    {(b.sizeBytes / 1024).toFixed(1)} KB
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                    {b.createdBy}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-slate-400">
-                    {(b.checksumSha256 || 'SHA256-PENDING').substring(0, 16)}...
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{b.status}</span>
-                    </span>
+              {backups.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    No backup records created yet. Click "Run Backup & Download" to create your first snapshot.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                backups.map((b) => {
+                  const filename = getBackupFilename(b);
+                  return (
+                    <tr key={b.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                      <td className="px-4 py-3 font-mono text-slate-500">
+                        {new Date(b.lastBackup || b.createdAt || Date.now()).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white font-mono text-[11px]">
+                        {filename}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
+                          {b.backupType || 'Full Database'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">
+                        {b.size || 'Auto'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {b.performedBy || 'System Admin'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{b.status || 'Successful'}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={handleDownloadLiveSnapshot}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 font-bold text-[11px] border border-sky-200 dark:border-sky-800 transition cursor-pointer"
+                          title="Download database snapshot file"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Download</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

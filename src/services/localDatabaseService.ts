@@ -66,6 +66,79 @@ export const STORE_NAMES = {
 
 export type StoreName = keyof typeof STORE_NAMES;
 
+export const SYNCABLE_STORES: StoreName[] = [
+  'users',
+  'departments',
+  'locations',
+  'tickets',
+  'assets',
+  'subscriptions',
+  'maintenance',
+  'incidents',
+  'hospitalSystems',
+  'networkDevices',
+  'networkIncidents',
+  'inventory',
+  'inventoryTransactions',
+  'procurementRequests',
+  'knowledgeBase',
+  'settings',
+  'emergencyBroadcasts',
+  'memos',
+];
+
+// Tombstone Management: Prevents deleted items from being resurrected by background cloud sync
+export function recordTombstone(storeName: string, id: string): void {
+  try {
+    const raw = localStorage.getItem('hitoms_tombstones');
+    const tombstones: Record<string, number> = raw ? JSON.parse(raw) : {};
+    tombstones[`${storeName}:${id}`] = Date.now();
+    // Prune tombstones older than 30 days
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const key in tombstones) {
+      if (tombstones[key] < thirtyDaysAgo) {
+        delete tombstones[key];
+      }
+    }
+    localStorage.setItem('hitoms_tombstones', JSON.stringify(tombstones));
+  } catch (e) {
+    console.warn('[localDatabaseService] Error recording tombstone:', e);
+  }
+}
+
+export function isTombstone(storeName: string, id: string, remoteUpdatedAt?: string): boolean {
+  try {
+    const raw = localStorage.getItem('hitoms_tombstones');
+    if (!raw) return false;
+    const tombstones: Record<string, number> = JSON.parse(raw);
+    const deletedAt = tombstones[`${storeName}:${id}`];
+    if (!deletedAt) return false;
+
+    // If remote doc was explicitly updated AFTER local deletion (with 5s buffer), it's a newer recreation
+    if (remoteUpdatedAt) {
+      const remoteTime = new Date(remoteUpdatedAt).getTime();
+      if (!isNaN(remoteTime) && remoteTime > deletedAt + 5000) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearTombstone(storeName: string, id: string): void {
+  try {
+    const raw = localStorage.getItem('hitoms_tombstones');
+    if (!raw) return;
+    const tombstones: Record<string, number> = JSON.parse(raw);
+    delete tombstones[`${storeName}:${id}`];
+    localStorage.setItem('hitoms_tombstones', JSON.stringify(tombstones));
+  } catch (e) {
+    // ignore
+  }
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 // Unique Device ID generation
@@ -250,6 +323,9 @@ export async function putToStore<T extends { id?: string; operationId?: string; 
   storeName: StoreName,
   value: T
 ): Promise<T> {
+  if (value && value.id) {
+    clearTombstone(storeName, value.id);
+  }
   const db = await getDB();
   if (!db.objectStoreNames.contains(storeName)) {
     console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring put.`);
@@ -264,7 +340,7 @@ export async function putToStore<T extends { id?: string; operationId?: string; 
       if (
         !skipSyncEnqueue &&
         value._syncStatus !== 'SYNCED' &&
-        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+        SYNCABLE_STORES.includes(storeName)
       ) {
         import('./syncService').then(({ syncService }) => {
           syncService.enqueueOperation(
@@ -288,6 +364,11 @@ export async function putBatchToStore<T extends { id?: string; operationId?: str
   storeName: StoreName,
   values: T[]
 ): Promise<void> {
+  for (const item of values) {
+    if (item && item.id) {
+      clearTombstone(storeName, item.id);
+    }
+  }
   const db = await getDB();
   if (!db.objectStoreNames.contains(storeName)) {
     console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring putBatch.`);
@@ -303,7 +384,7 @@ export async function putBatchToStore<T extends { id?: string; operationId?: str
       // Automatic real-time Sync Enqueue for Batch
       if (
         !skipSyncEnqueue &&
-        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+        SYNCABLE_STORES.includes(storeName)
       ) {
         import('./syncService').then(({ syncService }) => {
           for (const item of values) {
@@ -328,6 +409,7 @@ export async function putBatchToStore<T extends { id?: string; operationId?: str
 }
 
 export async function deleteFromStore(storeName: StoreName, key: string): Promise<void> {
+  recordTombstone(storeName, key);
   const db = await getDB();
   if (!db.objectStoreNames.contains(storeName)) {
     console.warn(`[localDatabaseService] Object store '${storeName}' does not exist. Ignoring delete.`);
@@ -341,14 +423,14 @@ export async function deleteFromStore(storeName: StoreName, key: string): Promis
       // Automatic real-time Sync Enqueue for Deletes
       if (
         !skipSyncEnqueue &&
-        ['users', 'settings', 'tickets', 'assets', 'inventory', 'maintenance', 'incidents', 'memos'].includes(storeName)
+        SYNCABLE_STORES.includes(storeName)
       ) {
         import('./syncService').then(({ syncService }) => {
           syncService.enqueueOperation(
             storeName,
             key,
             'DELETE',
-            null
+            { id: key }
           ).catch((e) => console.warn('[localDatabaseService] Sync delete failed:', e));
         });
         import('./seedSnapshotService').then(({ seedSnapshotService }) => {

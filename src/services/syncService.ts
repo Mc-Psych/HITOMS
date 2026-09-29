@@ -14,6 +14,7 @@ import {
   generateUUID,
   getDeviceId,
   setSkipSyncEnqueue,
+  isTombstone,
   type StoreName,
 } from './localDatabaseService';
 import { isFirebaseConfigured, firebaseClients, ensureFirebaseAuth } from './firebaseConfig';
@@ -235,7 +236,7 @@ class SyncService {
   private async pullCollectionFromFirestore(collectionName: string, storeName: StoreName): Promise<void> {
     if (!isFirebaseConfigured() || !firebaseClients.firestore) return;
     try {
-      const { collection, getDocs, doc, writeBatch } = await import('firebase/firestore');
+      const { collection, getDocs, doc, writeBatch, deleteDoc } = await import('firebase/firestore');
       const collectionRef = collection(firebaseClients.firestore, collectionName);
 
       // Wrap getDocs with 6 second timeout so it NEVER hangs indefinitely
@@ -250,6 +251,21 @@ class SyncService {
         const remoteData = document.data();
         const id = document.id;
         remoteDocIds.add(id);
+
+        // Check if item has a pending local DELETE mutation or tombstone
+        const hasPendingDelete = queue.some(
+          (q) => q.entityType === storeName && q.entityId === id && q.operation === 'DELETE'
+        );
+        const remoteTimestamp = remoteData.updatedAt || remoteData._lastSyncedAt;
+        const tombstoned = isTombstone(storeName, id, remoteTimestamp);
+
+        if (hasPendingDelete || tombstoned) {
+          // It was deleted locally, so proactively prune from Firestore remotely to maintain cloud parity
+          deleteDoc(doc(firebaseClients.firestore, collectionName, id)).catch((e) =>
+            console.warn(`[SyncService] Failed to prune tombstoned remote doc ${id}:`, e?.message)
+          );
+          continue;
+        }
 
         // Check if there is a pending local change in queue for this item
         const hasPendingEdit = queue.some((q) => q.entityType === storeName && (q.entityId === id || (storeName === 'settings' && q.entityType === 'settings')));
@@ -429,7 +445,11 @@ class SyncService {
           { col: 'settings', store: 'settings' },
           { col: 'networkDevices', store: 'networkDevices' },
           { col: 'networkIncidents', store: 'networkIncidents' },
+          { col: 'hospitalSystems', store: 'hospitalSystems' },
           { col: 'departments', store: 'departments' },
+          { col: 'locations', store: 'locations' },
+          { col: 'subscriptions', store: 'subscriptions' },
+          { col: 'knowledgeBase', store: 'knowledgeBase' },
         ];
 
         // Process in parallel with fast timeouts

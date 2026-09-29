@@ -1,4 +1,5 @@
 import { getAllFromStore, type StoreName } from './localDatabaseService';
+import { downloadJsonFile } from '../utils/fileDownloader';
 
 export interface SeedSnapshotData {
   savedAt: string;
@@ -7,6 +8,7 @@ export interface SeedSnapshotData {
     users: any[];
     settings: any[];
     hospitalSystems: any[];
+    networkDevices: any[];
     assets: any[];
     tickets: any[];
     inventory: any[];
@@ -14,6 +16,9 @@ export interface SeedSnapshotData {
     incidents: any[];
     memos: any[];
     departments: any[];
+    locations: any[];
+    subscriptions: any[];
+    knowledgeBase: any[];
   };
 }
 
@@ -33,6 +38,7 @@ class SeedSnapshotService {
         users,
         settings,
         hospitalSystems,
+        networkDevices,
         assets,
         tickets,
         inventory,
@@ -40,10 +46,14 @@ class SeedSnapshotService {
         incidents,
         memos,
         departments,
+        locations,
+        subscriptions,
+        knowledgeBase,
       ] = await Promise.all([
         getAllFromStore<any>('users'),
         getAllFromStore<any>('settings'),
         getAllFromStore<any>('hospitalSystems'),
+        getAllFromStore<any>('networkDevices'),
         getAllFromStore<any>('assets'),
         getAllFromStore<any>('tickets'),
         getAllFromStore<any>('inventory'),
@@ -51,6 +61,9 @@ class SeedSnapshotService {
         getAllFromStore<any>('incidents'),
         getAllFromStore<any>('memos'),
         getAllFromStore<any>('departments'),
+        getAllFromStore<any>('locations'),
+        getAllFromStore<any>('subscriptions'),
+        getAllFromStore<any>('knowledgeBase'),
       ]);
 
       const payload: SeedSnapshotData = {
@@ -60,6 +73,7 @@ class SeedSnapshotService {
           users,
           settings,
           hospitalSystems,
+          networkDevices,
           assets,
           tickets,
           inventory,
@@ -67,6 +81,9 @@ class SeedSnapshotService {
           incidents,
           memos,
           departments,
+          locations,
+          subscriptions,
+          knowledgeBase,
         },
       };
 
@@ -80,6 +97,7 @@ class SeedSnapshotService {
         users: users.length,
         settings: settings.length,
         hospitalSystems: hospitalSystems.length,
+        networkDevices: networkDevices.length,
         assets: assets.length,
         tickets: tickets.length,
         inventory: inventory.length,
@@ -124,6 +142,7 @@ class SeedSnapshotService {
       users,
       settings,
       hospitalSystems,
+      networkDevices,
       assets,
       tickets,
       inventory,
@@ -131,10 +150,14 @@ class SeedSnapshotService {
       incidents,
       memos,
       departments,
+      locations,
+      subscriptions,
+      knowledgeBase,
     ] = await Promise.all([
       getAllFromStore<any>('users'),
       getAllFromStore<any>('settings'),
       getAllFromStore<any>('hospitalSystems'),
+      getAllFromStore<any>('networkDevices'),
       getAllFromStore<any>('assets'),
       getAllFromStore<any>('tickets'),
       getAllFromStore<any>('inventory'),
@@ -142,6 +165,9 @@ class SeedSnapshotService {
       getAllFromStore<any>('incidents'),
       getAllFromStore<any>('memos'),
       getAllFromStore<any>('departments'),
+      getAllFromStore<any>('locations'),
+      getAllFromStore<any>('subscriptions'),
+      getAllFromStore<any>('knowledgeBase'),
     ]);
 
     const backupData: SeedSnapshotData = {
@@ -151,6 +177,7 @@ class SeedSnapshotService {
         users,
         settings,
         hospitalSystems,
+        networkDevices,
         assets,
         tickets,
         inventory,
@@ -158,20 +185,14 @@ class SeedSnapshotService {
         incidents,
         memos,
         departments,
+        locations,
+        subscriptions,
+        knowledgeBase,
       },
     };
 
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hitoms-default-seed-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const filename = `hitoms-default-seed-${new Date().toISOString().slice(0, 10)}.json`;
+    downloadJsonFile(filename, backupData);
   }
 }
 
