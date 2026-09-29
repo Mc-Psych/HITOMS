@@ -393,14 +393,37 @@ export type NetworkDeviceType =
   | 'Starlink Terminal'
   | 'Router'
   | 'Firewall'
+  | 'Managed Switch'
   | 'Core Switch'
   | 'Distribution Switch'
+  | 'Access Switch'
   | 'Switch'
+  | 'Access Point (Indoor)'
+  | 'Access Point (Outdoor)'
   | 'Access Point'
   | 'Server'
   | 'Workstation'
   | 'Laptop'
   | 'Printer';
+
+export interface VlanConfig {
+  id: number;
+  name: string;
+  subnet?: string;
+  description?: string;
+  isTagged?: boolean;
+}
+
+export interface NetworkDeviceUplink {
+  uplinkDeviceId: string;
+  uplinkDeviceName?: string;
+  connectionType?: NetworkConnectionType;
+  portSpeed?: string;
+  localPort?: string;
+  remotePort?: string;
+  vlanTrunk?: string;
+  isRedundant?: boolean;
+}
 
 export interface NetworkDevice extends SyncMetadata {
   id: string;
@@ -417,11 +440,32 @@ export interface NetworkDevice extends SyncMetadata {
   firmware: string;
   installationDate: string;
   lastMaintenance: string;
-  predecessorId?: string; // Upstream / Predecessor device ID
-  successorIds?: string[]; // Downstream / Successor device IDs
+  predecessorId?: string; // Primary upstream / predecessor device ID
+  predecessorIds?: string[]; // Multiple upstream / uplink device IDs (e.g. for managed switches with redundant trunks)
+  successorIds?: string[]; // Downstream / successor device IDs
   uplinkDeviceId?: string; // backward compatibility alias for predecessorId
+  uplinkDeviceIds?: string[]; // backward compatibility alias for predecessorIds
+  uplinks?: NetworkDeviceUplink[]; // Rich multi-uplink detail configuration
   connectionType?: NetworkConnectionType;
   portSpeed?: string; // e.g. 1 Gbps, 10 Gbps, 100 Mbps
+  
+  // Managed Switch & VLAN Capabilities
+  vlanEnabled?: boolean; // Whether 802.1Q VLANs are activated on this switch
+  vlans?: string[]; // List of active VLAN IDs/names (e.g. ['10', '20', '30', '40', '50', '99'])
+  vlanConfigs?: VlanConfig[]; // Detailed VLAN configuration list
+  managementVlan?: string; // Management VLAN ID (default e.g. '99')
+  nativeVlan?: string; // Native VLAN (default '1')
+  trunkPorts?: string[]; // Trunk ports configured for multi-VLAN pass-through
+  isManagedSwitch?: boolean;
+
+  // Access Point (Indoor / Outdoor) Capabilities
+  apCoverageType?: 'Indoor' | 'Outdoor';
+  outdoorWeatherproofRating?: string; // e.g. 'IP67 Weatherproof / Sun-Resistant'
+  wirelessBands?: string[]; // e.g. ['2.4GHz', '5GHz', '6GHz Wi-Fi 6E']
+  maxClients?: number;
+  ssids?: string[]; // e.g. ['HITOMS-Staff', 'LHIMS-Clinical', 'Hospital-Guest']
+  poePowered?: boolean; // 802.3af/at PoE powered from switch
+  
   canvasX?: number; // X coordinate on draggable topology canvas
   canvasY?: number; // Y coordinate on draggable topology canvas
   notes?: string;

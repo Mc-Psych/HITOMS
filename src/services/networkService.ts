@@ -39,12 +39,42 @@ class NetworkService {
     const id = generateUUID();
     const now = new Date().toISOString();
 
+    // Consolidate predecessors for multi-uplink support
+    const initialPredecessors = new Set<string>();
+    if (data.predecessorId) initialPredecessors.add(data.predecessorId);
+    if (data.uplinkDeviceId) initialPredecessors.add(data.uplinkDeviceId);
+    if (data.predecessorIds && Array.isArray(data.predecessorIds)) {
+      data.predecessorIds.forEach((p) => p && initialPredecessors.add(p));
+    }
+    const predecessorIds = Array.from(initialPredecessors);
+    const primaryPredecessorId = predecessorIds[0] || undefined;
+
+    const isSwitchType = [
+      'Managed Switch',
+      'Core Switch',
+      'Distribution Switch',
+      'Access Switch',
+      'Switch',
+    ].includes(data.deviceType);
+
+    const isApType = [
+      'Access Point (Indoor)',
+      'Access Point (Outdoor)',
+      'Access Point',
+    ].includes(data.deviceType);
+
     const device: NetworkDevice = {
       ...data,
       id,
-      uplinkDeviceId: data.predecessorId || data.uplinkDeviceId,
-      predecessorId: data.predecessorId || data.uplinkDeviceId,
+      predecessorId: primaryPredecessorId,
+      predecessorIds,
+      uplinkDeviceId: primaryPredecessorId,
+      uplinkDeviceIds: predecessorIds,
       successorIds: data.successorIds || [],
+      isManagedSwitch: data.isManagedSwitch ?? (isSwitchType && data.vlanEnabled),
+      vlanEnabled: data.vlanEnabled ?? (data.deviceType === 'Managed Switch' || (data.vlans && data.vlans.length > 0)),
+      vlans: data.vlans || (data.vlanEnabled || data.deviceType === 'Managed Switch' ? ['10', '20', '30', '99'] : undefined),
+      apCoverageType: data.apCoverageType ?? (data.deviceType === 'Access Point (Outdoor)' ? 'Outdoor' : isApType ? 'Indoor' : undefined),
       createdAt: now,
       updatedAt: now,
       _syncStatus: 'PENDING_SYNC',
@@ -55,9 +85,9 @@ class NetworkService {
 
     await putToStore('networkDevices', device);
 
-    // If predecessor is assigned, update predecessor's successor list
-    if (device.predecessorId) {
-      const parent = await getFromStore<NetworkDevice>('networkDevices', device.predecessorId);
+    // If predecessors are assigned, update all parent devices' successor lists
+    for (const parentId of predecessorIds) {
+      const parent = await getFromStore<NetworkDevice>('networkDevices', parentId);
       if (parent) {
         const successors = new Set(parent.successorIds || []);
         successors.add(id);
@@ -77,10 +107,17 @@ class NetworkService {
       for (const childId of device.successorIds) {
         const child = await getFromStore<NetworkDevice>('networkDevices', childId);
         if (child) {
+          const childPreds = new Set(child.predecessorIds || []);
+          if (child.predecessorId) childPreds.add(child.predecessorId);
+          childPreds.add(id);
+          const childPredList = Array.from(childPreds);
+
           const updatedChild: NetworkDevice = {
             ...child,
-            predecessorId: id,
-            uplinkDeviceId: id,
+            predecessorId: childPredList[0] || id,
+            predecessorIds: childPredList,
+            uplinkDeviceId: childPredList[0] || id,
+            uplinkDeviceIds: childPredList,
             updatedAt: now,
             _syncStatus: 'PENDING_SYNC',
             _syncVersion: (child._syncVersion || 1) + 1,
@@ -95,7 +132,9 @@ class NetworkService {
       ipAddress: device.ipAddress,
       deviceType: device.deviceType,
       location: device.location,
-      predecessorId: device.predecessorId,
+      predecessorIds: device.predecessorIds,
+      vlanEnabled: device.vlanEnabled,
+      vlans: device.vlans,
       successorIds: device.successorIds,
     });
 
@@ -119,24 +158,43 @@ class NetworkService {
     const previousData = { ...device };
     const now = new Date().toISOString();
 
-    const normalizedUpdates = {
-      ...updates,
-      ...(updates.predecessorId !== undefined ? { uplinkDeviceId: updates.predecessorId || undefined } : {}),
-      ...(updates.uplinkDeviceId !== undefined && updates.predecessorId === undefined ? { predecessorId: updates.uplinkDeviceId || undefined } : {}),
-    };
+    // Reconcile multi-uplink predecessors
+    let newPredecessorIds = updates.predecessorIds !== undefined
+      ? updates.predecessorIds
+      : device.predecessorIds || (device.predecessorId ? [device.predecessorId] : []);
+
+    if (updates.predecessorId !== undefined) {
+      if (updates.predecessorId) {
+        if (!newPredecessorIds.includes(updates.predecessorId)) {
+          newPredecessorIds = [updates.predecessorId, ...newPredecessorIds];
+        }
+      } else {
+        newPredecessorIds = [];
+      }
+    }
+
+    const primaryPredId = newPredecessorIds[0] || undefined;
 
     const updatedDevice: NetworkDevice = {
       ...device,
-      ...normalizedUpdates,
+      ...updates,
+      predecessorId: primaryPredId,
+      predecessorIds: newPredecessorIds,
+      uplinkDeviceId: primaryPredId,
+      uplinkDeviceIds: newPredecessorIds,
       updatedAt: now,
       _syncStatus: 'PENDING_SYNC',
       _syncVersion: (device._syncVersion || 1) + 1,
     };
 
-    // If predecessor changed, unlink from old predecessor and link to new predecessor
-    if (updates.predecessorId !== undefined && updates.predecessorId !== device.predecessorId) {
-      if (device.predecessorId) {
-        const oldParent = await getFromStore<NetworkDevice>('networkDevices', device.predecessorId);
+    // Calculate diff for predecessors (uplinks)
+    const oldPredSet = new Set(device.predecessorIds || (device.predecessorId ? [device.predecessorId] : []));
+    const newPredSet = new Set(newPredecessorIds);
+
+    // Removed predecessors: remove device from their successor lists
+    for (const oldParentId of oldPredSet) {
+      if (!newPredSet.has(oldParentId)) {
+        const oldParent = await getFromStore<NetworkDevice>('networkDevices', oldParentId);
         if (oldParent && oldParent.successorIds) {
           const updatedOldParent: NetworkDevice = {
             ...oldParent,
@@ -148,9 +206,12 @@ class NetworkService {
           await putToStore('networkDevices', updatedOldParent);
         }
       }
+    }
 
-      if (updates.predecessorId) {
-        const newParent = await getFromStore<NetworkDevice>('networkDevices', updates.predecessorId);
+    // Newly added predecessors: add device to their successor lists
+    for (const newParentId of newPredSet) {
+      if (!oldPredSet.has(newParentId)) {
+        const newParent = await getFromStore<NetworkDevice>('networkDevices', newParentId);
         if (newParent) {
           const currentSuccessors = new Set(newParent.successorIds || []);
           currentSuccessors.add(id);
@@ -175,11 +236,14 @@ class NetworkService {
       for (const oldChildId of oldSuccessors) {
         if (!newSuccessors.has(oldChildId)) {
           const child = await getFromStore<NetworkDevice>('networkDevices', oldChildId);
-          if (child && child.predecessorId === id) {
+          if (child) {
+            const childPreds = (child.predecessorIds || (child.predecessorId ? [child.predecessorId] : [])).filter((p) => p !== id);
             const updatedChild: NetworkDevice = {
               ...child,
-              predecessorId: undefined,
-              uplinkDeviceId: undefined,
+              predecessorId: childPreds[0] || undefined,
+              predecessorIds: childPreds,
+              uplinkDeviceId: childPreds[0] || undefined,
+              uplinkDeviceIds: childPreds,
               updatedAt: now,
               _syncStatus: 'PENDING_SYNC',
               _syncVersion: (child._syncVersion || 1) + 1,
@@ -194,10 +258,15 @@ class NetworkService {
         if (!oldSuccessors.has(newChildId)) {
           const child = await getFromStore<NetworkDevice>('networkDevices', newChildId);
           if (child) {
+            const childPreds = new Set(child.predecessorIds || (child.predecessorId ? [child.predecessorId] : []));
+            childPreds.add(id);
+            const childPredList = Array.from(childPreds);
             const updatedChild: NetworkDevice = {
               ...child,
-              predecessorId: id,
-              uplinkDeviceId: id,
+              predecessorId: childPredList[0] || id,
+              predecessorIds: childPredList,
+              uplinkDeviceId: childPredList[0] || id,
+              uplinkDeviceIds: childPredList,
               updatedAt: now,
               _syncStatus: 'PENDING_SYNC',
               _syncVersion: (child._syncVersion || 1) + 1,
@@ -243,10 +312,17 @@ class NetworkService {
       _syncVersion: (parent._syncVersion || 1) + 1,
     };
 
+    // For multi-uplink support (Managed Switches, dual homing): add to predecessorIds
+    const childPreds = new Set(child.predecessorIds || (child.predecessorId ? [child.predecessorId] : []));
+    childPreds.add(predecessorId);
+    const childPredList = Array.from(childPreds);
+
     const updatedChild: NetworkDevice = {
       ...child,
-      predecessorId,
-      uplinkDeviceId: predecessorId,
+      predecessorId: childPredList[0] || predecessorId,
+      predecessorIds: childPredList,
+      uplinkDeviceId: childPredList[0] || predecessorId,
+      uplinkDeviceIds: childPredList,
       connectionType: connectionType || child.connectionType || parent.connectionType || 'Ethernet Cat6',
       portSpeed: portSpeed || child.portSpeed || parent.portSpeed || '1 Gbps',
       updatedAt: now,
@@ -261,6 +337,8 @@ class NetworkService {
       predecessor: parent.deviceName,
       successor: child.deviceName,
       connectionType: updatedChild.connectionType,
+      portSpeed: updatedChild.portSpeed,
+      childTotalUplinks: childPredList.length,
     });
 
     await syncService.enqueueOperation('networkDevices', parent.id, 'UPDATE', updatedParent);
@@ -295,11 +373,14 @@ class NetworkService {
       await syncService.enqueueOperation('networkDevices', parent.id, 'UPDATE', updatedParent);
     }
 
-    if (child && child.predecessorId === predecessorId) {
+    if (child) {
+      const childPreds = (child.predecessorIds || (child.predecessorId ? [child.predecessorId] : [])).filter((id) => id !== predecessorId);
       const updatedChild: NetworkDevice = {
         ...child,
-        predecessorId: undefined,
-        uplinkDeviceId: undefined,
+        predecessorId: childPreds[0] || undefined,
+        predecessorIds: childPreds,
+        uplinkDeviceId: childPreds[0] || undefined,
+        uplinkDeviceIds: childPreds,
         updatedAt: now,
         _syncStatus: 'PENDING_SYNC',
         _syncVersion: (child._syncVersion || 1) + 1,
@@ -325,9 +406,10 @@ class NetworkService {
 
     const now = new Date().toISOString();
 
-    // Clean up predecessor's successor list
-    if (device.predecessorId) {
-      const parent = await getFromStore<NetworkDevice>('networkDevices', device.predecessorId);
+    // Clean up all predecessors' successor lists
+    const allPredIds = new Set(device.predecessorIds || (device.predecessorId ? [device.predecessorId] : []));
+    for (const parentId of allPredIds) {
+      const parent = await getFromStore<NetworkDevice>('networkDevices', parentId);
       if (parent && parent.successorIds) {
         const updatedParent: NetworkDevice = {
           ...parent,
@@ -340,15 +422,18 @@ class NetworkService {
       }
     }
 
-    // Clean up successors' predecessor field
+    // Clean up successors' predecessor lists
     if (device.successorIds) {
       for (const childId of device.successorIds) {
         const child = await getFromStore<NetworkDevice>('networkDevices', childId);
-        if (child && child.predecessorId === id) {
+        if (child) {
+          const childPreds = (child.predecessorIds || (child.predecessorId ? [child.predecessorId] : [])).filter((p) => p !== id);
           const updatedChild: NetworkDevice = {
             ...child,
-            predecessorId: undefined,
-            uplinkDeviceId: undefined,
+            predecessorId: childPreds[0] || undefined,
+            predecessorIds: childPreds,
+            uplinkDeviceId: childPreds[0] || undefined,
+            uplinkDeviceIds: childPreds,
             updatedAt: now,
             _syncStatus: 'PENDING_SYNC',
             _syncVersion: (child._syncVersion || 1) + 1,

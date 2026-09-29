@@ -44,6 +44,7 @@ import {
 import { networkService } from '../services/networkService';
 import { NetworkCanvas } from './NetworkCanvas';
 import { authService } from '../services/authService';
+import { CiscoDeviceIcon } from './packet-tracer/CiscoTopologyIcons';
 
 interface NetworkViewProps {
   devices: NetworkDevice[];
@@ -57,6 +58,15 @@ const CONNECTION_TYPES: { label: string; value: NetworkConnectionType; color: st
   { label: '10G SFP+ Trunk', value: 'SFP+ 10G', color: 'text-indigo-400', bg: 'bg-indigo-950/60 border-indigo-800' },
   { label: 'Wireless 5GHz/6GHz', value: 'Wireless 5GHz/6GHz', color: 'text-purple-400', bg: 'bg-purple-950/60 border-purple-800' },
   { label: 'Satellite RF Uplink', value: 'Satellite RF', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-800' },
+];
+
+export const HOSPITAL_VLANS: { id: string; name: string; subnet: string; color: string; bg: string; badge: string }[] = [
+  { id: '10', name: 'Clinical LHIMS & EMR', subnet: '192.168.10.0/24', color: 'text-sky-400', bg: 'bg-sky-950/60 border-sky-800', badge: 'VLAN 10: Clinical LHIMS' },
+  { id: '20', name: 'Admin, Billing & NHIS', subnet: '192.168.20.0/24', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-800', badge: 'VLAN 20: Admin & NHIS' },
+  { id: '30', name: 'Staff Wi-Fi & Mobile', subnet: '192.168.30.0/24', color: 'text-indigo-400', bg: 'bg-indigo-950/60 border-indigo-800', badge: 'VLAN 30: Staff Wi-Fi' },
+  { id: '40', name: 'Patient & Public Guest', subnet: '192.168.40.0/24', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-800', badge: 'VLAN 40: Public Guest' },
+  { id: '50', name: 'CCTV & Medical IoT', subnet: '192.168.50.0/24', color: 'text-rose-400', bg: 'bg-rose-950/60 border-rose-800', badge: 'VLAN 50: CCTV & IoT' },
+  { id: '99', name: 'IT Infrastructure Mgmt', subnet: '192.168.99.0/24', color: 'text-purple-400', bg: 'bg-purple-950/60 border-purple-800', badge: 'VLAN 99: Management' },
 ];
 
 export const NetworkView: React.FC<NetworkViewProps> = ({
@@ -81,21 +91,27 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   // Add device modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [deviceName, setDeviceName] = useState('');
-  const [deviceType, setDeviceType] = useState<NetworkDevice['deviceType']>('Switch');
+  const [deviceType, setDeviceType] = useState<NetworkDevice['deviceType']>('Managed Switch');
   const [ipAddress, setIpAddress] = useState('192.168.1.');
   const [location, setLocation] = useState('Server Room Rack 1');
   const [macAddress, setMacAddress] = useState('');
   const [portsCount, setPortsCount] = useState(24);
   const [predecessorId, setPredecessorId] = useState<string>('');
+  const [selectedPredecessors, setSelectedPredecessors] = useState<string[]>([]);
   const [selectedSuccessors, setSelectedSuccessors] = useState<string[]>([]);
   const [connectionType, setConnectionType] = useState<NetworkConnectionType>('Ethernet Cat6');
   const [portSpeed, setPortSpeed] = useState('1 Gbps');
+  const [vlanEnabled, setVlanEnabled] = useState(true);
+  const [selectedVlans, setSelectedVlans] = useState<string[]>(['10', '20', '30', '99']);
+  const [apCoverageType, setApCoverageType] = useState<'Indoor' | 'Outdoor'>('Indoor');
+  const [outdoorWeatherproofRating, setOutdoorWeatherproofRating] = useState('IP67 Weatherproof / Sun-Resistant');
+  const [maxClients, setMaxClients] = useState(250);
 
   // Edit device modal state
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<NetworkDevice | null>(null);
   const [editName, setEditName] = useState('');
-  const [editType, setEditType] = useState<NetworkDevice['deviceType']>('Switch');
+  const [editType, setEditType] = useState<NetworkDevice['deviceType']>('Managed Switch');
   const [editIp, setEditIp] = useState('');
   const [editMac, setEditMac] = useState('');
   const [editLocation, setEditLocation] = useState('');
@@ -103,9 +119,15 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   const [editStatus, setEditStatus] = useState<'Online' | 'Offline' | 'Warning'>('Online');
   const [editFirmware, setEditFirmware] = useState('v4.2.1-LTS');
   const [editPredecessorId, setEditPredecessorId] = useState<string>('');
+  const [editSelectedPredecessors, setEditSelectedPredecessors] = useState<string[]>([]);
   const [editSuccessors, setEditSuccessors] = useState<string[]>([]);
   const [editConnectionType, setEditConnectionType] = useState<NetworkConnectionType>('Ethernet Cat6');
   const [editPortSpeed, setEditPortSpeed] = useState('1 Gbps');
+  const [editVlanEnabled, setEditVlanEnabled] = useState(true);
+  const [editSelectedVlans, setEditSelectedVlans] = useState<string[]>(['10', '20', '30', '99']);
+  const [editApCoverageType, setEditApCoverageType] = useState<'Indoor' | 'Outdoor'>('Indoor');
+  const [editOutdoorWeatherproofRating, setEditOutdoorWeatherproofRating] = useState('IP67 Weatherproof');
+  const [editMaxClients, setEditMaxClients] = useState(250);
 
   // Clone device modal state
   const [cloneModalOpen, setCloneModalOpen] = useState(false);
@@ -163,17 +185,68 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     }
   };
 
+  // Quick inline uplink & AP switch connection state in inspector
+  const [inlineAddUplinkId, setInlineAddUplinkId] = useState<string>('');
+  const [isAddingInlineUplink, setIsAddingInlineUplink] = useState(false);
+  const [quickAPSwitchId, setQuickAPSwitchId] = useState<string>('');
+
+  const handleAddInlineUplink = async (newParentId: string) => {
+    if (!selectedDevice || !currentUser || !newParentId) return;
+    try {
+      const res = await networkService.connectNodes(
+        newParentId,
+        selectedDevice.id,
+        currentUser,
+        selectedDevice.connectionType || 'Ethernet Cat6',
+        selectedDevice.portSpeed || '1 Gbps'
+      );
+      setSelectedDevice(res.successor);
+      setInlineAddUplinkId('');
+      setIsAddingInlineUplink(false);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleConnectAPToSwitch = async (switchId: string) => {
+    if (!selectedDevice || !currentUser || !switchId) return;
+    try {
+      if (selectedDevice.predecessorId && selectedDevice.predecessorId !== switchId) {
+        await networkService.disconnectNodes(selectedDevice.predecessorId, selectedDevice.id, currentUser);
+      }
+      const res = await networkService.connectNodes(
+        switchId,
+        selectedDevice.id,
+        currentUser,
+        'Ethernet Cat6',
+        'PoE+ Gigabit (Wi-Fi 6)'
+      );
+      setSelectedDevice(res.successor);
+      setQuickAPSwitchId('');
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleAddDevice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deviceName.trim() || !currentUser) return;
 
     try {
+      const preds = selectedPredecessors.length > 0
+        ? selectedPredecessors
+        : predecessorId
+        ? [predecessorId]
+        : [];
+
       await networkService.addDevice(
         {
           deviceName: deviceName.trim(),
           deviceType,
-          manufacturer: 'Cisco / Ubiquiti Edge',
-          model: 'Enterprise Hardware Node',
+          manufacturer: deviceType.includes('Access Point') ? 'Ubiquiti UniFi Pro' : 'Cisco Catalyst / Edge',
+          model: deviceType.includes('Access Point') ? 'Hospital Enterprise AP' : 'Enterprise Managed Hardware Node',
           serialNumber: 'SN-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
           department: 'IT Infrastructure',
           ipAddress: ipAddress.trim(),
@@ -185,10 +258,16 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
           installationDate: new Date().toISOString().split('T')[0],
           lastMaintenance: new Date().toISOString().split('T')[0],
           status: 'Online',
-          predecessorId: predecessorId || undefined,
+          predecessorId: preds[0] || undefined,
+          predecessorIds: preds,
           successorIds: selectedSuccessors,
           connectionType,
           portSpeed,
+          vlanEnabled: ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(deviceType) ? vlanEnabled : undefined,
+          vlans: ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(deviceType) ? selectedVlans : undefined,
+          apCoverageType: deviceType.includes('Access Point') ? apCoverageType : undefined,
+          outdoorWeatherproofRating: deviceType === 'Access Point (Outdoor)' ? outdoorWeatherproofRating : undefined,
+          maxClients: deviceType.includes('Access Point') ? maxClients : undefined,
         },
         currentUser
       );
@@ -203,14 +282,21 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
 
   const resetAddForm = () => {
     setDeviceName('');
+    setDeviceType('Managed Switch');
     setIpAddress('192.168.1.');
     setLocation('Server Room Rack 1');
     setMacAddress('');
     setPortsCount(24);
     setPredecessorId('');
+    setSelectedPredecessors([]);
     setSelectedSuccessors([]);
     setConnectionType('Ethernet Cat6');
     setPortSpeed('1 Gbps');
+    setVlanEnabled(true);
+    setSelectedVlans(['10', '20', '30', '99']);
+    setApCoverageType('Indoor');
+    setOutdoorWeatherproofRating('IP67 Weatherproof / Sun-Resistant');
+    setMaxClients(250);
   };
 
   const openEditModal = (device: NetworkDevice) => {
@@ -223,10 +309,17 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     setEditPorts(device.portsCount || 24);
     setEditStatus(device.status);
     setEditFirmware(device.firmware || 'v4.2.1-LTS');
+    const preds = device.predecessorIds || (device.predecessorId ? [device.predecessorId] : []);
     setEditPredecessorId(device.predecessorId || device.uplinkDeviceId || '');
+    setEditSelectedPredecessors(preds);
     setEditSuccessors(device.successorIds || []);
     setEditConnectionType(device.connectionType || 'Ethernet Cat6');
     setEditPortSpeed(device.portSpeed || '1 Gbps');
+    setEditVlanEnabled(device.vlanEnabled ?? true);
+    setEditSelectedVlans(device.vlans || ['10', '20', '30', '99']);
+    setEditApCoverageType(device.apCoverageType || (device.deviceType === 'Access Point (Outdoor)' ? 'Outdoor' : 'Indoor'));
+    setEditOutdoorWeatherproofRating(device.outdoorWeatherproofRating || 'IP67 Weatherproof');
+    setEditMaxClients(device.maxClients || 250);
     setEditModalOpen(true);
   };
 
@@ -235,6 +328,12 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     if (!editingDevice || !currentUser) return;
 
     try {
+      const preds = editSelectedPredecessors.length > 0
+        ? editSelectedPredecessors
+        : editPredecessorId
+        ? [editPredecessorId]
+        : [];
+
       const updated = await networkService.updateDevice(
         editingDevice.id,
         {
@@ -246,10 +345,16 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
           portsCount: editPorts,
           status: editStatus,
           firmware: editFirmware.trim(),
-          predecessorId: editPredecessorId || undefined,
+          predecessorId: preds[0] || undefined,
+          predecessorIds: preds,
           successorIds: editSuccessors,
           connectionType: editConnectionType,
           portSpeed: editPortSpeed,
+          vlanEnabled: ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(editType) ? editVlanEnabled : undefined,
+          vlans: ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(editType) ? editSelectedVlans : undefined,
+          apCoverageType: editType.includes('Access Point') ? editApCoverageType : undefined,
+          outdoorWeatherproofRating: editType === 'Access Point (Outdoor)' ? editOutdoorWeatherproofRating : undefined,
+          maxClients: editType.includes('Access Point') ? editMaxClients : undefined,
         },
         currentUser
       );
@@ -364,37 +469,14 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     }
   };
 
-  // Helper to get device icon
-  const getDeviceIcon = (type: NetworkDevice['deviceType'], className = 'w-5 h-5') => {
-    switch (type) {
-      case 'Starlink Terminal':
-        return <Radio className={className} />;
-      case 'Router':
-        return <Network className={className} />;
-      case 'Core Switch':
-      case 'Distribution Switch':
-      case 'Switch':
-        return <Layers className={className} />;
-      case 'Server':
-        return <Server className={className} />;
-      case 'Access Point':
-        return <Wifi className={className} />;
-      case 'Firewall':
-        return <Shield className={className} />;
-      case 'Workstation':
-        return <Monitor className={className} />;
-      case 'Laptop':
-        return <Laptop className={className} />;
-      case 'Printer':
-        return <Printer className={className} />;
-      default:
-        return <Cpu className={className} />;
-    }
+  // Helper to get device icon (Cisco Packet Tracer topology icons)
+  const getDeviceIcon = (type: NetworkDevice['deviceType'], _className = 'w-5 h-5') => {
+    return <CiscoDeviceIcon type={type} size={28} />;
   };
 
   // Layer Categorization for Structured Hierarchical View
   const layer1Gateways = useMemo(() => {
-    return devices.filter((d) => !d.predecessorId && !d.uplinkDeviceId || d.deviceType === 'Starlink Terminal');
+    return devices.filter((d) => (!d.predecessorId && !d.uplinkDeviceId && (!d.predecessorIds || d.predecessorIds.length === 0)) || d.deviceType === 'Starlink Terminal');
   }, [devices]);
 
   const layer2Routers = useMemo(() => {
@@ -402,11 +484,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   }, [devices, layer1Gateways]);
 
   const layer3Switches = useMemo(() => {
-    return devices.filter((d) => ['Core Switch', 'Distribution Switch', 'Switch', 'Firewall'].includes(d.deviceType));
+    return devices.filter((d) => ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch', 'Firewall'].includes(d.deviceType));
   }, [devices]);
 
   const layer4Endpoints = useMemo(() => {
-    return devices.filter((d) => ['Access Point', 'Server', 'Workstation', 'Laptop', 'Printer'].includes(d.deviceType));
+    return devices.filter((d) => ['Access Point (Indoor)', 'Access Point (Outdoor)', 'Access Point', 'Server', 'Workstation', 'Laptop', 'Printer'].includes(d.deviceType));
   }, [devices]);
 
   // Highlight check helper
@@ -530,7 +612,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 }`}
               >
                 <Move className="w-3.5 h-3.5" />
-                <span>Interactive Draggable Canvas</span>
+                <span>Cisco Packet Tracer Canvas</span>
               </button>
               <button
                 onClick={() => setTopologySubView('MAP')}
@@ -1469,55 +1551,235 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 Network Interconnection Architecture
               </h4>
 
-              {/* UPSTREAM PREDECESSOR CARD */}
+              {/* UPSTREAM MULTI-UPLINK FEEDS CARD */}
               <div className="p-3.5 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/30 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[11px] font-bold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
                     <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Upstream Feed (Predecessor Node)</span>
+                    <span>Upstream Feeds / Uplinks</span>
+                    {selectedDevice.predecessorIds && selectedDevice.predecessorIds.length > 1 && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-200 dark:bg-sky-900 text-sky-800 dark:text-sky-200">
+                        {selectedDevice.predecessorIds.length} Active Trunks
+                      </span>
+                    )}
                   </div>
-                  {selectedDevice.predecessorId && canManageNetwork && (
+                  {canManageNetwork && ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(selectedDevice.deviceType) && !isAddingInlineUplink && (
                     <button
-                      onClick={() => handleDisconnect(selectedDevice.predecessorId!, selectedDevice.id)}
-                      className="text-[10px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer"
-                      title="Disconnect from predecessor"
+                      onClick={() => setIsAddingInlineUplink(true)}
+                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-600 text-white hover:bg-sky-500 transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                      title="Add another upstream uplink to this switch"
                     >
-                      <Unlink2 className="w-3 h-3" />
-                      <span>Unlink</span>
+                      <Plus className="w-3 h-3" />
+                      <span>Add Uplink</span>
                     </button>
                   )}
                 </div>
 
-                {selectedDevice.predecessorId && deviceMap.get(selectedDevice.predecessorId) ? (
-                  (() => {
-                    const parent = deviceMap.get(selectedDevice.predecessorId)!;
-                    return (
-                      <div
-                        onClick={() => setSelectedDevice(parent)}
-                        className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 flex items-center justify-between cursor-pointer hover:border-sky-400 transition"
+                {/* Inline Add Uplink form for Managed Switches */}
+                {isAddingInlineUplink && canManageNetwork && (
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-700 space-y-2">
+                    <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                      <span>Add Uplink Feed (Managed switches support multiple uplinks):</span>
+                      <button
+                        onClick={() => {
+                          setIsAddingInlineUplink(false);
+                          setInlineAddUplinkId('');
+                        }}
+                        className="text-slate-400 hover:text-slate-600"
                       >
-                        <div className="flex items-center gap-2">
-                          {getDeviceIcon(parent.deviceType, 'w-4 h-4 text-sky-600')}
-                          <div>
-                            <div className="font-bold text-slate-900 dark:text-white">{parent.deviceName}</div>
-                            <div className="text-[10px] font-mono text-slate-400">{parent.ipAddress} • {parent.deviceType}</div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[10px] font-mono text-sky-600 font-semibold block">
-                            {selectedDevice.connectionType || 'Cat6'} ({selectedDevice.portSpeed || '1G'})
-                          </span>
-                          <span className="text-[9px] text-slate-400">Click to inspect</span>
-                        </div>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <p className="text-[11px] text-slate-500 italic">
-                    This is a root gateway device with no upstream predecessor.
-                  </p>
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={inlineAddUplinkId}
+                        onChange={(e) => setInlineAddUplinkId(e.target.value)}
+                        className="flex-1 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                      >
+                        <option value="">Select upstream device...</option>
+                        {devices
+                          .filter(
+                            (d) =>
+                              d.id !== selectedDevice.id &&
+                              !(selectedDevice.predecessorIds || [selectedDevice.predecessorId]).includes(d.id)
+                          )
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        disabled={!inlineAddUplinkId}
+                        onClick={() => handleAddInlineUplink(inlineAddUplinkId)}
+                        className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold text-xs cursor-pointer"
+                      >
+                        Link
+                      </button>
+                    </div>
+                  </div>
                 )}
+
+                {/* Quick Switch connection for APs */}
+                {selectedDevice.deviceType.includes('Access Point') && canManageNetwork && (
+                  <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 space-y-1.5">
+                    <div className="text-[10px] font-bold text-purple-800 dark:text-purple-300 flex items-center justify-between">
+                      <span>Connect AP to Any Switch:</span>
+                      <span className="text-[9px] text-purple-600 dark:text-purple-400 font-mono">PoE+ Multi-SSID</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={quickAPSwitchId}
+                        onChange={(e) => setQuickAPSwitchId(e.target.value)}
+                        className="flex-1 px-2 py-1 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 rounded-lg text-xs"
+                      >
+                        <option value="">Choose target switch...</option>
+                        {devices
+                          .filter((d) =>
+                            ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(d.deviceType)
+                          )
+                          .map((sw) => (
+                            <option key={sw.id} value={sw.id}>
+                              {sw.deviceName} ({sw.ipAddress}) - {sw.deviceType} {sw.vlanEnabled ? '[VLANs Active]' : ''}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        disabled={!quickAPSwitchId}
+                        onClick={() => handleConnectAPToSwitch(quickAPSwitchId)}
+                        className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-bold text-xs cursor-pointer shrink-0"
+                      >
+                        Connect
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {(() => {
+                  const rawPreds: string[] =
+                    selectedDevice.predecessorIds && selectedDevice.predecessorIds.length > 0
+                      ? selectedDevice.predecessorIds
+                      : selectedDevice.predecessorId
+                      ? [selectedDevice.predecessorId]
+                      : [];
+                  const predIds: string[] = Array.from(new Set(rawPreds));
+
+                  if (predIds.length === 0) {
+                    return (
+                      <p className="text-[11px] text-slate-500 italic">
+                        This is a root gateway device with no upstream predecessor.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-1.5">
+                      {predIds.map((predId) => {
+                        const parent = deviceMap.get(predId);
+                        if (!parent) return null;
+                        return (
+                          <div
+                            key={predId}
+                            onClick={() => setSelectedDevice(parent)}
+                            className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 flex items-center justify-between cursor-pointer hover:border-sky-400 transition"
+                          >
+                            <div className="flex items-center gap-2">
+                              {getDeviceIcon(parent.deviceType, 'w-4 h-4 text-sky-600')}
+                              <div>
+                                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <span>{parent.deviceName}</span>
+                                  {(parent.deviceType === 'Managed Switch' || parent.vlanEnabled) && (
+                                    <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-900/60 text-cyan-300 border border-cyan-700">
+                                      VLAN Trunk
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-400">{parent.ipAddress} • {parent.deviceType}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-right">
+                                <span className="text-[10px] font-mono text-sky-600 font-semibold block">
+                                  {selectedDevice.connectionType || 'Cat6'} ({selectedDevice.portSpeed || '1G'})
+                                </span>
+                              </div>
+                              {canManageNetwork && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDisconnect(predId, selectedDevice.id);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                                  title="Disconnect this uplink"
+                                >
+                                  <Unlink2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
+
+              {/* VLAN & TRUNKING STATUS FOR SWITCHES */}
+              {(selectedDevice.vlanEnabled || (selectedDevice.vlans && selectedDevice.vlans.length > 0) || ['Managed Switch', 'Core Switch', 'Distribution Switch'].includes(selectedDevice.deviceType)) && (
+                <div className="p-3.5 rounded-xl border border-cyan-200 dark:border-cyan-900/60 bg-cyan-50/50 dark:bg-cyan-950/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-cyan-600" />
+                      <span>802.1Q Virtual LANs (VLANs) Active</span>
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-200 font-bold">
+                      Trunking Active
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(selectedDevice.vlans || ['10', '20', '30', '99']).map((vId) => {
+                      const vObj = HOSPITAL_VLANS.find((v) => v.id === vId);
+                      return (
+                        <span
+                          key={vId}
+                          className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white dark:bg-slate-900 border border-cyan-300 dark:border-cyan-800 text-cyan-800 dark:text-cyan-300 shadow-2xs"
+                        >
+                          {vObj ? vObj.badge : `VLAN ${vId}`}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* AP WIRELESS SPECIFICATIONS */}
+              {(selectedDevice.deviceType.includes('Access Point') || selectedDevice.apCoverageType) && (
+                <div className="p-3.5 rounded-xl border border-purple-200 dark:border-purple-900/60 bg-purple-50/50 dark:bg-purple-950/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
+                      <Wifi className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Wireless AP Deployment Profile</span>
+                    </span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      selectedDevice.deviceType === 'Access Point (Outdoor)' || selectedDevice.apCoverageType === 'Outdoor'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-500'
+                        : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                    }`}>
+                      {selectedDevice.deviceType === 'Access Point (Outdoor)' || selectedDevice.apCoverageType === 'Outdoor' ? 'Outdoor (IP67 Rated)' : 'Indoor Ceiling / Wall Mount'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+                    <div>
+                      <span className="text-slate-400 block">Coverage Scope:</span>
+                      <span className="font-semibold">{selectedDevice.apCoverageType || (selectedDevice.deviceType === 'Access Point (Outdoor)' ? 'Outdoor Compound / Bay' : 'Indoor Department')}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Max Clients:</span>
+                      <span className="font-semibold">{selectedDevice.maxClients || 250} Concurrent</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* DOWNSTREAM SUCCESSORS CARD */}
               <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/30 space-y-2">
@@ -1818,14 +2080,18 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                     onChange={(e) => setEditType(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
                   >
-                    <option value="Switch">Managed Switch</option>
-                    <option value="Core Switch">Core Switch</option>
+                    <option value="Managed Switch">Managed Switch (VLANs & Several Uplinks)</option>
+                    <option value="Core Switch">Core Switch (Backbone)</option>
                     <option value="Distribution Switch">Distribution Switch</option>
-                    <option value="Router">Core Router</option>
-                    <option value="Access Point">Access Point</option>
-                    <option value="Server">Local Server</option>
-                    <option value="Firewall">Hardware Firewall</option>
-                    <option value="Starlink Terminal">Starlink Terminal</option>
+                    <option value="Access Switch">Access Switch (PoE Edge)</option>
+                    <option value="Switch">Switch (Generic)</option>
+                    <option value="Access Point (Indoor)">Access Point (Indoor Ceiling / Wall)</option>
+                    <option value="Access Point (Outdoor)">Access Point (Outdoor Weatherproof IP67)</option>
+                    <option value="Access Point">Access Point (General Wi-Fi)</option>
+                    <option value="Router">Core Gateway / Router</option>
+                    <option value="Firewall">Hardware Security Firewall</option>
+                    <option value="Starlink Terminal">Starlink Terminal (Satellite WAN)</option>
+                    <option value="Server">Edge Hospital Server</option>
                     <option value="Workstation">Desktop Computer / Workstation</option>
                     <option value="Laptop">Laptop / Portable Computer</option>
                     <option value="Printer">Network Printer / Scanner</option>
@@ -1846,30 +2112,232 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 </div>
               </div>
 
-              {/* Predecessor Configuration */}
-              <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
-                <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
-                  <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Upstream Feed (Predecessor Device)</span>
-                </label>
-                <select
-                  value={editPredecessorId}
-                  onChange={(e) => setEditPredecessorId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
-                >
-                  <option value="">None (Top-Level Root Gateway)</option>
-                  {devices
-                    .filter((d) => d.id !== editingDevice.id)
-                    .map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.deviceName} ({d.ipAddress}) - {d.deviceType}
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[10px] text-slate-500">
-                  Select which hardware node supplies network access to this device.
-                </p>
-              </div>
+              {/* 1. If SWITCH: Support Several Upstream Uplinks and VLANs Configuration */}
+              {['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(editType) ? (
+                <div className="space-y-3">
+                  {/* Multi-Uplink Configuration */}
+                  <div className="p-3 bg-sky-50/70 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sky-800 dark:text-sky-300 font-bold flex items-center gap-1.5 text-xs">
+                        <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Upstream Feeds / Uplinks (Supports Several Uplinks)</span>
+                      </label>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300">
+                        {editSelectedPredecessors.length} active uplink{editSelectedPredecessors.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Managed switches with VLANs activated can connect to multiple upstream switches or routers for redundant trunking and LACP feeds.
+                    </p>
+                    <div className="max-h-32 overflow-y-auto space-y-1 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                      {devices
+                        .filter((d) => d.id !== editingDevice.id)
+                        .map((d) => {
+                          const isChecked = editSelectedPredecessors.includes(d.id);
+                          return (
+                            <label
+                              key={d.id}
+                              className="flex items-center justify-between p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEditSelectedPredecessors([...editSelectedPredecessors, d.id]);
+                                    } else {
+                                      setEditSelectedPredecessors(editSelectedPredecessors.filter((id) => id !== d.id));
+                                    }
+                                  }}
+                                  className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                                />
+                                <span className="font-semibold text-slate-800 dark:text-slate-200">{d.deviceName}</span>
+                                <span className="text-[10px] font-mono text-slate-400">({d.ipAddress})</span>
+                              </div>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                                {d.deviceType}
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* 802.1Q Virtual LANs (VLANs) Configuration */}
+                  <div className="p-3 bg-cyan-50/70 dark:bg-cyan-950/40 rounded-xl border border-cyan-200 dark:border-cyan-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-cyan-800 dark:text-cyan-300 font-bold flex items-center gap-1.5 text-xs">
+                        <Layers className="w-3.5 h-3.5 text-cyan-600" />
+                        <span>802.1Q Virtual LANs (VLANs)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editVlanEnabled}
+                          onChange={(e) => setEditVlanEnabled(e.target.checked)}
+                          className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                        />
+                        <span className="text-xs font-bold text-cyan-700 dark:text-cyan-300">
+                          {editVlanEnabled ? 'VLANs Activated' : 'Disabled'}
+                        </span>
+                      </label>
+                    </div>
+                    {editVlanEnabled && (
+                      <div className="space-y-1.5 pt-1 border-t border-cyan-200 dark:border-cyan-900/60">
+                        <div className="text-[10px] text-cyan-700 dark:text-cyan-400 font-medium">
+                          Select VLAN tags to carry across upstream trunks and downstream ports:
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {HOSPITAL_VLANS.map((vlan) => {
+                            const isVlanChecked = editSelectedVlans.includes(vlan.id);
+                            return (
+                              <label
+                                key={vlan.id}
+                                className="flex items-center gap-2 p-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer text-[11px]"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isVlanChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEditSelectedVlans([...editSelectedVlans, vlan.id]);
+                                    } else {
+                                      setEditSelectedVlans(editSelectedVlans.filter((v) => v !== vlan.id));
+                                    }
+                                  }}
+                                  className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                                />
+                                <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">{vlan.badge}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : editType.includes('Access Point') ? (
+                /* 2. If ACCESS POINT: Connect to ANY switch & AP Deployment Profile */
+                <div className="space-y-3">
+                  <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-800 space-y-2">
+                    <label className="block text-purple-800 dark:text-purple-300 font-bold flex items-center gap-1.5 text-xs">
+                      <Network className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Connected Upstream Switch (APs can connect to ANY switch)</span>
+                    </label>
+                    <select
+                      value={editPredecessorId}
+                      onChange={(e) => {
+                        setEditPredecessorId(e.target.value);
+                        setEditSelectedPredecessors(e.target.value ? [e.target.value] : []);
+                      }}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 rounded-xl focus:outline-none text-xs"
+                    >
+                      <option value="">Select Target Switch...</option>
+                      <optgroup label="Switches Available (Core, Dist, Managed, Access)">
+                        {devices
+                          .filter((d) =>
+                            ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(d.deviceType) &&
+                            d.id !== editingDevice.id
+                          )
+                          .map((sw) => (
+                            <option key={sw.id} value={sw.id}>
+                              ⚡ {sw.deviceName} ({sw.ipAddress}) - {sw.deviceType} {sw.vlanEnabled ? '[VLAN Trunk]' : ''}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label="Other Network Nodes (Routers / Gateways)">
+                        {devices
+                          .filter(
+                            (d) =>
+                              !['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(d.deviceType) &&
+                              d.id !== editingDevice.id
+                          )
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
+                    <p className="text-[10px] text-purple-700 dark:text-purple-300">
+                      Indoor and Outdoor APs can link into any switch port with 802.3af/at PoE+ power and multi-SSID VLAN trunking.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-700 dark:text-slate-300 font-bold flex items-center gap-1.5 text-xs">
+                        <Wifi className="w-3.5 h-3.5 text-sky-500" />
+                        <span>AP Wireless Coverage & Enclosure</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">Wi-Fi 6 (802.11ax)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Coverage Scope</label>
+                        <select
+                          value={editApCoverageType}
+                          onChange={(e) => setEditApCoverageType(e.target.value as 'Indoor' | 'Outdoor')}
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        >
+                          <option value="Indoor">Indoor (Ceiling / Wall Mount)</option>
+                          <option value="Outdoor">Outdoor (Perimeter / Ambulance Bay)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Max Concurrent Clients</label>
+                        <input
+                          type="number"
+                          value={editMaxClients}
+                          onChange={(e) => setEditMaxClients(parseInt(e.target.value) || 250)}
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                    {(editApCoverageType === 'Outdoor' || editType === 'Access Point (Outdoor)') && (
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Weatherproof Rating</label>
+                        <input
+                          type="text"
+                          value={editOutdoorWeatherproofRating}
+                          onChange={(e) => setEditOutdoorWeatherproofRating(e.target.value)}
+                          placeholder="e.g. IP67 Weatherproof / UV-Resistant Pole Mount"
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* 3. Other Devices: Standard Predecessor Selector */
+                <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+                  <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
+                    <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Upstream Feed (Predecessor Device)</span>
+                  </label>
+                  <select
+                    value={editPredecessorId}
+                    onChange={(e) => {
+                      setEditPredecessorId(e.target.value);
+                      setEditSelectedPredecessors(e.target.value ? [e.target.value] : []);
+                    }}
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
+                  >
+                    <option value="">None (Top-Level Root Gateway)</option>
+                    {devices
+                      .filter((d) => d.id !== editingDevice.id)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Select which hardware node supplies network access to this device.
+                  </p>
+                </div>
+              )}
 
               {/* Successors Multi-Selection */}
               <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-1.5">
@@ -2075,17 +2543,29 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                   <label className="block text-slate-500 font-semibold mb-1">Device Type *</label>
                   <select
                     value={deviceType}
-                    onChange={(e) => setDeviceType(e.target.value as any)}
+                    onChange={(e) => {
+                      const newType = e.target.value as any;
+                      setDeviceType(newType);
+                      if (newType === 'Access Point (Outdoor)') {
+                        setApCoverageType('Outdoor');
+                      } else if (newType === 'Access Point (Indoor)') {
+                        setApCoverageType('Indoor');
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none"
                   >
-                    <option value="Switch">Managed Switch</option>
-                    <option value="Core Switch">Core Switch</option>
+                    <option value="Managed Switch">Managed Switch (VLANs & Several Uplinks)</option>
+                    <option value="Core Switch">Core Switch (Backbone)</option>
                     <option value="Distribution Switch">Distribution Switch</option>
-                    <option value="Router">Core Router</option>
-                    <option value="Access Point">Access Point</option>
-                    <option value="Server">Local Server</option>
-                    <option value="Firewall">Hardware Firewall</option>
-                    <option value="Starlink Terminal">Starlink Terminal</option>
+                    <option value="Access Switch">Access Switch (PoE Edge)</option>
+                    <option value="Switch">Switch (Generic)</option>
+                    <option value="Access Point (Indoor)">Access Point (Indoor Ceiling / Wall)</option>
+                    <option value="Access Point (Outdoor)">Access Point (Outdoor Weatherproof IP67)</option>
+                    <option value="Access Point">Access Point (General Wi-Fi)</option>
+                    <option value="Router">Core Gateway / Router</option>
+                    <option value="Firewall">Hardware Security Firewall</option>
+                    <option value="Starlink Terminal">Starlink Terminal (Satellite WAN)</option>
+                    <option value="Server">Edge Hospital Server</option>
                     <option value="Workstation">Desktop Computer / Workstation</option>
                     <option value="Laptop">Laptop / Portable Computer</option>
                     <option value="Printer">Network Printer / Scanner</option>
@@ -2103,28 +2583,226 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 </div>
               </div>
 
-              {/* Predecessor Selection in Add Modal */}
-              <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
-                <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
-                  <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Upstream Feed (Predecessor Device)</span>
-                </label>
-                <select
-                  value={predecessorId}
-                  onChange={(e) => setPredecessorId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
-                >
-                  <option value="">None (Top-Level Root Gateway)</option>
-                  {devices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.deviceName} ({d.ipAddress}) - {d.deviceType}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-slate-500">
-                  Choose which switch, router, or gateway supplies connectivity to this node.
-                </p>
-              </div>
+              {/* 1. If SWITCH: Support Several Upstream Uplinks and VLANs Configuration */}
+              {['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(deviceType) ? (
+                <div className="space-y-3">
+                  {/* Multi-Uplink Configuration */}
+                  <div className="p-3 bg-sky-50/70 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sky-800 dark:text-sky-300 font-bold flex items-center gap-1.5 text-xs">
+                        <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Upstream Feeds / Uplinks (Supports Several Uplinks)</span>
+                      </label>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300">
+                        {selectedPredecessors.length} active uplink{selectedPredecessors.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Managed switches with VLANs activated can connect to multiple upstream switches or routers for redundant trunking and LACP feeds.
+                    </p>
+                    <div className="max-h-32 overflow-y-auto space-y-1 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                      {devices.map((d) => {
+                        const isChecked = selectedPredecessors.includes(d.id);
+                        return (
+                          <label
+                            key={d.id}
+                            className="flex items-center justify-between p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPredecessors([...selectedPredecessors, d.id]);
+                                  } else {
+                                    setSelectedPredecessors(selectedPredecessors.filter((id) => id !== d.id));
+                                  }
+                                }}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                              />
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{d.deviceName}</span>
+                              <span className="text-[10px] font-mono text-slate-400">({d.ipAddress})</span>
+                            </div>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                              {d.deviceType}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 802.1Q Virtual LANs (VLANs) Configuration */}
+                  <div className="p-3 bg-cyan-50/70 dark:bg-cyan-950/40 rounded-xl border border-cyan-200 dark:border-cyan-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-cyan-800 dark:text-cyan-300 font-bold flex items-center gap-1.5 text-xs">
+                        <Layers className="w-3.5 h-3.5 text-cyan-600" />
+                        <span>802.1Q Virtual LANs (VLANs)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={vlanEnabled}
+                          onChange={(e) => setVlanEnabled(e.target.checked)}
+                          className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                        />
+                        <span className="text-xs font-bold text-cyan-700 dark:text-cyan-300">
+                          {vlanEnabled ? 'VLANs Activated' : 'Disabled'}
+                        </span>
+                      </label>
+                    </div>
+                    {vlanEnabled && (
+                      <div className="space-y-1.5 pt-1 border-t border-cyan-200 dark:border-cyan-900/60">
+                        <div className="text-[10px] text-cyan-700 dark:text-cyan-400 font-medium">
+                          Select VLAN tags to carry across upstream trunks and downstream ports:
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {HOSPITAL_VLANS.map((vlan) => {
+                            const isVlanChecked = selectedVlans.includes(vlan.id);
+                            return (
+                              <label
+                                key={vlan.id}
+                                className="flex items-center gap-2 p-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer text-[11px]"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isVlanChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedVlans([...selectedVlans, vlan.id]);
+                                    } else {
+                                      setSelectedVlans(selectedVlans.filter((v) => v !== vlan.id));
+                                    }
+                                  }}
+                                  className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                                />
+                                <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">{vlan.badge}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : deviceType.includes('Access Point') ? (
+                /* 2. If ACCESS POINT: Connect to ANY switch & AP Deployment Profile */
+                <div className="space-y-3">
+                  <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-800 space-y-2">
+                    <label className="block text-purple-800 dark:text-purple-300 font-bold flex items-center gap-1.5 text-xs">
+                      <Network className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Connected Upstream Switch (APs can connect to ANY switch)</span>
+                    </label>
+                    <select
+                      value={predecessorId}
+                      onChange={(e) => {
+                        setPredecessorId(e.target.value);
+                        setSelectedPredecessors(e.target.value ? [e.target.value] : []);
+                      }}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 rounded-xl focus:outline-none text-xs"
+                    >
+                      <option value="">Select Target Switch...</option>
+                      <optgroup label="Switches Available (Core, Dist, Managed, Access)">
+                        {devices
+                          .filter((d) =>
+                            ['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(d.deviceType)
+                          )
+                          .map((sw) => (
+                            <option key={sw.id} value={sw.id}>
+                              ⚡ {sw.deviceName} ({sw.ipAddress}) - {sw.deviceType} {sw.vlanEnabled ? '[VLAN Trunk]' : ''}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label="Other Network Nodes (Routers / Gateways)">
+                        {devices
+                          .filter(
+                            (d) =>
+                              !['Managed Switch', 'Core Switch', 'Distribution Switch', 'Access Switch', 'Switch'].includes(d.deviceType)
+                          )
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
+                    <p className="text-[10px] text-purple-700 dark:text-purple-300">
+                      Indoor and Outdoor APs can link into any switch port with 802.3af/at PoE+ power and multi-SSID VLAN trunking.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-700 dark:text-slate-300 font-bold flex items-center gap-1.5 text-xs">
+                        <Wifi className="w-3.5 h-3.5 text-sky-500" />
+                        <span>AP Wireless Coverage & Enclosure</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">Wi-Fi 6 (802.11ax)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Coverage Scope</label>
+                        <select
+                          value={apCoverageType}
+                          onChange={(e) => setApCoverageType(e.target.value as 'Indoor' | 'Outdoor')}
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        >
+                          <option value="Indoor">Indoor (Ceiling / Wall Mount)</option>
+                          <option value="Outdoor">Outdoor (Perimeter / Ambulance Bay)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Max Concurrent Clients</label>
+                        <input
+                          type="number"
+                          value={maxClients}
+                          onChange={(e) => setMaxClients(parseInt(e.target.value) || 250)}
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                    {(apCoverageType === 'Outdoor' || deviceType === 'Access Point (Outdoor)') && (
+                      <div>
+                        <label className="block text-slate-500 text-[10px] font-semibold mb-1">Weatherproof Rating</label>
+                        <input
+                          type="text"
+                          value={outdoorWeatherproofRating}
+                          onChange={(e) => setOutdoorWeatherproofRating(e.target.value)}
+                          placeholder="e.g. IP67 Weatherproof / UV-Resistant Pole Mount"
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* 3. Other Devices: Standard Predecessor Selector */
+                <div className="p-3 bg-sky-50/60 dark:bg-sky-950/30 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+                  <label className="block text-sky-800 dark:text-sky-300 font-bold mb-1 flex items-center gap-1">
+                    <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Upstream Feed (Predecessor Device)</span>
+                  </label>
+                  <select
+                    value={predecessorId}
+                    onChange={(e) => {
+                      setPredecessorId(e.target.value);
+                      setSelectedPredecessors(e.target.value ? [e.target.value] : []);
+                    }}
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-xs"
+                  >
+                    <option value="">None (Top-Level Root Gateway)</option>
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.deviceName} ({d.ipAddress}) - {d.deviceType}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Choose which switch, router, or gateway supplies connectivity to this node.
+                  </p>
+                </div>
+              )}
 
               {/* Successors Multi-Selection in Add Modal */}
               <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-1.5">
