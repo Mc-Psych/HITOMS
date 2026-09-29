@@ -43,6 +43,27 @@ import { settingsService } from './services/settingsService';
 import { seedSnapshotService } from './services/seedSnapshotService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
 
+function updateFavicon(logoSrc: string | null | undefined) {
+  if (!logoSrc) return;
+  try {
+    let link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = logoSrc;
+    
+    // Also update apple-touch-icon if present
+    let appleLink = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement;
+    if (appleLink) {
+      appleLink.href = logoSrc;
+    }
+  } catch (e) {
+    console.warn('Failed to update favicon:', e);
+  }
+}
+
 // Component Views
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -154,6 +175,9 @@ export default function App() {
       setSyncLogs(loadedLogs || []);
       setAllUsers(loadedUsers || []);
       setSystemSettings(loadedSettings || null);
+      if (loadedSettings?.hospitalLogo) {
+        updateFavicon(loadedSettings.hospitalLogo);
+      }
       setEmergencyAlerts(loadedEmergency || []);
 
       const user = authService.getCurrentUser();
@@ -205,10 +229,23 @@ export default function App() {
       syncService.getPendingQueue().then(setSyncQueue);
     });
 
+    // Sync initial favicon update on startup from cached localStorage settings
+    try {
+      const cached = settingsService.getSettingsSync();
+      if (cached?.hospitalLogo) {
+        updateFavicon(cached.hospitalLogo);
+      }
+    } catch (e) {
+      // ignore
+    }
+
     const handleSettingsUpdated = (e: Event) => {
       const customEvent = e as CustomEvent<SystemSettings>;
       if (customEvent.detail) {
         setSystemSettings(customEvent.detail);
+        if (customEvent.detail.hospitalLogo) {
+          updateFavicon(customEvent.detail.hospitalLogo);
+        }
       }
     };
     window.addEventListener('hitoms_settings_updated', handleSettingsUpdated);

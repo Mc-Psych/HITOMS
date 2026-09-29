@@ -197,10 +197,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       {/* Top Collapse / Expand Header Bar */}
       <div className="p-2.5 border-b border-slate-800 flex items-center justify-between">
-        {!isCollapsed && (
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 pl-2">
-            Navigation
-          </span>
+        {!isCollapsed ? (
+          <div className="flex items-center gap-2 pl-2">
+            {systemSettings?.hospitalLogo ? (
+              <img
+                src={systemSettings.hospitalLogo}
+                alt="Logo"
+                className="w-5 h-5 object-contain bg-white rounded p-0.5 shrink-0"
+              />
+            ) : (
+              <div className="w-5 h-5 bg-sky-600 rounded flex items-center justify-center text-white font-black text-[10px] shrink-0">
+                H
+              </div>
+            )}
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              HITOMS Ops
+            </span>
+          </div>
+        ) : (
+          <div className="mx-auto flex items-center justify-center">
+            {systemSettings?.hospitalLogo ? (
+              <img
+                src={systemSettings.hospitalLogo}
+                alt="Logo"
+                className="w-5 h-5 object-contain bg-white rounded p-0.5 shrink-0"
+              />
+            ) : null}
+          </div>
         )}
         <button
           onClick={handleToggle}
