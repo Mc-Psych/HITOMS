@@ -333,11 +333,22 @@ export default function App() {
   }, [quickTicketOpen]);
 
   if (!initialized) {
+    const cachedSettings = settingsService.getSettingsSync();
+    const launchLogo = cachedSettings?.hospitalLogo;
+
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
-        <div className="w-12 h-12 rounded-2xl bg-sky-600 flex items-center justify-center font-black text-2xl animate-pulse shadow-lg mb-4">
-          H
-        </div>
+        {launchLogo ? (
+          <img
+            src={launchLogo}
+            alt="Hospital Logo"
+            className="w-16 h-16 object-contain rounded-2xl bg-white p-1.5 shadow-lg mb-4 animate-pulse"
+          />
+        ) : (
+          <div className="w-12 h-12 rounded-2xl bg-sky-600 flex items-center justify-center font-black text-2xl animate-pulse shadow-lg mb-4">
+            H
+          </div>
+        )}
         <h2 className="text-lg font-bold text-slate-100">HITOMS Local Server</h2>
         <p className="text-xs text-slate-400 mt-1">Initializing local hospital storage & offline database...</p>
         <div className="mt-4 flex items-center gap-2 text-[11px] text-emerald-400 font-mono">

@@ -252,7 +252,7 @@ class SyncService {
         remoteDocIds.add(id);
 
         // Check if there is a pending local change in queue for this item
-        const hasPendingEdit = queue.some((q) => q.entityType === storeName && q.entityId === id);
+        const hasPendingEdit = queue.some((q) => q.entityType === storeName && (q.entityId === id || (storeName === 'settings' && q.entityType === 'settings')));
         if (hasPendingEdit) continue;
 
         itemsToSave.push({
@@ -289,6 +289,7 @@ class SyncService {
 
         for (const localItem of localItems) {
           if (!localItem || !localItem.id) continue;
+          if (storeName === 'settings') continue; // Never delete settings from local store via sync pull reconciliation!
           if (!remoteDocIds.has(localItem.id)) {
             // Do not delete if the item has a pending local CREATE mutation
             const hasPendingCreate = queue.some(

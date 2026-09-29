@@ -34,6 +34,12 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
   const contactEmail = systemSettings?.contactEmail || 'send2smthit@gmail.com';
   const letterheadImage = systemSettings?.hospitalLetterheadImage;
   const letterheadMode = systemSettings?.letterheadMode || 'DYNAMIC_HEADER';
+  const isPdfLetterhead = Boolean(
+    letterheadImage &&
+      (letterheadImage.startsWith('data:application/pdf') ||
+        letterheadImage.includes('application/pdf') ||
+        letterheadImage.toLowerCase().includes('.pdf'))
+  );
 
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const memoCanvasRef = useRef<HTMLDivElement>(null);
@@ -64,6 +70,12 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
 
     const originalGetComputedStyle = window.getComputedStyle;
     const originalGetPropertyValue = CSSStyleDeclaration.prototype.getPropertyValue;
+
+    const cssRuleProto = CSSRule.prototype;
+    const styleProto = CSSStyleDeclaration.prototype;
+
+    const originalCssRuleCssTextDesc = Object.getOwnPropertyDescriptor(cssRuleProto, 'cssText');
+    const originalStyleCssTextDesc = Object.getOwnPropertyDescriptor(styleProto, 'cssText');
 
     try {
       // Helper to convert oklch colors to standard rgb/rgba
@@ -126,6 +138,13 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
         }
       };
 
+      const replaceOklchInString = (str: string): string => {
+        if (!str || typeof str !== 'string' || !str.includes('oklch')) return str;
+        return str.replace(/oklch\([^)]+\)/gi, (match) => {
+          return oklchToRgb(match);
+        });
+      };
+
       // Monkeypatch window.getComputedStyle
       window.getComputedStyle = (elt, pseudoElt) => {
         const style = originalGetComputedStyle(elt, pseudoElt);
@@ -153,7 +172,7 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
         });
       };
 
-      // Monkeypatch CSSStyleDeclaration prototype
+      // Monkeypatch CSSStyleDeclaration prototype getPropertyValue
       CSSStyleDeclaration.prototype.getPropertyValue = function(this: CSSStyleDeclaration, property: string) {
         const val = originalGetPropertyValue.call(this, property);
         if (val && typeof val === 'string' && val.includes('oklch')) {
@@ -161,6 +180,33 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
         }
         return val;
       };
+
+      // Monkeypatch cssText globally during html2canvas runtime to prevent style parsing crashes
+      if (originalCssRuleCssTextDesc && originalCssRuleCssTextDesc.configurable) {
+        Object.defineProperty(cssRuleProto, 'cssText', {
+          get() {
+            const val = originalCssRuleCssTextDesc.get?.call(this);
+            if (val && typeof val === 'string' && val.includes('oklch')) {
+              return replaceOklchInString(val);
+            }
+            return val;
+          },
+          configurable: true
+        });
+      }
+
+      if (originalStyleCssTextDesc && originalStyleCssTextDesc.configurable) {
+        Object.defineProperty(styleProto, 'cssText', {
+          get() {
+            const val = originalStyleCssTextDesc.get?.call(this);
+            if (val && typeof val === 'string' && val.includes('oklch')) {
+              return replaceOklchInString(val);
+            }
+            return val;
+          },
+          configurable: true
+        });
+      }
 
       const element = memoCanvasRef.current;
       const canvas = await html2canvas(element, {
@@ -204,6 +250,12 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
       // Restore original methods
       window.getComputedStyle = originalGetComputedStyle;
       CSSStyleDeclaration.prototype.getPropertyValue = originalGetPropertyValue;
+      if (originalCssRuleCssTextDesc) {
+        Object.defineProperty(cssRuleProto, 'cssText', originalCssRuleCssTextDesc);
+      }
+      if (originalStyleCssTextDesc) {
+        Object.defineProperty(styleProto, 'cssText', originalStyleCssTextDesc);
+      }
       setIsGeneratingPdf(false);
     }
   };
@@ -342,72 +394,109 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
       {/* MEMO DOCUMENT PAPER CANVAS */}
       <div ref={memoCanvasRef} className="p-8 sm:p-12 md:p-16 max-w-4xl mx-auto space-y-6 print:p-0 print:max-w-none print:w-full bg-white text-slate-900">
         
-        {/* OFFICIAL ST. MARY THERESA CATHOLIC HOSPITAL IT SUPPORT UNIT LETTERHEAD */}
-        <div className="border-b-2 border-slate-900 pb-3 mb-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            
-            {/* Left Column: Catholic Health Service Trust & Hospital Logos with green aligned text underneath */}
-            <div className="flex flex-col items-start gap-1.5 max-w-[450px] text-left">
-              <div className="flex items-center gap-3">
-                {/* Logo 1: Catholic Health Service Trust Emblem */}
-                <div className="w-16 h-16 sm:w-18 sm:h-18 shrink-0 flex items-center justify-center">
-                  <svg viewBox="0 0 100 100" className="w-full h-full">
-                    {/* Outer Green Ring */}
-                    <circle cx="50" cy="50" r="46" fill="none" stroke="#047857" strokeWidth="4" />
-                    {/* Inner Circle */}
-                    <circle cx="50" cy="50" r="38" fill="#f8fafc" stroke="#dc2626" strokeWidth="2" />
-                    {/* Red Cross Symbol */}
-                    <path d="M44 22 h12 v18 h18 v12 h-18 v22 h-12 v-22 h-18 v-12 h18 z" fill="#dc2626" />
-                    {/* Center Medical Emblem */}
-                    <circle cx="50" cy="50" r="7" fill="#047857" />
-                    <path d="M50 45 v10 M45 50 h10" stroke="#ffffff" strokeWidth="2" />
-                  </svg>
-                </div>
-
-                {/* Logo 2: St. Mary Theresa Portrait Image Badge */}
-                <div className="w-12 h-16 sm:w-14 sm:h-18 shrink-0 flex items-center justify-center border-2 border-amber-500 rounded bg-slate-100 overflow-hidden shadow-xs relative">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-amber-400 to-amber-200 opacity-60"></div>
-                  <svg viewBox="0 0 40 50" className="w-full h-full z-10">
-                    <circle cx="20" cy="18" r="10" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
-                    <path d="M10 22 c0 -10 6 -14 10 -14 s10 4 10 14 c0 6 -1 16 -3 18 h-14 c-2 -2 -3 -12 -3 -18 z" fill="#1e293b" />
-                    <ellipse cx="20" cy="20" rx="6" ry="8" fill="#ffedd5" />
-                    <path d="M14 24 q6 6 12 0" fill="#ffffff" />
-                    <circle cx="18" cy="18" r="0.7" fill="#0f172a" />
-                    <circle cx="22" cy="18" r="0.7" fill="#0f172a" />
-                    <path d="M18 22 q2 2 4 0" stroke="#0f172a" strokeWidth="0.5" fill="none" />
-                  </svg>
-                </div>
+        {/* GRAPHIC BANNER OVERLAY MODE */}
+        {letterheadImage && (letterheadMode === 'CUSTOM_BANNER' || letterheadMode === 'HEADER_AND_BANNER') && (
+          <div className="w-full mb-6 border-b border-slate-200 pb-4 print:pb-0">
+            {isPdfLetterhead ? (
+              <div className="w-full h-44 sm:h-52 rounded-lg overflow-hidden border border-slate-200 bg-white">
+                <object
+                  data={letterheadImage}
+                  type="application/pdf"
+                  className="w-full h-full"
+                >
+                  <iframe
+                    src={`${letterheadImage}#toolbar=0&navpanes=0`}
+                    className="w-full h-full border-none"
+                    title="Hospital Letterhead PDF"
+                  />
+                </object>
               </div>
-
-              {/* Left Header Aligned Text - Forest Green Color */}
-              <div className="text-[10px] sm:text-[11px] font-sans font-extrabold uppercase leading-tight text-emerald-800 tracking-wider">
-                <div className="font-black">CATHOLIC HEALTH</div>
-                <div>SERVICE TRUST - GHANA</div>
-                <div className="text-[9px] font-bold text-emerald-700">(JASIKAN DIOCESE)</div>
-                <div className="font-black mt-1">ST. MARY THERESA</div>
-                <div>CATHOLIC HOSPITAL</div>
-                <div className="text-[8px] font-bold tracking-tighter text-slate-600 mt-0.5 normal-case font-mono">DODI PAPASE, KADJEBI DISTRICT - OTI REGION</div>
-              </div>
-            </div>
-
-            {/* Right Column: IT Support Unit Title & Contact Details */}
-            <div className="text-left sm:text-right space-y-0.5">
-              <h1 className="text-sm sm:text-base md:text-lg font-serif font-bold italic text-slate-900 leading-tight">
-                {unitTitle}
-              </h1>
-              <p className="text-xs font-sans text-slate-800">
-                <span className="font-semibold">Tel:</span> {contactPhone}
-              </p>
-              <p className="text-xs font-sans text-slate-800">
-                <span className="font-semibold">E-mail:</span>{' '}
-                <a href={`mailto:${contactEmail}`} className="text-blue-900 underline font-medium hover:text-blue-700">
-                  {contactEmail}
-                </a>
-              </p>
-            </div>
-
+            ) : (
+              <img
+                src={letterheadImage}
+                alt="Official Letterhead Banner"
+                className="w-full max-h-44 object-contain sm:object-cover mx-auto"
+              />
+            )}
           </div>
-        </div>
+        )}
+
+        {/* DYNAMIC / STANDARD HEADER MODE */}
+        {(letterheadMode === 'DYNAMIC_HEADER' || letterheadMode === 'HEADER_AND_BANNER' || !letterheadImage) && (
+          <div className="border-b-2 border-slate-900 pb-3 mb-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              
+              {/* Left Column: Catholic Health Service Trust & Hospital Logos with green aligned text underneath */}
+              <div className="flex flex-col items-start gap-1.5 max-w-[450px] text-left">
+                <div className="flex items-center gap-3">
+                  {/* Logo 1: Catholic Health Service Trust Emblem */}
+                  <div className="w-16 h-16 sm:w-18 sm:h-18 shrink-0 flex items-center justify-center">
+                    <svg viewBox="0 0 100 100" className="w-full h-full">
+                      {/* Outer Green Ring */}
+                      <circle cx="50" cy="50" r="46" fill="none" stroke="#047857" strokeWidth="4" />
+                      {/* Inner Circle */}
+                      <circle cx="50" cy="50" r="38" fill="#f8fafc" stroke="#dc2626" strokeWidth="2" />
+                      {/* Red Cross Symbol */}
+                      <path d="M44 22 h12 v18 h18 v12 h-18 v22 h-12 v-22 h-18 v-12 h18 z" fill="#dc2626" />
+                      {/* Center Medical Emblem */}
+                      <circle cx="50" cy="50" r="7" fill="#047857" />
+                      <path d="M50 45 v10 M45 50 h10" stroke="#ffffff" strokeWidth="2" />
+                    </svg>
+                  </div>
+
+                  {/* Logo 2: St. Mary Theresa Portrait Image Badge */}
+                  {systemSettings?.hospitalLogo ? (
+                    <img
+                      src={systemSettings.hospitalLogo}
+                      alt="Hospital Logo"
+                      className="w-14 h-14 object-contain rounded-lg shrink-0 border border-slate-200"
+                    />
+                  ) : (
+                    <div className="w-12 h-16 sm:w-14 sm:h-18 shrink-0 flex items-center justify-center border-2 border-amber-500 rounded bg-slate-100 overflow-hidden shadow-xs relative">
+                      <div className="absolute inset-0 bg-gradient-to-tr from-amber-400 to-amber-200 opacity-60"></div>
+                      <svg viewBox="0 0 40 50" className="w-full h-full z-10">
+                        <circle cx="20" cy="18" r="10" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
+                        <path d="M10 22 c0 -10 6 -14 10 -14 s10 4 10 14 c0 6 -1 16 -3 18 h-14 c-2 -2 -3 -12 -3 -18 z" fill="#1e293b" />
+                        <ellipse cx="20" cy="20" rx="6" ry="8" fill="#ffedd5" />
+                        <path d="M14 24 q6 6 12 0" fill="#ffffff" />
+                        <circle cx="18" cy="18" r="0.7" fill="#0f172a" />
+                        <circle cx="22" cy="18" r="0.7" fill="#0f172a" />
+                        <path d="M18 22 q2 2 4 0" stroke="#0f172a" strokeWidth="0.5" fill="none" />
+                      </svg>
+                    </div>
+                  )}
+                </div>
+
+                {/* Left Header Aligned Text - Forest Green Color */}
+                <div className="text-[10px] sm:text-[11px] font-sans font-extrabold uppercase leading-tight text-emerald-800 tracking-wider">
+                  <div className="font-black">CATHOLIC HEALTH</div>
+                  <div>SERVICE TRUST - GHANA</div>
+                  <div className="text-[9px] font-bold text-emerald-700">(JASIKAN DIOCESE)</div>
+                  <div className="font-black mt-1">{hospitalName}</div>
+                  <div>CATHOLIC HOSPITAL</div>
+                  <div className="text-[8px] font-bold tracking-tighter text-slate-600 mt-0.5 normal-case font-mono">{addressLine}</div>
+                </div>
+              </div>
+
+              {/* Right Column: IT Support Unit Title & Contact Details */}
+              <div className="text-left sm:text-right space-y-0.5">
+                <h1 className="text-sm sm:text-base md:text-lg font-serif font-bold italic text-slate-900 leading-tight">
+                  {unitTitle}
+                </h1>
+                <p className="text-xs font-sans text-slate-800">
+                  <span className="font-semibold">Tel:</span> {contactPhone}
+                </p>
+                <p className="text-xs font-sans text-slate-800">
+                  <span className="font-semibold">E-mail:</span>{' '}
+                  <a href={`mailto:${contactEmail}`} className="text-blue-900 underline font-medium hover:text-blue-700">
+                    {contactEmail}
+                  </a>
+                </p>
+              </div>
+
+            </div>
+          </div>
+        )}
 
         {/* MEMO CENTERED HEADING WITH THICK UNDERLINE */}
         <div className="text-center pt-2 pb-4">

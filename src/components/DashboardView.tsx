@@ -107,11 +107,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     <div className="space-y-6">
       {/* Welcome Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 border border-slate-800 rounded-2xl p-5 text-white shadow-sm">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight">Hospital IT Operations Center</h1>
-          <p className="text-xs sm:text-sm text-slate-300 mt-1">
-            Real-time local node telemetry for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}. All services operating locally on LAN.
-          </p>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          {systemSettings?.hospitalLogo ? (
+            <img
+              src={systemSettings.hospitalLogo}
+              alt="Hospital Logo"
+              className="w-14 h-14 object-contain rounded-xl bg-white p-1 shrink-0 shadow-md border border-slate-800"
+            />
+          ) : (
+            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center font-black text-xl shrink-0 shadow-md backdrop-blur-xs border border-white/20">
+              H
+            </div>
+          )}
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight">Hospital IT Operations Center</h1>
+            <p className="text-xs sm:text-sm text-slate-300 mt-1">
+              Real-time local node telemetry for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}. All services operating locally on LAN.
+            </p>
+          </div>
         </div>
       </div>
 
