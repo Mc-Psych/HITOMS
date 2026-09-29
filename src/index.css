@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:p-0 {
+    padding: 0 !important;
+  }
+
+  .print\:bg-white {
+    background-color: #ffffff !important;
+  }
+
+  .print\:text-black {
+    color: #000000 !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm 12mm 12mm 12mm;
+  }
+}

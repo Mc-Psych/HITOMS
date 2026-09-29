@@ -56,6 +56,16 @@ export const Header: React.FC<HeaderProps> = ({
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifs, setShowNotifs] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(ticketSoundService.isMuted());
+
+  const handleToggleMute = () => {
+    const nextMute = !isAudioMuted;
+    ticketSoundService.setMuted(nextMute);
+    setIsAudioMuted(nextMute);
+    if (!nextMute) {
+      ticketSoundService.playBellRingtone(false, 2);
+    }
+  };
 
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
 
@@ -299,6 +309,24 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
+
+          {/* Audio Bell Sound Toggle Button */}
+          <button
+            id="bell-mute-toggle-btn"
+            onClick={handleToggleMute}
+            className={`flex items-center justify-center p-2.5 rounded-xl border transition cursor-pointer text-xs font-semibold shrink-0 ${
+              isAudioMuted
+                ? 'bg-rose-950/40 border-rose-900/60 text-rose-400 hover:bg-rose-900/40'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+            }`}
+            title={isAudioMuted ? "Ringtone Muted (Click to Unmute Notification Bell)" : "Ringtone Active (Click to Mute Notification Bell)"}
+          >
+            {isAudioMuted ? (
+              <VolumeX className="w-4 h-4 text-rose-400" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-emerald-400 animate-pulse" />
+            )}
+          </button>
 
           {/* User Profile & Role Switcher */}
           <div className="relative shrink-0" ref={roleMenuRef}>

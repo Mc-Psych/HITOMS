@@ -39,6 +39,7 @@ import {
 } from '../services/officerSpecialtyService';
 import { systemNotificationRingService } from '../services/ticketSoundService';
 import { LetterheadUploadModal } from './LetterheadUploadModal';
+import { compressImage } from '../utils/imageCompressor';
 import { AccountManagementTab } from './AccountManagementTab';
 import { DepartmentManagementTab } from './DepartmentManagementTab';
 
@@ -265,10 +266,12 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
     setErrorMessage(null);
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const base64 = reader.result as string;
-      setLogoPreview(base64);
-      setSettings((prev) => ({ ...prev, hospitalLogo: base64 }));
+      // Compress logo to safe 300x300 square before saving
+      const compressed = await compressImage(base64, 300, 300, 0.8);
+      setLogoPreview(compressed);
+      setSettings((prev) => ({ ...prev, hospitalLogo: compressed }));
     };
     reader.readAsDataURL(file);
   };

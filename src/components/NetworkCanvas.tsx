@@ -588,29 +588,42 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     });
   }, [devices, zoomLevel]);
 
-  // Auto-center canvas on initial load, mobile layout mount, and screen resize
+  // Auto-center canvas on initial load, mobile layout mount, screen resize & container resize
   useEffect(() => {
-    if (devices.length > 0) {
-      const t1 = setTimeout(() => centerCanvasView(), 150);
-      const t2 = setTimeout(() => centerCanvasView(), 600);
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-      };
-    }
-  }, [devices.length, centerCanvasView]);
+    if (devices.length === 0) return;
 
-  useEffect(() => {
-    const handleResize = () => {
-      centerCanvasView();
-    };
+    // Timeout-based centering
+    const t1 = setTimeout(() => centerCanvasView(), 150);
+    const t2 = setTimeout(() => centerCanvasView(), 600);
+
+    // ResizeObserver on the container (critical for mobile layout switches/reflows)
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current) {
+      observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            centerCanvasView();
+          }
+        }
+      });
+      observer.observe(containerRef.current);
+    }
+
+    // Window-level events
+    const handleResize = () => centerCanvasView();
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
+
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (observer) {
+        observer.disconnect();
+      }
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
     };
-  }, [centerCanvasView]);
+  }, [devices.length, centerCanvasView]);
 
   // Canvas Mouse Down: Starts Canvas Panning OR Marquee Box Selection on background
   const handleCanvasMouseDown = (e: React.MouseEvent) => {

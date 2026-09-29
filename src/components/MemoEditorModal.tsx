@@ -428,18 +428,15 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-purple-600/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-              <Sparkles className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 flex items-center justify-center">
+              <FileText className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>{memoToEdit ? 'Edit Hospital Memo & Report' : 'AI Hospital Memo & Report Studio'}</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-                  Gemini 3.8 Write-Up Engine
-                </span>
+                <span>{memoToEdit ? 'Edit Hospital Memo & Report' : 'Hospital Official Memorandum Studio'}</span>
               </h2>
               <p className="text-xs text-slate-500">
-                Draft, format, and publish authoritative hospital memorandums, executive debriefs, and clinical advisories.
+                Draft, format, and publish official hospital memorandums and clinical advisories.
               </p>
             </div>
           </div>
@@ -458,13 +455,13 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
           
           {/* LEFT COLUMN: AI PROMPTING & SPECIFICATIONS (5 cols) */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="p-4 rounded-2xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 space-y-3">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
-                  <Wand2 className="w-3.5 h-3.5" />
-                  <span>AI Prompt Presets</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Topic & Directive Presets</span>
                 </span>
-                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
+                <span className="text-[10px] text-slate-500 font-semibold">
                   Click to auto-fill
                 </span>
               </div>
@@ -689,17 +686,17 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
               type="button"
               disabled={isGenerating}
               onClick={() => handleGenerateAiMemo()}
-              className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+              className="w-full py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
             >
               {isGenerating ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Generating Hospital Memo Write-Up with AI...</span>
+                  <span>Drafting Official Memorandum...</span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>Draft Full Memo with Gemini AI</span>
+                  <FileText className="w-4 h-4" />
+                  <span>Auto-Draft Official Memo</span>
                 </>
               )}
             </button>

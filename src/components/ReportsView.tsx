@@ -86,7 +86,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     currentUser?.role === 'IT_OFFICER';
 
   // Active Main Navigation Tab (Default to MEMOS if IT User, else DATA_REGISTERS)
-  const [activeTab, setActiveTab] = useState<'MEMOS' | 'EXECUTIVE_AI_REPORT' | 'DATA_REGISTERS'>(
+  const [activeTab, setActiveTab] = useState<'MEMOS' | 'DATA_REGISTERS'>(
     isITUser ? 'MEMOS' : 'DATA_REGISTERS'
   );
 
@@ -330,16 +330,10 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
               <FileBarChart2 className="w-5 h-5" />
             </div>
             <span>{isITUser ? 'Hospital Memos & Operations Reports' : 'Hospital Operations & Data Reports'}</span>
-            {isITUser && (
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
-                <Sparkles className="w-3 h-3" />
-                <span>AI Write-Up Enabled</span>
-              </span>
-            )}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             {isITUser
-              ? 'Draft authoritative clinical memorandums, generate automated executive IT reports with Gemini AI, and export operational datasets.'
+              ? 'Issue official clinical memorandums, view department circulars, and export operational datasets.'
               : 'Access operational registers, system performance datasets, and hospital IT compliance reports.'}
           </p>
         </div>
@@ -359,11 +353,11 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
             <button
               type="button"
               onClick={() => setIsLetterheadModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-2xs transition cursor-pointer"
-              title="Upload or change official hospital letterhead banner (PDF or image) for memos and printable records"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs shadow-2xs transition cursor-pointer"
+              title="Upload or change official hospital letterhead"
             >
-              <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-              <span>Upload Letterhead</span>
+              <ImageIcon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              <span>Configure Letterhead</span>
             </button>
 
             <button
@@ -372,10 +366,10 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                 setMemoToEdit(null);
                 setIsEditorOpen(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 text-white font-bold text-xs shadow-md transition cursor-pointer"
             >
-              <Sparkles className="w-4 h-4" />
-              <span>New AI Memo Write-Up</span>
+              <Plus className="w-4 h-4" />
+              <span>New Official Memo</span>
             </button>
           </div>
         )}
@@ -389,14 +383,14 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
             onClick={() => setActiveTab('MEMOS')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeTab === 'MEMOS'
-                ? 'bg-purple-600 text-white shadow-sm'
+                ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
             }`}
           >
             <FileText className="w-4 h-4" />
             <span>Hospital Memos & Circulars</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-              activeTab === 'MEMOS' ? 'bg-purple-800 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+              activeTab === 'MEMOS' ? 'bg-slate-700 dark:bg-slate-300 text-white dark:text-slate-900' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
             }`}>
               {memos.length}
             </span>
@@ -405,23 +399,10 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
 
         <button
           type="button"
-          onClick={() => setActiveTab('EXECUTIVE_AI_REPORT')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'EXECUTIVE_AI_REPORT'
-              ? 'bg-purple-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Executive Debrief & AI Summary</span>
-        </button>
-
-        <button
-          type="button"
           onClick={() => setActiveTab('DATA_REGISTERS')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
             activeTab === 'DATA_REGISTERS'
-              ? 'bg-purple-600 text-white shadow-sm'
+              ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
           }`}
         >
@@ -431,7 +412,7 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
       </div>
 
       {/* ============================================================== */}
-      {/* TAB 1: HOSPITAL MEMOS & CIRCULARS (AI WRITE-UP) */}
+      {/* TAB 1: HOSPITAL MEMOS & CIRCULARS */}
       {/* ============================================================== */}
       {activeTab === 'MEMOS' && (
         <div className="space-y-6">
@@ -463,12 +444,11 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
             </div>
 
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 block">AI-Assisted Write-Ups</span>
-              <div className="text-2xl font-black text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1.5">
-                <span>{memos.filter((m) => m.isAiGenerated).length}</span>
-                <Sparkles className="w-4 h-4 text-purple-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 block">Archived Directives</span>
+              <div className="text-2xl font-black text-sky-700 dark:text-sky-400 mt-1">
+                {memos.filter((m) => m.status === 'ARCHIVED').length}
               </div>
-              <span className="text-[10px] text-slate-500">Gemini 3.8 Generated</span>
+              <span className="text-[10px] text-slate-500">Historical Records</span>
             </div>
           </div>
 
@@ -555,10 +535,10 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                     setMemoToEdit(null);
                     setIsEditorOpen(true);
                   }}
-                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Draft New Memo with AI</span>
+                  <Plus className="w-4 h-4" />
+                  <span>Draft New Memo</span>
                 </button>
               </div>
             </div>
@@ -718,7 +698,7 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
                           className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                           title="Edit / Refine Draft"
                         >
-                          <Wand2 className="w-3.5 h-3.5" />
+                          <FileText className="w-3.5 h-3.5" />
                         </button>
 
                         {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.id === memo.fromSender?.uid) && (
@@ -742,157 +722,7 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
       )}
 
       {/* ============================================================== */}
-      {/* TAB 2: EXECUTIVE DEBRIEF & AI SUMMARY */}
-      {/* ============================================================== */}
-      {activeTab === 'EXECUTIVE_AI_REPORT' && (
-        <div className="space-y-6">
-          <div className="bg-gradient-to-r from-purple-900 to-indigo-900 rounded-3xl p-6 text-white space-y-4 shadow-lg">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-purple-300" />
-                  <span>Gemini Executive Operations Summarizer</span>
-                </span>
-                <h2 className="text-xl font-black mt-1">
-                  Automated Hospital IT Executive Debrief
-                </h2>
-                <p className="text-xs text-purple-200 max-w-xl">
-                  Synthesize real-time helpdesk tickets, clinical SLA adherence, Starlink uptime, and ward hardware status into an executive memorandum ready for the Hospital Board.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                disabled={isGeneratingDebrief}
-                onClick={handleGenerateExecutiveDebrief}
-                className="px-5 py-2.5 rounded-2xl bg-white text-purple-900 hover:bg-purple-50 font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {isGeneratingDebrief ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-purple-900" />
-                    <span>Analyzing Live Hospital Data...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-4 h-4 text-purple-900" />
-                    <span>Generate Executive Debrief</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Quick Live Snapshot Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
-                <span className="text-[10px] uppercase font-bold text-purple-200">Open Tickets</span>
-                <div className="text-xl font-black mt-0.5">
-                  {safeTickets.filter((t) => t.status !== 'Resolved' && t.status !== 'Closed').length}
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
-                <span className="text-[10px] uppercase font-bold text-purple-200">SLA Adherence</span>
-                <div className="text-xl font-black mt-0.5 text-emerald-300">
-                  98.6%
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
-                <span className="text-[10px] uppercase font-bold text-purple-200">Hospital Assets</span>
-                <div className="text-xl font-black mt-0.5">
-                  {safeAssets.length} Tracked
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15">
-                <span className="text-[10px] uppercase font-bold text-purple-200">WAN Status</span>
-                <div className="text-xl font-black mt-0.5 text-sky-300">
-                  Fiber + Starlink
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Render Generated Executive Debrief or Placeholder */}
-          {executiveDebriefText ? (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xs">
-              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-purple-600 bg-purple-50 dark:bg-purple-950 px-2 py-0.5 rounded">
-                    Generated via Gemini AI
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    Timestamp: {new Date().toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const memoObj: HospitalMemo = {
-                        id: `memo-${Date.now()}`,
-                        memoNumber: `REPORT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-                        title: `EXECUTIVE REPORT: Hospital IT Operations & Infrastructure Review`,
-                        memoType: 'OPERATIONS_REPORT',
-                        department: 'Hospital IT Department',
-                        targetAudience: 'Hospital Directorate, Medical Director, and Clinical Board',
-                        fromSender: {
-                          uid: currentUser?.id || 'usr-system',
-                          name: currentUser?.fullName || 'Courage Kay',
-                          role: currentUser?.role || 'SUPER_ADMIN',
-                          title: currentUser?.jobTitle || 'Super Administrator & CIO',
-                        },
-                        executiveSummary: 'Automated executive operational summary debrief generated from live telemetry.',
-                        backgroundAndContext: 'Hospital-wide infrastructure and clinical system performance overview.',
-                        detailedFindingsOrBody: executiveDebriefText,
-                        actionRequiredOrChecklist: [
-                          'Review Q4 consumables budget requisition.',
-                          'Verify emergency backup generator failover schedule.',
-                          'Ensure all ward nursing supervisors adhere to paper encounter fallback rules.',
-                        ],
-                        status: 'PUBLISHED',
-                        isAiGenerated: true,
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString(),
-                      };
-                      setMemoToEdit(memoObj);
-                      setIsEditorOpen(true);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Save to Memos Repository</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePrint}
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold transition hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Print Report</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="prose prose-sm dark:prose-invert max-w-none text-xs sm:text-sm text-slate-800 dark:text-slate-200 whitespace-pre-line leading-relaxed font-sans">
-                {executiveDebriefText}
-              </div>
-            </div>
-          ) : (
-            <div className="p-12 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-3">
-              <Wand2 className="w-10 h-10 text-purple-400 mx-auto" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                Ready to Generate Operations Debrief
-              </h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Click the button above to have Gemini AI analyze your live ticket volume, network uptime, and maintenance schedules into an executive briefing document.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* TAB 3: OPERATIONAL REGISTERS & CSV EXPORTS */}
+      {/* TAB 2: OPERATIONAL REGISTERS & CSV EXPORTS */}
       {/* ============================================================== */}
       {activeTab === 'DATA_REGISTERS' && (
         <div className="space-y-6">

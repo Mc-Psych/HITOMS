@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { type SystemSettings, type User, type LetterheadMode } from '../types';
 import { settingsService } from '../services/settingsService';
+import { compressImage } from '../utils/imageCompressor';
 
 interface LetterheadUploadModalProps {
   isOpen: boolean;
@@ -27,25 +28,13 @@ interface LetterheadUploadModalProps {
   onSettingsSaved?: (newSettings: SystemSettings) => void;
 }
 
-// Built-in presets for quick hospital setup if user doesn't have an image ready
+// Built-in official hospital letterhead
 const PRESET_LETTERHEADS = [
   {
-    id: 'st-mary-classic',
-    name: 'St. Mary Theresa Official Crest & Banner',
-    description: 'Gold & Deep Navy Blue Catholic Hospital Letterhead with formal seal',
-    svgData: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240"><defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%230f172a"/><stop offset="60%" stop-color="%230369a1"/><stop offset="100%" stop-color="%230284c7"/></linearGradient></defs><rect width="1200" height="240" fill="url(%23g1)"/><rect y="230" width="1200" height="10" fill="%23f59e0b"/><g transform="translate(40, 30)"><circle cx="85" cy="85" r="75" fill="%23ffffff" fill-opacity="0.12"/><circle cx="85" cy="85" r="65" stroke="%23f59e0b" stroke-width="4" fill="%230f172a"/><path d="M85 40 v90 M40 85 h90" stroke="%23ffffff" stroke-width="12" stroke-linecap="round"/><circle cx="85" cy="85" r="20" fill="%23f59e0b"/></g><text x="230" y="85" font-family="system-ui,-apple-system,sans-serif" font-size="34" font-weight="900" fill="%23ffffff" letter-spacing="1.5">ST. MARY THERESA CATHOLIC HOSPITAL</text><text x="230" y="125" font-family="system-ui,-apple-system,sans-serif" font-size="18" font-weight="700" fill="%2338bdf8" letter-spacing="2">DIRECTORATE OF INFORMATION TECHNOLOGY &amp; CLINICAL INFORMATICS</text><text x="230" y="165" font-family="system-ui,-apple-system,sans-serif" font-size="14" fill="%23e2e8f0">104 Healthcare Boulevard, P.O. Box 450 • Emergency: Ext 9911 / 222 • LHIMS: hitoms.local</text><line x1="230" y1="185" x2="1140" y2="185" stroke="%2338bdf8" stroke-opacity="0.4" stroke-width="1.5"/><text x="230" y="208" font-family="monospace" font-size="12" font-weight="700" fill="%23f59e0b">HEALTHCARE INFORMATION TECHNOLOGY &amp; OPERATIONS MANAGEMENT (HITOMS)</text><text x="1140" y="85" text-anchor="end" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="800" fill="%23ffffff" fill-opacity="0.7">OFFICIAL DIRECTIVE</text><text x="1140" y="110" text-anchor="end" font-family="monospace" font-size="12" fill="%2338bdf8">ACC-HOSP-2026</text></svg>`,
-  },
-  {
-    id: 'health-service-green',
-    name: 'Ghana Health Service / District Health Style',
-    description: 'Emerald Green & Gold official clinical memorandum header',
-    svgData: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240"><defs><linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23064e3b"/><stop offset="60%" stop-color="%23047857"/><stop offset="100%" stop-color="%23059669"/></linearGradient></defs><rect width="1200" height="240" fill="url(%23g2)"/><rect y="228" width="1200" height="12" fill="%23d97706"/><g transform="translate(45, 30)"><circle cx="85" cy="85" r="70" fill="%23ffffff" fill-opacity="0.15"/><polygon points="85,35 125,75 110,135 60,135 45,75" fill="%23d97706"/><circle cx="85" cy="85" r="28" fill="%23064e3b"/><text x="85" y="93" text-anchor="middle" fill="%23ffffff" font-weight="900" font-size="22">GHS</text></g><text x="230" y="80" font-family="system-ui,-apple-system,sans-serif" font-size="32" font-weight="900" fill="%23ffffff" letter-spacing="1">DISTRICT HEALTHCARE ADMINISTRATION</text><text x="230" y="120" font-family="system-ui,-apple-system,sans-serif" font-size="18" font-weight="700" fill="%236ee7b7" letter-spacing="1.5">CLINICAL COMPUTING &amp; EMR OPERATIONS UNIT</text><text x="230" y="160" font-family="system-ui,-apple-system,sans-serif" font-size="14" fill="%23ecfdf5">Regional Health Directorate • Official Hospital Noticeboard &amp; Ward Circular</text><line x1="230" y1="180" x2="1140" y2="180" stroke="%2334d399" stroke-opacity="0.4" stroke-width="1.5"/><text x="230" y="205" font-family="monospace" font-size="12" font-weight="700" fill="%23fde68a">ELECTRONIC MEDICAL RECORDS SECURITY PROTOCOL</text></svg>`,
-  },
-  {
-    id: 'modern-clinical-indigo',
-    name: 'Modern Clean Slate & Indigo Header',
-    description: 'High-contrast minimalist layout ideal for official PDF & paper printing',
-    svgData: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240"><rect width="1200" height="240" fill="%231e1b4b"/><rect y="232" width="1200" height="8" fill="%236366f1"/><g transform="translate(50, 40)"><rect width="100" height="100" rx="20" fill="%234338ca"/><path d="M50 25 v50 M25 50 h50" stroke="%23ffffff" stroke-width="10" stroke-linecap="round"/></g><text x="180" y="85" font-family="system-ui,-apple-system,sans-serif" font-size="32" font-weight="900" fill="%23ffffff">ST. MARY THERESA MEMORIAL HOSPITAL</text><text x="180" y="125" font-family="system-ui,-apple-system,sans-serif" font-size="18" font-weight="600" fill="%23a5b4fc">Executive Medical &amp; Technical Services Directorate</text><text x="180" y="165" font-family="system-ui,-apple-system,sans-serif" font-size="13" fill="%23c7d2fe">LHIMS EMR System • Starlink WAN Failover • Biomedical Support Ext 221</text></svg>`,
+    id: 'st-mary-it-support',
+    name: 'St. Mary Theresa Catholic Hospital I.T Support Unit (Official)',
+    description: 'Official white background with Catholic Health Service Trust emblem, hospital badge, and I.T Support Unit header',
+    svgData: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 220" width="1200" height="220"><rect width="1200" height="220" fill="%23ffffff"/><g transform="translate(30, 20)"><circle cx="60" cy="60" r="54" fill="none" stroke="%23047857" stroke-width="5"/><circle cx="60" cy="60" r="44" fill="%23ffffff" stroke="%23dc2626" stroke-width="3"/><path d="M53 28 h14 v22 h22 v14 h-22 v26 h-14 v-26 h-22 v-14 h22 z" fill="%23dc2626"/><circle cx="60" cy="60" r="8" fill="%23047857"/></g><g transform="translate(170, 30)"><rect width="70" height="85" rx="8" fill="%230f172a"/><text x="35" y="32" font-family="sans-serif" font-size="11" font-weight="900" fill="%23ffffff" text-anchor="middle">ST. MARY</text><text x="35" y="48" font-family="sans-serif" font-size="10" font-weight="900" fill="%23f59e0b" text-anchor="middle">THERESA</text><line x1="15" y1="58" x2="55" y2="58" stroke="%23ef4444" stroke-width="3"/><text x="250" y="35" font-family="sans-serif" font-size="28" font-weight="900" fill="%230f172a" letter-spacing="1">ST. MARY THERESA CATHOLIC HOSPITAL</text><text x="250" y="65" font-family="sans-serif" font-size="18" font-weight="800" fill="%23334155">DODI PAPASE, KADJEBI DISTRICT - OTI REGION</text></g><text x="1170" y="50" font-family="Georgia, serif" font-size="28" font-weight="700" font-style="italic" fill="%230f172a" text-anchor="end">St. Mary Theresa Catholic Hospital I.T Support Unit</text><text x="1170" y="85" font-family="sans-serif" font-size="18" font-weight="600" fill="%231e293b" text-anchor="end">Tel: 055 272 2289</text><text x="1170" y="115" font-family="sans-serif" font-size="18" font-weight="600" fill="%231d4ed8" text-anchor="end">E-mail: send2smthit@gmail.com</text><line x1="30" y1="180" x2="1170" y2="180" stroke="%230f172a" stroke-width="3"/></svg>`,
   },
 ];
 
@@ -125,9 +114,15 @@ export const LetterheadUploadModal: React.FC<LetterheadUploadModalProps> = ({
 
     setError(null);
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const base64 = reader.result as string;
-      setLetterheadImage(base64);
+      if (isImage) {
+        // Compress wide banner image before saving to stay under DB/Firestore 1MB limit
+        const compressed = await compressImage(base64, 1200, 350, 0.75);
+        setLetterheadImage(compressed);
+      } else {
+        setLetterheadImage(base64);
+      }
     };
     reader.readAsDataURL(file);
   };
