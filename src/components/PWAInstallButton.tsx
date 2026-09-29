@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { Download, Smartphone, X, ExternalLink, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { settingsService } from '../services/settingsService';
 
 interface PWAInstallButtonProps {
   variant?: 'header' | 'sidebar' | 'compact';
@@ -9,6 +10,9 @@ interface PWAInstallButtonProps {
 export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'header' }) => {
   const { isInstallable, isInstalled, install } = usePWAInstall();
   const [showGuideModal, setShowGuideModal] = useState(false);
+
+  const cachedSettings = settingsService.getSettingsSync();
+  const logo = cachedSettings?.hospitalLogo;
 
   // If already running as standalone PWA app
   if (isInstalled) {
@@ -67,9 +71,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
             {/* Header */}
             <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-sky-500/20 text-sky-400 border border-sky-500/30">
-                  <Download className="w-5 h-5" />
-                </div>
+                {logo ? (
+                  <img
+                    src={logo}
+                    alt="App Logo"
+                    className="w-10 h-10 object-contain rounded-xl bg-white p-1 shadow-sm border border-slate-700 shrink-0"
+                  />
+                ) : (
+                  <div className="p-2 rounded-xl bg-sky-500/20 text-sky-400 border border-sky-500/30 shrink-0">
+                    <Download className="w-5 h-5" />
+                  </div>
+                )}
                 <div>
                   <h3 className="text-sm font-bold">Install HITOMS App</h3>
                   <p className="text-[11px] text-slate-400">PWA Offline Asset & Ticket Management System</p>
