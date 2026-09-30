@@ -660,31 +660,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
           
           {/* LEFT COLUMN: AI PROMPTING & SPECIFICATIONS (5 cols) */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Topic & Directive Presets</span>
-                </span>
-                <span className="text-[10px] text-slate-500 font-semibold">
-                  Click to auto-fill
-                </span>
-              </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_TOPICS.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleApplyPreset(preset)}
-                    className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800 hover:border-purple-400 text-purple-950 dark:text-purple-200 transition cursor-pointer shadow-2xs text-left truncate max-w-full"
-                    title={preset.topic}
-                  >
-                    {preset.title}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* Document Type & Department */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

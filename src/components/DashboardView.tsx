@@ -393,15 +393,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
-              <span className="text-[11px] font-bold text-slate-400 block">Avg. Resolution Interval</span>
-              <p className="text-lg font-black text-sky-400 font-mono">
-                {formatResolutionInterval(avgResolutionMins)}
-              </p>
-              <span className="text-[10px] text-slate-500 block">Across {resolvedTickets.length} resolved tickets</span>
-            </div>
-
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
               <span className="text-[11px] font-bold text-slate-400 block">Fastest Turnaround</span>
               <p className="text-lg font-black text-emerald-400 font-mono">

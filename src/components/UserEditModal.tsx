@@ -24,6 +24,8 @@ import {
   Plus,
   Sparkles,
   Info,
+  Upload,
+  FileText,
 } from 'lucide-react';
 import { type User as UserType, type Role, type AccountStatus } from '../types';
 import {
@@ -121,6 +123,98 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [suspensionReason, setSuspensionReason] = useState('');
   const [showSuspendModal, setShowSuspendModal] = useState(false);
 
+  const [signature, setSignature] = useState('');
+  const [isSignPadOpen, setIsSignPadOpen] = useState(false);
+  const [signMethod, setSignMethod] = useState<'DRAW' | 'UPLOAD' | 'TYPE'>('DRAW');
+  const [cursiveText, setCursiveText] = useState('');
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.strokeStyle = '#1e3a8a';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const rect = canvas.getBoundingClientRect();
+    let x = 0;
+    let y = 0;
+
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      x = e.touches[0].clientX - rect.left;
+      y = e.touches[0].clientY - rect.top;
+    } else {
+      x = e.clientX - rect.left;
+      y = e.clientY - rect.top;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let x = 0;
+    let y = 0;
+
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      x = e.touches[0].clientX - rect.left;
+      y = e.touches[0].clientY - rect.top;
+    } else {
+      x = e.clientX - rect.left;
+      y = e.clientY - rect.top;
+    }
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const saveCanvasSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    setSignature(dataUrl);
+    setIsSignPadOpen(false);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setSignature(base64);
+      setIsSignPadOpen(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
   useEffect(() => {
     if (targetUser) {
       setFullName(targetUser.fullName || '');
@@ -142,6 +236,12 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setPassword('');
       setMustChangePassword(targetUser.mustChangePasswordOnFirstLogin ?? false);
       setOfflineAllowed(targetUser.offlineAccessAllowed ?? true);
+      setSignature(targetUser.signature || '');
+      if (targetUser.signature && !targetUser.signature.startsWith('data:image/')) {
+        setCursiveText(targetUser.signature);
+      } else {
+        setCursiveText('');
+      }
     } else {
       // New user defaults
       setFullName('');
@@ -158,6 +258,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setPassword('');
       setMustChangePassword(true);
       setOfflineAllowed(true);
+      setSignature('');
+      setCursiveText('');
     }
     setError(null);
     setShowDeleteConfirm(false);
@@ -265,6 +367,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           status: status,
           offlineAccessAllowed: offlineAllowed,
           mustChangePasswordOnFirstLogin: mustChangePassword,
+          signature: signature.trim() || undefined,
         };
 
         if (password.trim()) {
@@ -288,6 +391,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             password: password.trim() || undefined,
             offlineAccessAllowed: offlineAllowed,
             mustChangePasswordOnFirstLogin: mustChangePassword,
+            signature: signature.trim() || undefined,
           },
           currentUser
         );
@@ -699,6 +803,65 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </div>
           </div>
 
+          {/* Section 4: Official User Signature */}
+          <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5" />
+                <span>Official User Signature</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignPadOpen(true);
+                  setTimeout(() => {
+                    if (canvasRef.current) {
+                      const canvas = canvasRef.current;
+                      canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
+                      canvas.height = 160;
+                    }
+                  }, 100);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{signature ? 'Change / Re-Sign Signature' : 'Add Signature (Pad or Upload)'}</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Signatures uploaded or drawn here appear automatically at the signature section when authoring official hospital memorandums.
+            </p>
+
+            {signature ? (
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+                <div className="h-16 flex items-center justify-center p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 min-w-[200px]">
+                  {signature.startsWith('data:image/') ? (
+                    <img src={signature} alt="User Signature" className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <span className="font-serif italic text-base text-blue-900 dark:text-blue-300 font-bold tracking-wider">
+                      {signature}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSignature('')}
+                    className="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                No official signature configured yet. Click "Add Signature" above to draw or upload one.
+              </div>
+            )}
+          </div>
+
           {/* Section 4: Credentials & Login Security */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
@@ -917,6 +1080,149 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </button>
           </div>
         </form>
+
+        {/* Signature Pad / Upload Modal */}
+        {isSignPadOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-sky-600" />
+                  <span>Configure Official Signature</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsSignPadOpen(false)}
+                  className="p-1 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Method Tabs */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSignMethod('DRAW')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
+                    signMethod === 'DRAW'
+                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  Draw on Pad
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSignMethod('UPLOAD')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
+                    signMethod === 'UPLOAD'
+                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  Upload Image
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSignMethod('TYPE')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
+                    signMethod === 'TYPE'
+                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  Type Name
+                </button>
+              </div>
+
+              {signMethod === 'DRAW' && (
+                <div className="space-y-3">
+                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-950 overflow-hidden relative touch-none">
+                    <canvas
+                      ref={canvasRef}
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                      onTouchStart={startDrawing}
+                      onTouchMove={draw}
+                      onTouchEnd={stopDrawing}
+                      className="w-full h-40 cursor-crosshair bg-white dark:bg-slate-950"
+                    />
+                    <div className="absolute bottom-2 right-2 text-[10px] text-slate-400 pointer-events-none">
+                      Use mouse or touchscreen to sign
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={clearCanvas}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Clear Canvas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveCanvasSignature}
+                      className="px-4 py-2 rounded-xl bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 cursor-pointer shadow-md"
+                    >
+                      Save Drawn Signature
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {signMethod === 'UPLOAD' && (
+                <div className="space-y-4 py-4">
+                  <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-sky-300 dark:border-sky-800 rounded-2xl bg-slate-50 dark:bg-slate-950 cursor-pointer relative group">
+                    <input
+                      type="file"
+                      accept="image/png, image/jpeg, image/svg+xml, image/webp"
+                      onChange={handleFileUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <Upload className="w-8 h-8 text-sky-600 mb-2" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Click to upload signature image (PNG, JPG, SVG)
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-1">Maximum size 2MB</span>
+                  </div>
+                </div>
+              )}
+
+              {signMethod === 'TYPE' && (
+                <div className="space-y-3 py-2">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Type Name (Cursive Font Style)
+                  </label>
+                  <input
+                    type="text"
+                    value={cursiveText}
+                    onChange={(e) => setCursiveText(e.target.value)}
+                    placeholder="e.g. Courage Kekesi"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-base font-serif italic text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-950 focus:outline-none"
+                  />
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (cursiveText.trim()) {
+                          setSignature(cursiveText.trim());
+                          setIsSignPadOpen(false);
+                        }
+                      }}
+                      className="px-4 py-2 rounded-xl bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 cursor-pointer"
+                    >
+                      Save Typed Signature
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

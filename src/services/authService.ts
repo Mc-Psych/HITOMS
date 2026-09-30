@@ -833,6 +833,7 @@ class AuthService {
       updatedAt: now,
       lastLoginAt: now,
       offlineAccessAllowed: userData.offlineAccessAllowed ?? true,
+      signature: userData.signature || ((userData.role === 'SUPER_ADMIN' || userData.role === 'IT_ADMIN') ? fullName : ''),
       password: defaultPassword,
       mustChangePasswordOnFirstLogin: userData.mustChangePasswordOnFirstLogin ?? true,
       _syncStatus: 'LOCAL_ONLY',
@@ -884,6 +885,7 @@ class AuthService {
     if (updates.specialties !== undefined) user.specialties = updates.specialties;
     if (updates.specialtyNotes !== undefined) user.specialtyNotes = updates.specialtyNotes.trim();
     if (updates.photoURL !== undefined) user.photoURL = updates.photoURL;
+    if (updates.signature !== undefined) user.signature = updates.signature;
     if (updates.offlineAccessAllowed !== undefined) user.offlineAccessAllowed = updates.offlineAccessAllowed;
 
     // Password reset / update by admin
