@@ -219,6 +219,7 @@ class EmergencyService {
     };
 
     await putToStore(STORE_NAMES.emergencyBroadcasts, alert);
+    await syncService.enqueueOperation(STORE_NAMES.emergencyBroadcasts, alert.id, 'CREATE', alert);
 
     // Trigger system notification ring for alert (rings siren & delivers background notification even if app closed)
     try {
@@ -267,6 +268,7 @@ class EmergencyService {
         acks.add(userId);
         target.acknowledgedByUsers = Array.from(acks);
         await putToStore(STORE_NAMES.emergencyBroadcasts, target);
+        await syncService.enqueueOperation(STORE_NAMES.emergencyBroadcasts, target.id, 'UPDATE', target);
       }
     } catch (err) {
       console.error('[EmergencyService] Failed to acknowledge alert:', err);
@@ -280,6 +282,7 @@ class EmergencyService {
       if (target) {
         target.isActive = false;
         await putToStore(STORE_NAMES.emergencyBroadcasts, target);
+        await syncService.enqueueOperation(STORE_NAMES.emergencyBroadcasts, target.id, 'UPDATE', target);
 
         // If this alert was tied to a hospital system, restore its status!
         if (target.targetSystemId) {

@@ -454,6 +454,7 @@ class SyncService {
           { col: 'locations', store: 'locations' },
           { col: 'subscriptions', store: 'subscriptions' },
           { col: 'knowledgeBase', store: 'knowledgeBase' },
+          { col: 'emergencyBroadcasts', store: 'emergencyBroadcasts' },
         ];
 
         // Process in parallel with fast timeouts
