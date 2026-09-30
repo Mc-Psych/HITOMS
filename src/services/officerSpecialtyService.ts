@@ -41,7 +41,7 @@ export function getDefaultSpecialtiesForMonth(monthKey: string): OfficerMonthlyS
     {
       id: `spec-${monthKey}-admin-001`,
       userId: 'usr-admin-001',
-      userName: 'Courage Kay',
+      userName: 'Super Administrator',
       month: monthKey,
       specialties: [
         'Network',

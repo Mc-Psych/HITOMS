@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Upload,
   FileSpreadsheet,
@@ -53,12 +54,34 @@ interface ParsedAssetRow {
   errors: string[];
 }
 
-const SAMPLE_CSV_CONTENT = `assetType,manufacturer,model,serialNumber,department,location,assignedUser,condition,status,operatingSystem,ipAddress,purchasePrice,supplier,notes
-Desktop,Dell,OptiPlex 7090,CN-0K9821-7281,Pharmacy,Dispensing Counter 1,Dr. Kwesi,Good,Active,Windows 11 Pro,192.168.10.45,850,TechWorld Ghana,Primary dispensary terminal
-Laptop,HP,EliteBook 840 G8,5CG12345XYZ,Emergency (A&E),Triage Desk,Nurse Joyce,Excellent,Active,Windows 11 Pro,192.168.10.88,1100,Universal IT,Triage intake unit
-Printer,HP,LaserJet Pro MFP M428fdw,VNB3K98765,Radiology,Reception Desk,Shared,Good,Active,,192.168.10.150,420,OfficeTech Ltd,High-volume label printer
-Switch,Cisco,Catalyst 2960X,FCW2145A098,IT Server Room,Rack 1 Unit 4,IT Unit Staff,Excellent,Active,,192.168.10.2,1450,Cisco Direct,MDF Core Switch
-UPS,APC,Smart-UPS 1500VA,AS1834120984,ICU,Nurse Station 2,Shared,Good,Active,,,580,PowerSafe Systems,Battery replaced Jan 2026`;
+export function generateAssetCsvTemplate(existingAssets: Asset[] = []): string {
+  const headers = 'assetType,manufacturer,model,serialNumber,department,location,assignedUser,condition,status';
+
+  if (!existingAssets || existingAssets.length === 0) {
+    return `${headers}\n`;
+  }
+
+  const escape = (val?: string) => {
+    const clean = val || '';
+    return clean.includes(',') ? `"${clean}"` : clean;
+  };
+
+  const rows = existingAssets.map((a) => {
+    const assetType = escape(a.assetType || 'Desktop');
+    const mfr = escape(a.manufacturer || '');
+    const model = escape(a.model || '');
+    const sn = escape(a.serialNumber || '');
+    const dept = escape(a.department || 'General');
+    const loc = escape(a.location || 'Office');
+    const user = escape(a.assignedUser || '');
+    const cond = escape(a.condition || 'Good');
+    const stat = escape(a.status || 'Available');
+
+    return `${assetType},${mfr},${model},${sn},${dept},${loc},${user},${cond},${stat}`;
+  });
+
+  return `${headers}\n${rows.join('\n')}`;
+}
 
 export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   isOpen,
@@ -86,7 +109,8 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
   // Download Sample CSV
   const handleDownloadSample = () => {
-    downloadTextFile('HITOMS_Asset_Bulk_Upload_Template.csv', SAMPLE_CSV_CONTENT, {
+    const content = generateAssetCsvTemplate(existingAssets);
+    downloadTextFile('HITOMS_Asset_Bulk_Upload_Template.csv', content, {
       mimeType: 'text/csv;charset=utf-8',
     });
   };
@@ -242,55 +266,75 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
     setFile(selectedFile);
     setImportResult(null);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        if (selectedFile.name.endsWith('.json')) {
-          try {
-            const parsed = JSON.parse(content);
-            const array = Array.isArray(parsed) ? parsed : [parsed];
-            const rows: ParsedAssetRow[] = array.map((item, idx) => ({
-              id: `json-${idx}-${Date.now()}`,
-              assetTag: item.assetTag || '',
-              assetType: item.assetType || 'Desktop',
-              manufacturer: item.manufacturer || '',
-              model: item.model || '',
-              serialNumber: item.serialNumber || '',
-              department: item.department || 'General',
-              location: item.location || 'Office',
-              assignedUser: item.assignedUser || '',
-              condition: (item.condition as AssetCondition) || 'Good',
-              status: (['Available', 'Assigned', 'In Repair', 'Under Maintenance', 'Retired', 'Lost', 'Damaged', 'Disposed'].includes(item.status)
-                ? item.status
-                : item.assignedUser ? 'Assigned' : 'Available') as AssetStatus,
-              operatingSystem: item.operatingSystem || '',
-              ipAddress: item.ipAddress || '',
-              macAddress: item.macAddress || '',
-              specifications: item.specifications || '',
-              notes: item.notes || '',
-              purchasePrice: Number(item.purchasePrice) || 0,
-              supplier: item.supplier || '',
-              purchaseDate: item.purchaseDate || '',
-              isValid: Boolean(item.manufacturer && item.model && item.department),
-              errors: [
-                !item.manufacturer ? 'Missing manufacturer' : '',
-                !item.model ? 'Missing model' : '',
-                !item.department ? 'Missing department' : '',
-              ].filter(Boolean),
-            }));
-            setParsedRows(rows);
-          } catch (err) {
-            console.error('JSON parsing failed', err);
-          }
-        } else {
-          // Standard CSV / Tab delimited text
-          const rows = parseCSVString(content);
+    const fileName = selectedFile.name.toLowerCase();
+
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+          const rows = parseCSVString(csvContent);
           setParsedRows(rows);
+        } catch (err) {
+          console.error('Excel parsing failed', err);
         }
-      }
-    };
-    reader.readAsText(selectedFile);
+      };
+      reader.readAsArrayBuffer(selectedFile);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        if (content) {
+          if (fileName.endsWith('.json')) {
+            try {
+              const parsed = JSON.parse(content);
+              const array = Array.isArray(parsed) ? parsed : [parsed];
+              const rows: ParsedAssetRow[] = array.map((item, idx) => ({
+                id: `json-${idx}-${Date.now()}`,
+                assetTag: item.assetTag || '',
+                assetType: item.assetType || 'Desktop',
+                manufacturer: item.manufacturer || '',
+                model: item.model || '',
+                serialNumber: item.serialNumber || '',
+                department: item.department || 'General',
+                location: item.location || 'Office',
+                assignedUser: item.assignedUser || '',
+                condition: (item.condition as AssetCondition) || 'Good',
+                status: (['Available', 'Assigned', 'In Repair', 'Under Maintenance', 'Retired', 'Lost', 'Damaged', 'Disposed'].includes(item.status)
+                  ? item.status
+                  : item.assignedUser ? 'Assigned' : 'Available') as AssetStatus,
+                operatingSystem: item.operatingSystem || '',
+                ipAddress: item.ipAddress || '',
+                macAddress: item.macAddress || '',
+                specifications: item.specifications || '',
+                notes: item.notes || '',
+                purchasePrice: Number(item.purchasePrice) || 0,
+                supplier: item.supplier || '',
+                purchaseDate: item.purchaseDate || '',
+                isValid: Boolean(item.manufacturer && item.model && item.department),
+                errors: [
+                  !item.manufacturer ? 'Missing manufacturer' : '',
+                  !item.model ? 'Missing model' : '',
+                  !item.department ? 'Missing department' : '',
+                ].filter(Boolean),
+              }));
+              setParsedRows(rows);
+            } catch (err) {
+              console.error('JSON parsing failed', err);
+            }
+          } else {
+            // Standard CSV / Tab delimited text
+            const rows = parseCSVString(content);
+            setParsedRows(rows);
+          }
+        }
+      };
+      reader.readAsText(selectedFile);
+    }
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -503,7 +547,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".csv, .txt, .json"
+                    accept=".csv, .xlsx, .xls, .txt, .json, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
                     onChange={handleFileChange}
                     className="hidden"
                   />
@@ -512,11 +556,11 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                   </div>
                   <div>
                     <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-                      Drag and drop your asset CSV/JSON file here, or{' '}
+                      Drag and drop your Excel (.xlsx, .xls), CSV, or JSON file here, or{' '}
                       <span className="text-sky-600 hover:underline">browse files</span>
                     </p>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Supports comma-separated values (.csv), tab-delimited text, or structured JSON.
+                      Supports Excel workbooks (.xlsx, .xls), comma-separated values (.csv), tab-delimited text, or structured JSON.
                     </p>
                   </div>
 
@@ -561,7 +605,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setPastedText(SAMPLE_CSV_CONTENT)}
+                      onClick={() => setPastedText(generateAssetCsvTemplate(existingAssets))}
                       className="px-3 py-1.5 text-xs text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/50 rounded-lg font-semibold"
                     >
                       Load Sample Data

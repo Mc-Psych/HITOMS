@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -28,7 +29,9 @@ interface StaffBulkUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserType | null;
-  onSuccess: () => void;
+  existingUsers?: UserType[];
+  onUploadComplete?: () => void;
+  onSuccess?: () => void;
 }
 
 export interface ParsedStaffRecord {
@@ -46,22 +49,36 @@ export interface ParsedStaffRecord {
   warnings: string[];
 }
 
-export const SAMPLE_CSV_CONTENT = `fullName,department,role,jobTitle,phone,email
-Dr. Kwame Mensah,Outpatient Department (OPD),DEPARTMENT_HEAD,Lead Clinical Physician,+233 24 111 2222,mensah@hospital.local
-Sister Beatrice Osei,Maternity Ward,STAFF_USER,Senior Midwife,+233 24 333 4444,osei@hospital.local
-Emmanuel Owusu,IT Operations,IT_OFFICER,Network Administrator,+233 24 555 6666,owusu@hospital.local
-Dr. Abigail Boateng,Pharmacy Unit,DEPARTMENT_HEAD,Chief Pharmacist,+233 24 777 8888,boateng@hospital.local
-Frank Kwarteng,Finance & Stores,PROCUREMENT_OFFICER,Stores & Procurement Specialist,+233 24 999 0000,kwarteng@hospital.local
-Rita Addo,Diagnostic Imaging / Radiology,STAFF_USER,Senior Radiographer,+233 24 222 3333,addo@hospital.local
-Samuel Asante,Intensive Care Unit (ICU),STAFF_USER,ICU Critical Care Nurse,+233 24 444 5555,asante@hospital.local
-Sister Grace Cudjoe,Hospital Administration,HOSPITAL_MANAGEMENT,Deputy Director of Nursing,+233 24 666 7777,cudjoe@hospital.local
-David Annan,Internal Audit,AUDITOR,Hospital Compliance Auditor,+233 24 888 9999,annan@hospital.local`;
+export function generateStaffCsvTemplate(existingUsers: UserType[] = [], withSamples: boolean = true): string {
+  const headers = 'fullName,department,role';
 
-export const BLANK_CSV_CONTENT = `fullName,department,role,jobTitle,phone,email
-`;
+  if (!withSamples) {
+    return `${headers}\n`;
+  }
 
-export function downloadStaffTemplate(withSamples: boolean = true) {
-  const content = withSamples ? SAMPLE_CSV_CONTENT : BLANK_CSV_CONTENT;
+  // Filter out Super Admin accounts
+  const nonSuperAdmins = (existingUsers || []).filter(
+    (u) => u.role !== 'SUPER_ADMIN' && u.username?.toLowerCase() !== 'admin' && u.id !== 'usr-admin-001'
+  );
+
+  if (nonSuperAdmins.length === 0) {
+    return `${headers}\n`;
+  }
+
+  const rows = nonSuperAdmins.map((u) => {
+    const fullName = u.fullName || '';
+    const dept = u.department || 'General Clinical';
+    const role = u.role || 'STAFF_USER';
+    const escapedName = fullName.includes(',') ? `"${fullName}"` : fullName;
+    const escapedDept = dept.includes(',') ? `"${dept}"` : dept;
+    return `${escapedName},${escapedDept},${role}`;
+  });
+
+  return `${headers}\n${rows.join('\n')}`;
+}
+
+export function downloadStaffTemplate(withSamples: boolean = true, existingUsers: UserType[] = []) {
+  const content = generateStaffCsvTemplate(existingUsers, withSamples);
   const filename = withSamples
     ? 'HITOMS_Staff_Upload_Template_Sample.csv'
     : 'HITOMS_Staff_Upload_Template_Blank.csv';
@@ -114,6 +131,8 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   isOpen,
   onClose,
   currentUser,
+  existingUsers,
+  onUploadComplete,
   onSuccess,
 }) => {
   const [activeInputMode, setActiveInputMode] = useState<'FILE' | 'MANUAL'>('FILE');
@@ -125,6 +144,22 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showRoleGuide, setShowRoleGuide] = useState(false);
+  const [fetchedUsers, setFetchedUsers] = useState<UserType[]>([]);
+
+  // Load existing users if not provided via props
+  useEffect(() => {
+    if (isOpen) {
+      if (existingUsers && existingUsers.length > 0) {
+        setFetchedUsers(existingUsers);
+      } else {
+        authService.getAllUsers().then((users) => {
+          setFetchedUsers(users);
+        });
+      }
+    }
+  }, [isOpen, existingUsers]);
+
+  const activeUserList = existingUsers && existingUsers.length > 0 ? existingUsers : fetchedUsers;
 
   // Outcome state
   const [bulkResult, setBulkResult] = useState<{
@@ -157,7 +192,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
   // Download Sample Template CSV
   const handleDownloadTemplate = (withSamples: boolean = true) => {
-    downloadStaffTemplate(withSamples);
+    downloadStaffTemplate(withSamples, activeUserList);
   };
 
   // Export created accounts list
@@ -180,7 +215,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   };
 
   // Parse raw text into structured staff records
-  const parseRawText = (rawText: string) => {
+  const parseRawText = (rawText: string, autoSubmit: boolean = false) => {
     setErrorMessage(null);
     const lines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
 
@@ -271,7 +306,13 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       const warnings: string[] = [];
       let isValid = true;
 
-      if (!fullName.trim()) {
+      const cleanFullName = (fullName || '').trim();
+      const cleanDept = (department || '').trim();
+      const cleanJobTitle = (jobTitle || '').trim();
+      const cleanPhone = (phone || '').trim();
+      let cleanEmail = (email || '').trim();
+
+      if (!cleanFullName) {
         isValid = false;
         warnings.push('Full Name is required');
       }
@@ -281,31 +322,38 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         warnings.push(`Mapped "${roleRaw}" to role "${role}"`);
       }
 
-      const surname = extractSurname(fullName);
+      const surname = extractSurname(cleanFullName);
       const username = surname.toLowerCase();
       const defaultPassword = getDefaultPasswordForSurname(surname);
 
-      if (!email.trim()) {
-        email = `${username}@hospital.local`;
+      if (!cleanEmail) {
+        cleanEmail = `${username}@hospital.local`;
       }
 
       records.push({
         id: `rec-${i}`,
-        fullName: fullName.trim(),
+        fullName: cleanFullName,
         surname,
         username,
         defaultPassword,
-        department: department.trim(),
+        department: cleanDept || 'General Clinical',
         role,
-        jobTitle: jobTitle.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
+        jobTitle: cleanJobTitle || 'Hospital Staff',
+        phone: cleanPhone || '+233 24 000 0000',
+        email: cleanEmail,
         isValid,
         warnings,
       });
     }
 
     setParsedRecords(records);
+
+    if (autoSubmit) {
+      const validRecords = records.filter((r) => r.isValid);
+      if (validRecords.length > 0) {
+        handleExecuteUpload(records);
+      }
+    }
   };
 
   // Handle file selection
@@ -317,24 +365,50 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   };
 
   const processSelectedFile = (file: File) => {
-    if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt') && !file.name.endsWith('.tsv')) {
-      setErrorMessage('Please upload a valid CSV, TSV, or TXT file.');
+    const fileName = file.name.toLowerCase();
+    if (
+      !fileName.endsWith('.csv') &&
+      !fileName.endsWith('.xlsx') &&
+      !fileName.endsWith('.xls') &&
+      !fileName.endsWith('.txt') &&
+      !fileName.endsWith('.tsv')
+    ) {
+      setErrorMessage('Please upload a valid Excel (.xlsx, .xls), CSV, or TSV file.');
       return;
     }
 
     setSelectedFileName(`${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      if (text) {
-        setManualInputText(text);
-        parseRawText(text);
-      }
-    };
-    reader.onerror = () => {
-      setErrorMessage('Failed to read the uploaded file.');
-    };
-    reader.readAsText(file);
+
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const csvText = XLSX.utils.sheet_to_csv(worksheet);
+          setManualInputText(csvText);
+          parseRawText(csvText, true);
+        } catch (err) {
+          setErrorMessage('Failed to read Excel workbook. Please ensure it is a valid .xlsx or .xls file.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        if (text) {
+          setManualInputText(text);
+          parseRawText(text, true);
+        }
+      };
+      reader.onerror = () => {
+        setErrorMessage('Failed to read the uploaded file.');
+      };
+      reader.readAsText(file);
+    }
   };
 
   // Drag and drop handlers
@@ -359,9 +433,10 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
   // Insert sample data into manual text area
   const handlePasteSample = () => {
-    setManualInputText(SAMPLE_CSV_CONTENT);
+    const sampleText = generateStaffCsvTemplate(activeUserList, true);
+    setManualInputText(sampleText);
     setSelectedFileName('Sample Hospital Staff Template');
-    parseRawText(SAMPLE_CSV_CONTENT);
+    parseRawText(sampleText);
   };
 
   // Clear loaded data
@@ -377,13 +452,14 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   };
 
   // Execute provision
-  const handleExecuteUpload = async () => {
+  const handleExecuteUpload = async (customRecords?: ParsedStaffRecord[]) => {
     if (!currentUser || !isSuperAdmin) {
       setErrorMessage('Access Denied: Only Super Administrators can provision staff accounts.');
       return;
     }
 
-    const validRecords = parsedRecords.filter((r) => r.isValid);
+    const recordsToUse = customRecords || parsedRecords;
+    const validRecords = recordsToUse.filter((r) => r.isValid);
     if (validRecords.length === 0) {
       setErrorMessage('No valid staff records found to provision. Please verify the template columns and names.');
       return;
@@ -594,7 +670,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                   }`}
                 >
-                  File Upload (.csv)
+                  File Upload (.xlsx, .csv)
                 </button>
                 <button
                   type="button"
@@ -617,7 +693,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept=".csv,.txt,.tsv"
+                  accept=".csv,.xlsx,.xls,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   className="hidden"
                 />
 

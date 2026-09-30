@@ -282,7 +282,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>Quick demo login disabled by Super Administrator Courage Kay</span>
+                <span>Quick demo login disabled by Super Administrator</span>
               </span>
               <span className="font-mono text-[10px] text-slate-500">Security Active</span>
             </div>

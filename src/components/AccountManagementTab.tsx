@@ -1125,10 +1125,10 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
               ) : (
                 filteredUsers.map((user) => {
                   const isSelected = selectedUserIds.has(user.id);
-                  const isCourageKay =
+                  const isRootAdmin =
                     user.role === 'SUPER_ADMIN' &&
-                    (user.username?.toLowerCase() === 'kay' ||
-                      user.fullName.toLowerCase().includes('courage kay'));
+                    (user.username?.toLowerCase() === 'admin' ||
+                      user.id === 'usr-admin-001');
                   const isSelf = currentUser?.id === user.id;
 
                   return (
@@ -1161,7 +1161,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                           <div className="min-w-0">
                             <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
                               <span>{user.fullName}</span>
-                              {isCourageKay && (
+                              {isRootAdmin && (
                                 <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9px] font-black uppercase tracking-wider">
                                   Root Admin
                                 </span>
@@ -1303,7 +1303,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                           )}
 
                           {/* Delete Account */}
-                          {isItAdmin && !isSelf && !isCourageKay && (
+                          {isItAdmin && !isSelf && !isRootAdmin && (
                             <button
                               onClick={() => setUserToDelete(user)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"

@@ -752,7 +752,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </p>
 
               {[
-                { role: 'SUPER_ADMIN', label: 'Super Admin (Courage Kay)' },
+                { role: 'SUPER_ADMIN', label: 'Super Administrator' },
                 { role: 'IT_ADMIN', label: 'IT Systems Administrator' },
                 { role: 'IT_OFFICER', label: 'IT Support Officer / Field Technician' },
                 { role: 'CLINICAL_STAFF', label: 'Clinical Ward Staff / General Staff' },

@@ -73,6 +73,11 @@ export type Permission =
   | 'users.create'
   | 'users.update'
   | 'users.delete'
+  | 'departments.view'
+  | 'departments.create'
+  | 'departments.update'
+  | 'departments.delete'
+  | 'departments.delete_all'
   | 'tickets.view'
   | 'tickets.create'
   | 'tickets.comment'
@@ -171,6 +176,11 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'users.create', label: 'Provision Staff Accounts', category: 'Facility & Admin', description: 'Create new user profiles and set roles' },
   { key: 'users.update', label: 'Edit Staff Accounts', category: 'Facility & Admin', description: 'Modify staff permissions, status, and department assignments' },
   { key: 'users.delete', label: 'Deactivate / Remove Users', category: 'Facility & Admin', description: 'Suspend or disable staff login credentials' },
+  { key: 'departments.view', label: 'View Department Directory', category: 'Facility & Admin', description: 'Browse clinical units, wards, emergency classifications, extensions, and unit leadership' },
+  { key: 'departments.create', label: 'Create Hospital Department', category: 'Facility & Admin', description: 'Register new wards and clinical departments' },
+  { key: 'departments.update', label: 'Edit Department Details', category: 'Facility & Admin', description: 'Modify department leadership, extension numbers, building locations, and emergency flags' },
+  { key: 'departments.delete', label: 'Delete Department', category: 'Facility & Admin', description: 'Permanently remove individual hospital departments' },
+  { key: 'departments.delete_all', label: 'Delete All Departments (Super Admin Only)', category: 'Facility & Admin', description: 'Purge all registered hospital departments at once (restricted to Super Administrator)' },
   { key: 'facility.manage', label: 'Edit Facility Details & Logo', category: 'Facility & Admin', description: 'Upload hospital emblem, configure LAN URLs, address, and contacts' },
   { key: 'settings.manage', label: 'Manage System Settings & Offline Policy', category: 'Facility & Admin', description: 'Configure sync intervals, offline thresholds, and global security rules' },
 ];
@@ -222,6 +232,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, { title: string; description: strin
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   SUPER_ADMIN: [
     'users.view', 'users.create', 'users.update', 'users.delete',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete', 'departments.delete_all',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close', 'tickets.delete',
     'assets.view', 'assets.create', 'assets.update', 'assets.delete',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
@@ -236,6 +247,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
   IT_ADMIN: [
     'users.view', 'users.create', 'users.update',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close',
     'assets.view', 'assets.create', 'assets.update',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
@@ -249,6 +261,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'facility.manage',
   ],
   IT_OFFICER: [
+    'departments.view', 'departments.create', 'departments.update',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close',
     'assets.view', 'assets.create', 'assets.update',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
@@ -260,6 +273,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'reports.view',
   ],
   HOSPITAL_MANAGEMENT: [
+    'departments.view',
     'tickets.view',
     'assets.view',
     'maintenance.view',
@@ -268,20 +282,24 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'reports.view', 'reports.export',
   ],
   DEPARTMENT_HEAD: [
+    'departments.view',
     'tickets.view', 'tickets.create', 'tickets.comment',
     'assets.view',
     'reports.view',
   ],
   STAFF_USER: [
+    'departments.view',
     'tickets.view', 'tickets.create', 'tickets.comment',
   ],
   PROCUREMENT_OFFICER: [
+    'departments.view',
     'inventory.view', 'inventory.create', 'inventory.update', 'inventory.adjust',
     'procurement.manage',
     'assets.view',
     'reports.view', 'reports.export',
   ],
   AUDITOR: [
+    'departments.view',
     'tickets.view',
     'assets.view',
     'maintenance.view',
@@ -598,11 +616,7 @@ class AuthService {
       ? (user.password && user.password === cleanPassword)
       : (user.password && user.password === cleanPassword) ||
         cleanPassword.toLowerCase() === defaultPassword.toLowerCase() ||
-        cleanPassword === 'admin' ||
-        cleanPassword === 'admin123' ||
-        cleanPassword === 'kay' ||
-        cleanPassword === 'kay1' ||
-        cleanPassword === 'password';
+        (user.role === 'SUPER_ADMIN' && cleanPassword.toLowerCase() === 'admin');
 
     if (!isMatch) {
       throw new Error('Incorrect password. For new accounts, initial password is the last 4 letters of your Surname.');
@@ -679,7 +693,7 @@ class AuthService {
     const generatedAccounts: Array<{ fullName: string; username: string; defaultPassword: string; role: Role; department: string }> = [];
 
     // Ensure all departments in bulk staff list exist in departmentService
-    const distinctDepts = Array.from(new Set(staffList.map((s) => s.department?.trim()).filter(Boolean)));
+    const distinctDepts = Array.from(new Set(staffList.map((s) => (s.department ? String(s.department).trim() : '')).filter(Boolean)));
     try {
       await departmentService.ensureDepartmentsExist(distinctDepts as string[], actor);
     } catch (e) {
@@ -687,16 +701,16 @@ class AuthService {
     }
 
     for (const item of staffList) {
-      if (!item.fullName || !item.fullName.trim()) {
+      if (!item.fullName || !String(item.fullName).trim()) {
         skippedCount++;
         continue;
       }
 
-      const fullName = item.fullName.trim();
+      const fullName = String(item.fullName).trim();
       const surname = extractSurname(fullName);
       const username = surname.toLowerCase();
       const defaultPassword = getDefaultPasswordForSurname(surname);
-      const email = item.email?.trim() || `${username}@hospital.local`;
+      const email = (item.email ? String(item.email).trim() : '') || `${username}@hospital.local`;
 
       // If exact email already exists, skip or generate unique handle
       if (existingEmails.has(email.toLowerCase())) {
@@ -704,17 +718,17 @@ class AuthService {
         continue;
       }
 
-      const dept = item.department?.trim() || 'General Clinical';
+      const dept = (item.department ? String(item.department).trim() : '') || 'General Clinical';
 
       const newUser: User = {
         id: 'usr-' + generateUUID().substring(0, 8),
         fullName,
         username,
         email,
-        phone: item.phone?.trim() || '+233 24 000 0000',
+        phone: (item.phone ? String(item.phone).trim() : '') || '+233 24 000 0000',
         department: dept,
         departments: [dept],
-        jobTitle: item.jobTitle?.trim() || 'Hospital Staff',
+        jobTitle: (item.jobTitle ? String(item.jobTitle).trim() : '') || 'Hospital Staff',
         role: item.role || 'STAFF_USER',
         status: 'Active',
         createdAt: now,
@@ -811,17 +825,17 @@ class AuthService {
       throw new Error('Full Name is required.');
     }
 
-    const fullName = userData.fullName.trim();
+    const fullName = (userData.fullName || '').trim();
     const surname = extractSurname(fullName);
-    const username = userData.username?.trim().toLowerCase() || surname.toLowerCase();
+    const username = (userData.username || '').trim().toLowerCase() || surname.toLowerCase();
     const defaultPassword = userData.password || getDefaultPasswordForSurname(surname);
-    const email = userData.email?.trim() || `${username}@hospital.local`;
+    const email = (userData.email || '').trim() || `${username}@hospital.local`;
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
     const existingUsers = await getAllFromStore<User>('users');
     const duplicate = existingUsers.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase() || (u.username && u.username.toLowerCase() === username)
+      (u) => (u.email || '').toLowerCase() === email.toLowerCase() || (u.username && u.username.toLowerCase() === username)
     );
 
     if (duplicate) {
@@ -832,8 +846,8 @@ class AuthService {
     const rawDepts = userData.departments && userData.departments.length > 0
       ? userData.departments
       : (userData.department ? [userData.department] : ['General Clinical']);
-    const cleanDepts = Array.from(new Set(rawDepts.map((d) => d.trim()).filter(Boolean)));
-    const primaryDept = userData.department?.trim() || cleanDepts[0] || 'General Clinical';
+    const cleanDepts = Array.from(new Set(rawDepts.map((d) => (d || '').trim()).filter(Boolean)));
+    const primaryDept = (userData.department || '').trim() || cleanDepts[0] || 'General Clinical';
 
     // Ensure all tied departments exist as STANDARD_DEPARTMENTS
     try {
@@ -909,32 +923,34 @@ class AuthService {
       } catch (e) {
         console.warn('[authService] Error auto-registering departments during user update:', e);
       }
-      user.departments = Array.from(new Set(updates.departments.map((d) => d.trim()).filter(Boolean)));
+      user.departments = Array.from(new Set(updates.departments.map((d) => (d || '').trim()).filter(Boolean)));
       if (updates.department === undefined) {
         user.department = user.departments[0] || user.department;
       }
     }
 
     // Field updates
-    if (updates.fullName !== undefined) user.fullName = updates.fullName.trim();
-    if (updates.username !== undefined) user.username = updates.username.trim().toLowerCase();
-    if (updates.email !== undefined) user.email = updates.email.trim();
-    if (updates.phone !== undefined) user.phone = updates.phone.trim();
+    if (updates.fullName !== undefined) user.fullName = (updates.fullName || '').trim();
+    if (updates.username !== undefined) user.username = (updates.username || '').trim().toLowerCase();
+    if (updates.email !== undefined) user.email = (updates.email || '').trim();
+    if (updates.phone !== undefined) user.phone = (updates.phone || '').trim();
     if (updates.department !== undefined) {
-      const cleanDept = updates.department.trim();
+      const cleanDept = (updates.department || '').trim();
       user.department = cleanDept;
-      if (!user.departments || !user.departments.includes(cleanDept)) {
+      if (cleanDept && (!user.departments || !user.departments.includes(cleanDept))) {
         user.departments = Array.from(new Set([...(user.departments || []), cleanDept]));
       }
-      try {
-        await departmentService.ensureDepartmentExists(cleanDept, actor);
-      } catch (e) {
-        console.warn('[authService] Error ensuring department exists during user update:', e);
+      if (cleanDept) {
+        try {
+          await departmentService.ensureDepartmentExists(cleanDept, actor);
+        } catch (e) {
+          console.warn('[authService] Error ensuring department exists during user update:', e);
+        }
       }
     }
-    if (updates.jobTitle !== undefined) user.jobTitle = updates.jobTitle.trim();
+    if (updates.jobTitle !== undefined) user.jobTitle = (updates.jobTitle || '').trim();
     if (updates.specialties !== undefined) user.specialties = updates.specialties;
-    if (updates.specialtyNotes !== undefined) user.specialtyNotes = updates.specialtyNotes.trim();
+    if (updates.specialtyNotes !== undefined) user.specialtyNotes = (updates.specialtyNotes || '').trim();
     if (updates.photoURL !== undefined) user.photoURL = updates.photoURL;
     if (updates.signature !== undefined) user.signature = updates.signature;
     if (updates.offlineAccessAllowed !== undefined) user.offlineAccessAllowed = updates.offlineAccessAllowed;
@@ -1039,8 +1055,8 @@ class AuthService {
     }
 
     // Safety guard for primary root admin
-    if (user.role === 'SUPER_ADMIN' && (user.username?.toLowerCase() === 'kay' || user.fullName.toLowerCase().includes('courage kay'))) {
-      throw new Error('Protected Account: The primary Super Administrator profile (Courage Kay) cannot be deleted.');
+    if (user.role === 'SUPER_ADMIN' && (user.username?.toLowerCase() === 'admin' || user.id === 'usr-admin-001')) {
+      throw new Error('Protected Account: The primary Super Administrator profile (admin) cannot be deleted.');
     }
 
     await deleteFromStore('users', userId);

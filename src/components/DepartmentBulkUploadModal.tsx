@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   X,
   Upload,
@@ -12,7 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { type Department, type User } from '../types';
-import { departmentService } from '../services/departmentService';
+import { departmentService, generateDepartmentCode } from '../services/departmentService';
 
 interface DepartmentBulkUploadModalProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ interface DepartmentBulkUploadModalProps {
 interface ParsedDeptRow {
   code: string;
   name: string;
+  locationDescription: string;
   building: string;
   floor: string;
   headOfDepartment: string;
@@ -35,21 +37,49 @@ interface ParsedDeptRow {
   error?: string;
 }
 
-const SAMPLE_CSV_CONTENT = `code,name,building,floor,headOfDepartment,phone,isEmergency
-A&E,Accident & Emergency,Block A (Trauma Wing),Ground Floor,Dr. Kwesi Mensah,Ext. 101,true
-ICU,Intensive Care Unit,Block A (Critical Care),Level 2,Dr. K. Adjei,Ext. 104,true
-OPD,Outpatient Department,Block B (Main),Ground Floor,Dr. M. Osei,Ext. 102,false
-PHARM,Central Hospital Pharmacy,Block B,Ground Floor,Pharm. A. Mensah,Ext. 108,false
-LAB,Laboratory & Pathology,Block A,Level 1,Dr. S. Boateng,Ext. 112,false
-RAD,Radiology & Diagnostic Imaging,Block A,Ground Floor,Dr. E. Appiah,Ext. 115,false
-MAT,Maternity & Labour Ward,Block C,Level 1,Dr. Joyce Addo,Ext. 120,true
-NICU,Neonatal Intensive Care Unit,Block C,Level 2,Dr. P. Owusu,Ext. 122,true
-THEATRE,Main Surgical Theatre & CSSD,Block A,Level 3,Dr. R. Tetteh,Ext. 130,true
-PED,Paediatric Ward,Block C,Ground Floor,Dr. A. Darko,Ext. 125,false
-IT,IT & Telecommunications,Block B (Admin),Level 1,Courage Kekesi,Ext. 201,false
-ADMIN,Hospital Administration & HR,Block B (Admin),Level 2,Mr. K. Boateng,Ext. 200,false
-ACCTS,Accounts & Patient Billing,Block B (Admin),Ground Floor,Mrs. G. Frimpong,Ext. 205,false
-STORES,Procurement & Medical Stores,Block D,Ground Floor,Mr. E. Gadzekpo,Ext. 210,false`;
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((char === ',' || char === '\t' || char === ';') && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+export function generateDepartmentCsvTemplate(existingDepts: Department[] = []): string {
+  const headers = 'code,name,locationDescription';
+
+  if (!existingDepts || existingDepts.length === 0) {
+    return `${headers}\n`;
+  }
+
+  const rows = existingDepts.map((d) => {
+    const code = d.code || '';
+    const name = d.name || '';
+    const loc = d.locationDescription || d.building || '';
+    const escapedName = name.includes(',') ? `"${name}"` : name;
+    const escapedLoc = loc.includes(',') ? `"${loc}"` : loc;
+    return `${code},${escapedName},${escapedLoc}`;
+  });
+
+  return `${headers}\n${rows.join('\n')}`;
+}
 
 export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps> = ({
   isOpen,
@@ -71,7 +101,8 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
   if (!isOpen) return null;
 
   const downloadSampleCsv = () => {
-    const blob = new Blob([SAMPLE_CSV_CONTENT], { type: 'text/csv;charset=utf-8;' });
+    const content = generateDepartmentCsvTemplate(existingDepartments);
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
@@ -81,7 +112,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
     document.body.removeChild(link);
   };
 
-  const parseCsvContent = (text: string) => {
+  const parseCsvContent = (text: string, autoSubmit: boolean = false) => {
     setErrorMessage('');
     const lines = text
       .split(/\r?\n/)
@@ -95,17 +126,18 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
       return;
     }
 
-    const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/["']/g, ''));
+    const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/["']/g, ''));
     const codeIdx = header.findIndex((h) => h === 'code' || h === 'deptcode' || h === 'abbrev');
     const nameIdx = header.findIndex((h) => h === 'name' || h === 'department' || h === 'deptname');
+    const locIdx = header.findIndex((h) => h === 'locationdescription' || h === 'location' || h === 'loc');
     const buildingIdx = header.findIndex((h) => h === 'building' || h === 'wing' || h === 'block');
     const floorIdx = header.findIndex((h) => h === 'floor' || h === 'level');
     const hodIdx = header.findIndex((h) => h === 'headofdepartment' || h === 'hod' || h === 'head');
     const phoneIdx = header.findIndex((h) => h === 'phone' || h === 'extension' || h === 'ext');
     const isEmergIdx = header.findIndex((h) => h === 'isemergency' || h === 'emergency');
 
-    if (codeIdx === -1 || nameIdx === -1) {
-      setErrorMessage('CSV must contain at least "code" and "name" columns in the header row.');
+    if (nameIdx === -1) {
+      setErrorMessage('CSV must contain at least a "name" or "department" column in the header row.');
       setParsedRows([]);
       setHasParsed(true);
       return;
@@ -117,14 +149,23 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
-      // Basic CSV split respecting commas inside quotes if any
-      const tokens = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+      const tokens = parseCsvLine(line);
       const cleanTokens = tokens.map((t) => t.trim().replace(/^"|"$/g, ''));
 
-      const code = (cleanTokens[codeIdx] || '').trim().toUpperCase();
       const name = (cleanTokens[nameIdx] || '').trim();
-      const building = (buildingIdx >= 0 ? cleanTokens[buildingIdx] : 'Main Hospital Complex') || 'Main Hospital Complex';
-      const floor = (floorIdx >= 0 ? cleanTokens[floorIdx] : 'Ground Floor') || 'Ground Floor';
+      let code = (codeIdx >= 0 ? cleanTokens[codeIdx] : '').trim().toUpperCase();
+      if (!code && name) {
+        code = generateDepartmentCode(name);
+      }
+
+      const locDesc = (locIdx >= 0 ? cleanTokens[locIdx] : '').trim();
+      const building = (buildingIdx >= 0 ? cleanTokens[buildingIdx] : '').trim();
+      const floor = (floorIdx >= 0 ? cleanTokens[floorIdx] : '').trim();
+      const locationDescription =
+        locDesc ||
+        [building, floor].filter(Boolean).join(', ') ||
+        'Main Hospital Complex, Ground Floor';
+
       const headOfDepartment = (hodIdx >= 0 ? cleanTokens[hodIdx] : '') || '';
       const phone = (phoneIdx >= 0 ? cleanTokens[phoneIdx] : 'Ext. ') || 'Ext. ';
       const isEmergencyRaw = (isEmergIdx >= 0 ? cleanTokens[isEmergIdx] : 'false') || 'false';
@@ -133,12 +174,12 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
       let isValid = true;
       let error = '';
 
-      if (!code) {
-        isValid = false;
-        error = 'Missing department code';
-      } else if (!name) {
+      if (!name) {
         isValid = false;
         error = 'Missing department name';
+      } else if (!code) {
+        isValid = false;
+        error = 'Failed to generate department code';
       } else if (existingCodes.has(code)) {
         isValid = false;
         error = `Code "${code}" already exists in hospital registry`;
@@ -154,8 +195,9 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
       results.push({
         code,
         name,
-        building,
-        floor,
+        locationDescription,
+        building: building || locationDescription,
+        floor: floor || '',
         headOfDepartment,
         phone,
         isEmergency,
@@ -166,6 +208,13 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
 
     setParsedRows(results);
     setHasParsed(true);
+
+    if (autoSubmit) {
+      const validItems = results.filter((r) => r.isValid);
+      if (validItems.length > 0) {
+        handleImportSubmit(results);
+      }
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,17 +222,38 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
     if (!file) return;
 
     setSelectedFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      setCsvText(text);
-      parseCsvContent(text);
-    };
-    reader.readAsText(file);
+    const fileName = file.name.toLowerCase();
+
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const csvText = XLSX.utils.sheet_to_csv(worksheet);
+          setCsvText(csvText);
+          parseCsvContent(csvText, true);
+        } catch (err: any) {
+          setErrorMessage('Failed to read Excel workbook. Please ensure it is a valid .xlsx or .xls file.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setCsvText(text);
+        parseCsvContent(text, true);
+      };
+      reader.readAsText(file);
+    }
   };
 
-  const handleImportSubmit = async () => {
-    const validItems = parsedRows.filter((r) => r.isValid);
+  const handleImportSubmit = async (customRows?: ParsedDeptRow[]) => {
+    const rowsToUse = customRows || parsedRows;
+    const validItems = rowsToUse.filter((r) => r.isValid);
     if (validItems.length === 0) return;
 
     setIsProcessing(true);
@@ -192,6 +262,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
         validItems.map((r) => ({
           code: r.code,
           name: r.name,
+          locationDescription: r.locationDescription,
           building: r.building,
           floor: r.floor,
           headOfDepartment: r.headOfDepartment,
@@ -300,7 +371,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv, .xlsx, .xls, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel, text/csv"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -309,10 +380,10 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
               </div>
               <div>
                 <span className="font-bold text-xs text-slate-800 dark:text-slate-200 block">
-                  {selectedFileName ? selectedFileName : 'Click to browse or drop CSV file here'}
+                  {selectedFileName ? selectedFileName : 'Click to browse or drop Excel (.xlsx, .xls) or CSV file here'}
                 </span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">
-                  Compatible with Microsoft Excel, Google Sheets, and standard CSV exports
+                  Compatible with Microsoft Excel (.xlsx / .xls), Google Sheets, and standard CSV files
                 </span>
               </div>
             </div>
@@ -330,7 +401,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
               />
               <button
                 type="button"
-                onClick={() => parseCsvContent(csvText)}
+                onClick={() => parseCsvContent(csvText, true)}
                 className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer"
               >
                 Parse & Validate Data
@@ -375,7 +446,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
                         <th className="p-2.5">Status</th>
                         <th className="p-2.5">Code</th>
                         <th className="p-2.5">Department Name</th>
-                        <th className="p-2.5">Building & Floor</th>
+                        <th className="p-2.5">Location Description</th>
                         <th className="p-2.5">HOD</th>
                         <th className="p-2.5">Ext</th>
                         <th className="p-2.5">Emergency</th>
@@ -400,7 +471,7 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
                           </td>
                           <td className="p-2.5 font-mono font-bold text-indigo-600">{row.code || '-'}</td>
                           <td className="p-2.5 font-semibold text-slate-900 dark:text-white">{row.name || '-'}</td>
-                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{row.building} ({row.floor})</td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{row.locationDescription}</td>
                           <td className="p-2.5 text-slate-700 dark:text-slate-300">{row.headOfDepartment || '-'}</td>
                           <td className="p-2.5 font-mono text-slate-500">{row.phone}</td>
                           <td className="p-2.5">

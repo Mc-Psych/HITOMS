@@ -262,7 +262,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 - Starlink and Core Fiber WAN auto-failover link status: Operational`,
         tone: 'EXECUTIVE' as const,
         hospitalName: systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital',
-        senderName: currentUser?.fullName || 'Courage Kay',
+        senderName: currentUser?.fullName || 'Super Administrator',
         senderTitle: currentUser?.jobTitle || 'Super Administrator & CIO',
         includeLiveData: true,
       };

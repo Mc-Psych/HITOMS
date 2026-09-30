@@ -52,150 +52,47 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 5000, fallbackV
   });
 };
 
+export async function purgeAllPastUsersAndDepartments(): Promise<void> {
+  try {
+    const existingUsers = await getAllFromStore<User>('users');
+    for (const u of existingUsers) {
+      const isSuperAdmin = u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
+      if (!isSuperAdmin) {
+        await deleteFromStore('users', u.id);
+      }
+    }
+
+    const existingDepts = await getAllFromStore<Department>('departments');
+    for (const d of existingDepts) {
+      await deleteFromStore('departments', d.id);
+    }
+
+    await ensureDefaultSuperAdmin();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('hitoms_users_synced', { detail: { count: 1 } })
+      );
+      window.dispatchEvent(
+        new CustomEvent('hitoms_departments_updated', { detail: { deletedAll: true } })
+      );
+    }
+  } catch (err) {
+    console.warn('[SeedData] Error purging past users & departments:', err);
+  }
+}
+
 export async function syncLatestStaffAccounts(): Promise<User[]> {
   try {
     const existingUsers = await getAllFromStore<User>('users');
-    const existingMap = new Map<string, User>();
-    existingUsers.forEach((u) => {
-      if (u.id) existingMap.set(u.id, u);
-      if (u.username) existingMap.set(u.username.toLowerCase(), u);
-      if (u.email) existingMap.set(u.email.toLowerCase(), u);
-    });
-
-    // Remove data on all users that are not still users in the system
-    const obsoleteIds = new Set([
-      'usr-admin-002',
-      'usr-itadmin-002',
-      'usr-officer-003',
-      'usr-mgmt-004',
-      'usr-head-005',
-      'usr-staff-006',
-      'usr-procure-007',
-      'usr-audit-008',
-    ]);
-    const obsoleteUsernames = new Set([
-      'mensah',
-      'boateng',
-      'owusu',
-      'asante',
-      'cudjoe',
-      'agyeman',
-      'kwarteng',
-      'patricia',
-    ]);
-
     for (const u of existingUsers) {
-      const uName = (u.username || '').toLowerCase();
-      if (obsoleteIds.has(u.id) || obsoleteUsernames.has(uName)) {
+      const isSuperAdmin = u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
+      if (!isSuperAdmin) {
         await deleteFromStore('users', u.id);
-        existingMap.delete(u.id);
-        if (u.username) existingMap.delete(u.username.toLowerCase());
-        if (u.email) existingMap.delete(u.email.toLowerCase());
       }
     }
 
-    const usersToUpsert: User[] = [];
-
-    // 1. From defaultSeedData.json snapshot
-    if (defaultSeedJson?.data?.users && Array.isArray(defaultSeedJson.data.users)) {
-      for (const u of defaultSeedJson.data.users) {
-        const found =
-          (u.id && existingMap.get(u.id)) ||
-          (u.username && existingMap.get(u.username.toLowerCase())) ||
-          (u.email && existingMap.get(u.email.toLowerCase()));
-
-        if (!found) {
-          usersToUpsert.push(u as User);
-          if (u.id) existingMap.set(u.id, u as User);
-        } else {
-          let updated = false;
-          const merged = { ...found };
-          if (u.fullName && u.fullName !== found.fullName) {
-            merged.fullName = u.fullName;
-            updated = true;
-          }
-          if (u.username && u.username !== found.username) {
-            merged.username = u.username;
-            updated = true;
-          }
-          if (u.role && u.role !== found.role) {
-            merged.role = u.role as any;
-            updated = true;
-          }
-          if (u.password && u.password !== found.password && !found.lastPasswordChangeAt) {
-            merged.password = u.password;
-            updated = true;
-          }
-          if (u.specialties && JSON.stringify(u.specialties) !== JSON.stringify(found.specialties)) {
-            merged.specialties = u.specialties;
-            updated = true;
-          }
-          if (u.department && u.department !== found.department) {
-            merged.department = u.department;
-            updated = true;
-          }
-          if ((u.role === 'SUPER_ADMIN' || u.role === 'IT_ADMIN') && !found.signature) {
-            merged.signature = found.fullName;
-            updated = true;
-          }
-          if (updated) {
-            usersToUpsert.push(merged as User);
-            if (u.id) existingMap.set(u.id, merged as User);
-          }
-        }
-      }
-    }
-
-    // 2. From Firestore if online
-    if (isFirebaseConfigured() && firebaseClients.firestore) {
-      try {
-        const db = firebaseClients.firestore;
-        const usersRef = collection(db, 'users');
-        const snap = await withTimeout(getDocs(usersRef), 4000);
-        if (snap && !snap.empty) {
-          snap.forEach((doc) => {
-            const data = doc.data() as User;
-            const id = doc.id;
-            const found =
-              existingMap.get(id) ||
-              (data.username && existingMap.get(data.username.toLowerCase())) ||
-              (data.email && existingMap.get(data.email.toLowerCase()));
-
-            if (!found) {
-              const newUser = {
-                ...data,
-                id,
-                _syncStatus: 'SYNCED' as const,
-                _lastSyncedAt: new Date().toISOString(),
-              };
-              usersToUpsert.push(newUser);
-              existingMap.set(id, newUser);
-            } else {
-              const remoteUpdated = new Date(data.updatedAt || 0).getTime();
-              const localUpdated = new Date(found.updatedAt || 0).getTime();
-              if (remoteUpdated >= localUpdated) {
-                const merged = { ...found, ...data, id, _syncStatus: 'SYNCED' as const };
-                usersToUpsert.push(merged);
-                existingMap.set(id, merged);
-              }
-            }
-          });
-        }
-      } catch (err: any) {
-        console.warn('[SeedData] Note on cloud staff pull:', err?.message);
-      }
-    }
-
-    if (usersToUpsert.length > 0) {
-      setSkipSyncEnqueue(true);
-      try {
-        await putBatchToStore('users', usersToUpsert);
-      } finally {
-        setSkipSyncEnqueue(false);
-      }
-    }
-
-    await ensureSuperAdminCourageKay();
+    await ensureDefaultSuperAdmin();
     const finalUsers = await getAllFromStore<User>('users');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -209,35 +106,34 @@ export async function syncLatestStaffAccounts(): Promise<User[]> {
   }
 }
 
-export async function ensureSuperAdminCourageKay(): Promise<void> {
+export async function ensureDefaultSuperAdmin(): Promise<void> {
   try {
     const users = await getAllFromStore<User>('users');
-    const courageKay = users.find(
+    const superAdmin = users.find(
       (u) =>
-        u.fullName.toLowerCase().includes('courage') ||
-        (u.username && u.username.toLowerCase() === 'kay')
+        u.role === 'SUPER_ADMIN' ||
+        (u.username && u.username.toLowerCase() === 'admin')
     );
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
-    if (!courageKay) {
+    if (!superAdmin) {
       const admin001 = users.find((u) => u.id === 'usr-admin-001');
       if (admin001) {
-        admin001.fullName = 'Courage Kekesi';
-        admin001.username = 'kay';
-        admin001.email = 'courage.kay@hospital.local';
+        admin001.fullName = 'Super Administrator';
+        admin001.username = 'admin';
+        admin001.email = 'admin@hospital.local';
         admin001.role = 'SUPER_ADMIN';
         admin001.jobTitle = 'Chief Information Officer & Super Administrator';
         admin001.department = 'IT & Systems Administration';
         admin001.status = 'Active';
-        admin001.password = '1234';
         await putToStore('users', admin001);
       } else {
         const newUser: User = {
           id: 'usr-admin-001',
-          fullName: 'Courage Kekesi',
-          username: 'kay',
-          email: 'courage.kay@hospital.local',
+          fullName: 'Super Administrator',
+          username: 'admin',
+          email: 'admin@hospital.local',
           phone: '+233 24 100 0001',
           department: 'IT & Systems Administration',
           jobTitle: 'Chief Information Officer & Super Administrator',
@@ -247,8 +143,7 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
           updatedAt: now,
           lastLoginAt: now,
           offlineAccessAllowed: true,
-          signature: 'Courage Kekesi',
-          password: '1234',
+          signature: 'Super Administrator',
           _syncStatus: 'SYNCED',
           _syncVersion: 1,
           _lastSyncedAt: now,
@@ -258,28 +153,28 @@ export async function ensureSuperAdminCourageKay(): Promise<void> {
       }
     } else {
       let needsUpdate = false;
-      if (courageKay.role !== 'SUPER_ADMIN') {
-        courageKay.role = 'SUPER_ADMIN';
+      if (superAdmin.role !== 'SUPER_ADMIN') {
+        superAdmin.role = 'SUPER_ADMIN';
         needsUpdate = true;
       }
-      if (courageKay.status !== 'Active') {
-        courageKay.status = 'Active';
+      if (superAdmin.status !== 'Active') {
+        superAdmin.status = 'Active';
         needsUpdate = true;
       }
-      if (!courageKay.username) {
-        courageKay.username = 'kay';
+      if (!superAdmin.username) {
+        superAdmin.username = 'admin';
         needsUpdate = true;
       }
-      if (!courageKay.signature) {
-        courageKay.signature = courageKay.fullName;
+      if (!superAdmin.signature) {
+        superAdmin.signature = superAdmin.fullName;
         needsUpdate = true;
       }
       if (needsUpdate) {
-        await putToStore('users', courageKay);
+        await putToStore('users', superAdmin);
       }
     }
   } catch (err) {
-    console.warn('[SeedData] Error ensuring Courage Kay super admin:', err);
+    console.warn('[SeedData] Error ensuring default super admin:', err);
   }
 }
 
@@ -332,7 +227,7 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
         }
 
         setSkipSyncEnqueue(false);
-        await ensureSuperAdminCourageKay();
+        await ensureDefaultSuperAdmin();
         await memoService.getMemos();
         console.log('[SeedData] Hydration from Firestore seed complete!');
         return;
@@ -362,7 +257,7 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
       if (d.departments?.length) await putBatchToStore('departments', d.departments);
 
       setSkipSyncEnqueue(false);
-      await ensureSuperAdminCourageKay();
+      await ensureDefaultSuperAdmin();
       await memoService.getMemos();
       return;
     } catch (err) {

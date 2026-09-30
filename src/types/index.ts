@@ -52,6 +52,7 @@ export interface Department extends SyncMetadata {
   name: string;
   building: string;
   floor: string;
+  locationDescription?: string;
   headOfDepartment: string;
   phone: string;
   isEmergency: boolean;

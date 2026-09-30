@@ -698,7 +698,7 @@ export const OfficialMemoLetterhead: React.FC<OfficialMemoLetterheadProps> = ({
               <div className="border-b border-dashed border-slate-300 w-48 mb-2 opacity-50"></div>
               
               <p className="font-bold text-slate-950 text-base sm:text-lg leading-tight">
-                {memo.officerName || memo.fromSender?.name || 'Courage Kekesi'}
+                {memo.officerName || memo.fromSender?.name || 'Super Administrator'}
               </p>
               <p className="text-slate-800 text-sm sm:text-base font-semibold leading-tight">
                 {memo.officerTitle || memo.fromSender?.title || 'Snr. IT Officer'}

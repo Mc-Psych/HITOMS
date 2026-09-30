@@ -35,16 +35,64 @@ export const INITIAL_STANDARD_DEPARTMENTS: string[] = [
   'Physiotherapy & Rehabilitation',
 ];
 
-function generateDepartmentCode(name: string): string {
-  const cleaned = name.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-  const words = cleaned.split(/\s+/).filter(Boolean);
+export function generateDepartmentCode(name: string): string {
+  if (!name || typeof name !== 'string' || !name.trim()) return '';
+  const trimmed = name.trim();
+
+  // 1. Check if name contains explicit abbreviation in parentheses, e.g. "Intensive Care Unit (ICU)", "Accident & Emergency (A&E)", "Outpatient Department (OPD)"
+  const parenMatch = trimmed.match(/\(([^)]+)\)/);
+  if (parenMatch && parenMatch[1]) {
+    const candidate = parenMatch[1].replace(/[^a-zA-Z0-9&]/g, '').trim().toUpperCase();
+    if (candidate.length >= 2 && candidate.length <= 7) {
+      return candidate;
+    }
+  }
+
+  // 2. Common clinical standard mapping
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('emergency') || lower.includes('accident')) return 'A&E';
+  if (lower.includes('intensive care') || lower.includes('icu')) return 'ICU';
+  if (lower.includes('outpatient') || lower.includes('opd')) return 'OPD';
+  if (lower.includes('pediatric') || lower.includes('paediatric')) return 'PED';
+  if (lower.includes('pharmacy')) return 'PHARM';
+  if (lower.includes('laboratory') || lower.includes('lab')) return 'LAB';
+  if (lower.includes('theatre') || lower.includes('surgery') || lower.includes('surgical')) return 'THEATRE';
+  if (lower.includes('maternity') || lower.includes('labour') || lower.includes('labor')) return 'MAT';
+  if (lower.includes('radiology') || lower.includes('x-ray') || lower.includes('imaging')) return 'RAD';
+  if (lower.includes('information technology') || lower.includes('telecom')) return 'IT';
+  if (lower.includes('records') || lower.includes('lhims')) return 'HIMS';
+  if (lower.includes('dental')) return 'DENT';
+  if (lower.includes('dialysis') || lower.includes('renal')) return 'RENAL';
+  if (lower.includes('cardiology')) return 'CARD';
+  if (lower.includes('oncology')) return 'ONC';
+  if (lower.includes('physiotherapy')) return 'PHYSIO';
+  if (lower.includes('biomedical')) return 'BIOMED';
+  if (lower.includes('administration') || lower.includes('admin')) return 'ADMIN';
+  if (lower.includes('accounts') || lower.includes('finance') || lower.includes('billing')) return 'FIN';
+  if (lower.includes('procurement') || lower.includes('stores')) return 'STORES';
+  if (lower.includes('morgue') || lower.includes('pathology')) return 'PATH';
+
+  // 3. Extract words and build acronym
+  const words = trimmed
+    .replace(/[^a-zA-Z0-9\s&]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+
   if (words.length === 1) {
     return words[0].substring(0, 5).toUpperCase();
   }
-  const acronym = words.map((w) => w[0]).join('').toUpperCase();
+
+  // Filter out minor stop words like "and", "of", "the", "for", "in", "to", "at"
+  const significantWords = words.filter(
+    (w) => !['and', 'of', 'the', 'for', 'in', 'to', 'at', '&'].includes(w.toLowerCase())
+  );
+
+  const wordsForAcronym = significantWords.length >= 2 ? significantWords : words;
+  const acronym = wordsForAcronym.map((w) => w[0]).join('').toUpperCase();
   if (acronym.length >= 2 && acronym.length <= 6) {
     return acronym;
   }
+
   return (words[0].substring(0, 3) + (words[1] ? words[1].substring(0, 3) : '')).toUpperCase();
 }
 
@@ -72,16 +120,16 @@ class DepartmentService {
   }
 
   public async ensureDepartmentExists(name: string, currentUser?: User | null): Promise<Department> {
-    const cleanName = name.trim();
+    const cleanName = (name || '').trim();
     if (!cleanName) {
       throw new Error('Department name cannot be empty');
     }
     const existing = await this.getDepartments();
-    const match = existing.find((d) => d.name.toLowerCase() === cleanName.toLowerCase());
+    const match = existing.find((d) => (d.name || '').toLowerCase() === cleanName.toLowerCase());
     if (match) return match;
 
     // Generate unique code
-    const existingCodes = new Set(existing.map((d) => d.code.toUpperCase()));
+    const existingCodes = new Set(existing.map((d) => (d.code || '').toUpperCase()));
     let baseCode = generateDepartmentCode(cleanName);
     let code = baseCode;
     let counter = 1;
@@ -113,7 +161,7 @@ class DepartmentService {
 
   public async ensureDepartmentsExist(names: string[], currentUser?: User | null): Promise<void> {
     for (const name of names) {
-      if (name && name.trim()) {
+      if (name && typeof name === 'string' && name.trim()) {
         await this.ensureDepartmentExists(name.trim(), currentUser);
       }
     }
@@ -123,8 +171,9 @@ class DepartmentService {
     data: {
       code: string;
       name: string;
-      building: string;
-      floor: string;
+      building?: string;
+      floor?: string;
+      locationDescription?: string;
       headOfDepartment: string;
       phone: string;
       isEmergency: boolean;
@@ -132,12 +181,17 @@ class DepartmentService {
     currentUser?: User | null
   ): Promise<Department> {
     const now = new Date().toISOString();
+    const locDesc = (data.locationDescription || '').trim();
+    const bldg = (data.building || (locDesc ? locDesc : 'Main Hospital Complex')).trim();
+    const flr = (data.floor || '').trim();
+
     const newDept: Department = {
       id: `dept-${generateUUID().substring(0, 8)}`,
-      code: data.code.trim().toUpperCase(),
-      name: data.name.trim(),
-      building: (data.building || 'Main Hospital Complex').trim(),
-      floor: (data.floor || 'Ground Floor').trim(),
+      code: (data.code || '').trim().toUpperCase(),
+      name: (data.name || '').trim(),
+      building: bldg,
+      floor: flr,
+      locationDescription: locDesc || (flr ? `${bldg}, ${flr}` : bldg),
       headOfDepartment: (data.headOfDepartment || '').trim(),
       phone: (data.phone || 'Ext. ').trim(),
       isEmergency: Boolean(data.isEmergency),
@@ -174,6 +228,7 @@ class DepartmentService {
       name: string;
       building?: string;
       floor?: string;
+      locationDescription?: string;
       headOfDepartment?: string;
       phone?: string;
       isEmergency?: boolean;
@@ -182,20 +237,27 @@ class DepartmentService {
   ): Promise<{ created: Department[]; count: number }> {
     const created: Department[] = [];
     const existing = await this.getDepartments();
-    const existingCodes = new Set(existing.map((d) => d.code.toUpperCase()));
+    const existingCodes = new Set(existing.map((d) => (d.code || '').toUpperCase()));
     const now = new Date().toISOString();
 
     for (const item of items) {
-      if (!item.name?.trim() || !item.code?.trim()) continue;
-      const codeClean = item.code.trim().toUpperCase();
+      if (!item.name || !item.code) continue;
+      const codeClean = (item.code || '').trim().toUpperCase();
+      const nameClean = (item.name || '').trim();
+      if (!codeClean || !nameClean) continue;
       if (existingCodes.has(codeClean)) continue;
+
+      const locDesc = (item.locationDescription || '').trim();
+      const bldg = (item.building || (locDesc ? locDesc : 'Main Hospital Complex')).trim();
+      const flr = (item.floor || '').trim();
 
       const newDept: Department = {
         id: `dept-${generateUUID().substring(0, 8)}`,
         code: codeClean,
-        name: item.name.trim(),
-        building: (item.building || 'Main Hospital Complex').trim(),
-        floor: (item.floor || 'Ground Floor').trim(),
+        name: nameClean,
+        building: bldg,
+        floor: flr,
+        locationDescription: locDesc || (flr ? `${bldg}, ${flr}` : bldg),
         headOfDepartment: (item.headOfDepartment || '').trim(),
         phone: (item.phone || 'Ext. ').trim(),
         isEmergency: Boolean(item.isEmergency),
@@ -282,6 +344,29 @@ class DepartmentService {
         new CustomEvent('hitoms_departments_updated', { detail: { deletedId: id } })
       );
     }
+  }
+
+  public async deleteAllDepartments(currentUser?: User | null): Promise<number> {
+    const existing = await this.getDepartments();
+    const count = existing.length;
+
+    for (const dept of existing) {
+      await deleteFromStore('departments', dept.id);
+      await syncService.enqueueOperation('departments', dept.id, 'DELETE', { id: dept.id, name: dept.name });
+    }
+
+    await auditService.logAction('DELETE_ALL_DEPARTMENTS', 'Departments', 'PURGE_ALL', null, {
+      totalDeleted: count,
+      deletedBy: currentUser?.fullName || 'Super Admin',
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('hitoms_departments_updated', { detail: { purgeAll: true, count } })
+      );
+    }
+
+    return count;
   }
 }
 

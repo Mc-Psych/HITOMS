@@ -787,11 +787,11 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   <span>Super Administrator Terminal Controls</span>
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Authority reserved for Super Administrator Courage Kay. Manage terminal access security and demo profiles.
+                  Authority reserved for Super Administrator. Manage terminal access security and demo profiles.
                 </p>
               </div>
               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                Super Admin: Courage Kay
+                Super Admin Active
               </span>
             </div>
 
@@ -812,7 +812,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-slate-500 max-w-xl">
-                  Courage Kay can disable the quick demo login profile buttons on the login modal to prevent unauthorized one-click terminal entry during live hospital production.
+                  Super Administrator can disable the quick demo login profile buttons on the login modal to prevent unauthorized one-click terminal entry during live hospital production.
                 </p>
               </div>
 

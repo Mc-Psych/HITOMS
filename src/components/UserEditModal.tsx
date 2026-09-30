@@ -1437,7 +1437,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     type="text"
                     value={cursiveText}
                     onChange={(e) => setCursiveText(e.target.value)}
-                    placeholder="e.g. Courage Kekesi"
+                    placeholder="e.g. Dr. Kwame Mensah"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-base font-serif italic text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-950 focus:outline-none"
                   />
                   <div className="flex justify-end pt-2">

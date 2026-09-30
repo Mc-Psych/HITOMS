@@ -734,9 +734,8 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
       } else {
         setCursiveText('');
       }
-      setOfficerName(memoToEdit.officerName || memoToEdit.fromSender?.name || currentUser?.fullName || 'Courage Kekesi');
-      const isCourageEdit = (currentUser?.fullName || '').toLowerCase().includes('courage');
-      const defaultTitleEdit = isCourageEdit ? 'Senior IT Officer' : (currentUser?.jobTitle || 'Senior IT Officer');
+      setOfficerName(memoToEdit.officerName || memoToEdit.fromSender?.name || currentUser?.fullName || 'Super Administrator');
+      const defaultTitleEdit = currentUser?.jobTitle || 'Senior IT Officer';
       setOfficerTitle(memoToEdit.officerTitle || memoToEdit.fromSender?.title || defaultTitleEdit);
       
       const formatDdMmYyyy = (d: Date = new Date()) => {
@@ -763,7 +762,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
       setDetailedFindingsOrBody('');
       setActionChecklist([]);
       setTimelineOrDeadline('Effective immediately upon publication.');
-      setContactPersonOrExtension(`${currentUser?.fullName || 'Courage Kekesi'} — IT Helpdesk Ext. 2101`);
+      setContactPersonOrExtension(`${currentUser?.fullName || 'Super Administrator'} — IT Helpdesk Ext. 2101`);
       setRecommendedDistribution('All Clinical Noticeboards, Ward Supervisors, IT Helpdesk Archive');
       setStatus('PUBLISHED');
 
@@ -778,9 +777,8 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
       } else {
         setCursiveText('');
       }
-      setOfficerName(currentUser?.fullName || 'Courage Kekesi');
-      const isCourageNew = (currentUser?.fullName || '').toLowerCase().includes('courage');
-      setOfficerTitle(isCourageNew ? 'Senior IT Officer' : (currentUser?.jobTitle || 'Senior IT Officer'));
+      setOfficerName(currentUser?.fullName || 'Super Administrator');
+      setOfficerTitle(currentUser?.jobTitle || 'Senior IT Officer');
       
       const formatDdMmYyyy = (d: Date = new Date()) => {
         const day = String(d.getDate()).padStart(2, '0');
@@ -860,7 +858,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
         rawNotes,
         tone,
         hospitalName,
-        senderName: currentUser?.fullName || 'Courage Kay',
+        senderName: currentUser?.fullName || 'Super Administrator',
         senderTitle: currentUser?.jobTitle || 'Super Administrator & CIO',
         includeLiveData,
         refineInstruction: specificRefine || refinePrompt,
@@ -930,7 +928,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
         targetRoles: selectedRoles,
         fromSender: {
           uid: currentUser?.id || 'usr-system',
-          name: currentUser?.fullName || 'Courage Kay',
+          name: currentUser?.fullName || 'Super Administrator',
           role: currentUser?.role || 'SUPER_ADMIN',
           title: currentUser?.jobTitle || 'Hospital IT Operations',
         },
@@ -949,7 +947,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
         approvedBy:
           status === 'PUBLISHED' || status === 'APPROVED'
             ? {
-                name: currentUser?.fullName || 'Courage Kay',
+                name: currentUser?.fullName || 'Super Administrator',
                 title: currentUser?.jobTitle || 'Super Administrator & CIO',
                 approvedAt: now,
               }
@@ -1547,7 +1545,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
               </span>
             ) : (
               <span className="text-xs text-slate-400">
-                Author: <strong>{currentUser?.fullName || 'Courage Kay'}</strong> ({currentUser?.jobTitle || 'IT Operations'})
+                Author: <strong>{currentUser?.fullName || 'Super Administrator'}</strong> ({currentUser?.jobTitle || 'IT Operations'})
               </span>
             )}
           </div>
