@@ -47,8 +47,6 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
   systemSettings,
   onRefresh,
 }) => {
-  if (!isOpen) return null;
-
   const [activeTab, setActiveTab] = useState<'TRIGGERS' | 'BROADCAST' | 'SPEED_SETTINGS' | 'PRINT_PACK'>('TRIGGERS');
 
   // Quick Triggers Preset State
@@ -103,6 +101,8 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
   const [severity, setSeverity] = useState<'CRITICAL' | 'HIGH' | 'WARNING'>('CRITICAL');
   const [targetUnit, setTargetUnit] = useState<string>('ALL');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
 
   const activeAlerts = alerts.filter((a) => a.isActive);
 
