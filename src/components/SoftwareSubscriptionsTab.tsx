@@ -81,7 +81,7 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
     new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString().split('T')[0]
   );
   const [cost, setCost] = useState(1200);
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('GH₵');
   const [billingCycle, setBillingCycle] = useState<SubscriptionBillingCycle>('Annual');
   const [status, setStatus] = useState<SubscriptionStatus>('Active');
   const [autoRenew, setAutoRenew] = useState(true);
@@ -124,7 +124,7 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
     setPurchaseDate(new Date().toISOString().split('T')[0]);
     setRenewalDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString().split('T')[0]);
     setCost(1200);
-    setCurrency('USD');
+    setCurrency('GH₵');
     setBillingCycle('Annual');
     setStatus('Active');
     setAutoRenew(true);
@@ -431,7 +431,7 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
           <div>
             <div className="text-xs text-slate-500">Annual Software Budget</div>
             <div className="text-lg font-black text-slate-900 dark:text-white">
-              ${totalCostAnnual.toLocaleString()} <span className="text-[10px] font-mono text-slate-400">USD/yr</span>
+              GH₵{totalCostAnnual.toLocaleString()} <span className="text-[10px] font-mono text-slate-400">/yr</span>
             </div>
           </div>
         </div>
@@ -601,7 +601,7 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
                   <div>
                     <span className="text-slate-400 block text-[10px]">Contract Cost:</span>
                     <span className="font-mono font-bold text-slate-900 dark:text-white flex items-center gap-0.5 mt-0.5">
-                      ${sub.cost.toLocaleString()} {sub.currency}
+                      GH₵{sub.cost.toLocaleString()}
                     </span>
                   </div>
 
@@ -873,7 +873,7 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Cost ($)</label>
+                  <label className="block text-slate-500 font-semibold mb-1">Cost (GH₵)</label>
                   <input
                     type="number"
                     min={0}

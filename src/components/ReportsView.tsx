@@ -31,6 +31,8 @@ import {
   Upload,
   FolderArchive,
   Eye,
+  X,
+  Loader2,
 } from 'lucide-react';
 import {
   type Ticket,
@@ -111,6 +113,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
 
+  // Delete All Memos Confirmation Modal State (Super Admin Only)
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const [isDeleteAllMemosModalOpen, setIsDeleteAllMemosModalOpen] = useState(false);
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
   // Data Register Report Selection
   const [reportType, setReportType] = useState<'TICKETS' | 'ASSETS' | 'MAINTENANCE' | 'INVENTORY' | 'SLA'>('TICKETS');
 
@@ -189,13 +197,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const handleDeleteAllSampleMemos = async () => {
-    if (!window.confirm('Are you sure you want to delete ALL sample and stored memorandums from the hospital repository? This will clear all default memos.')) return;
+    if (!isSuperAdmin) {
+      alert('Access Denied: Only Super Administrators have permission to delete all hospital memorandums.');
+      return;
+    }
+    setIsDeletingAll(true);
     try {
       await memoService.deleteAllMemos(currentUser);
       setMemos([]);
       setSelectedMemoForDetail(null);
-    } catch (err) {
-      console.error('Failed to delete sample memos:', err);
+      setIsDeleteAllMemosModalOpen(false);
+      setDeleteAllConfirmText('');
+    } catch (err: any) {
+      console.error('Failed to delete memos:', err);
+      alert(err.message || 'Failed to delete all memos.');
+    } finally {
+      setIsDeletingAll(false);
     }
   };
 
@@ -360,12 +377,15 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
 
         {isITUser && (
           <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
-            {memos.length > 0 && (
+            {isSuperAdmin && memos.length > 0 && (
               <button
                 type="button"
-                onClick={handleDeleteAllSampleMemos}
+                onClick={() => {
+                  setDeleteAllConfirmText('');
+                  setIsDeleteAllMemosModalOpen(true);
+                }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 font-bold text-xs shadow-2xs transition cursor-pointer"
-                title="Delete all memorandums and circulars from the repository"
+                title="Super Admin Only: Delete all memorandums and circulars from the repository"
               >
                 <Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />
                 <span>Delete All Memos</span>
@@ -1064,6 +1084,89 @@ ${res.actionRequiredOrChecklist.map((item, i) => `${i + 1}. ${item}`).join('\n')
         isOpen={Boolean(selectedMemoForScanViewer)}
         onClose={() => setSelectedMemoForScanViewer(null)}
       />
+
+      {/* Delete All Memos Super Admin Warning Modal */}
+      {isDeleteAllMemosModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border-2 border-rose-500/80 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-2.5 rounded-2xl bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                    Permanent Deletion Warning
+                  </h3>
+                  <button
+                    onClick={() => setIsDeleteAllMemosModalOpen(false)}
+                    className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                  Super Administrator Privilege Required
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 space-y-2 text-xs text-rose-950 dark:text-rose-200">
+              <p className="font-bold">
+                ⚠️ You are about to permanently purge ALL ({memos.length}) stored hospital memorandums and circulars from the system.
+              </p>
+              <p className="text-[11px] text-rose-800 dark:text-rose-300 leading-relaxed">
+                This will delete all official directives, scanned memos, ward circulars, and attachments from both local storage and the database. This action is irreversible.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                Type <span className="font-mono text-rose-600 dark:text-rose-400 font-black bg-rose-100 dark:bg-rose-950 px-1.5 py-0.5 rounded">DELETE ALL MEMOS</span> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteAllConfirmText}
+                onChange={(e) => setDeleteAllConfirmText(e.target.value)}
+                placeholder="DELETE ALL MEMOS"
+                className="w-full px-3.5 py-2 text-xs font-mono font-bold bg-white dark:bg-slate-950 border border-rose-300 dark:border-rose-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteAllMemosModalOpen(false);
+                  setDeleteAllConfirmText('');
+                }}
+                disabled={isDeletingAll}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAllSampleMemos}
+                disabled={deleteAllConfirmText.trim().toUpperCase() !== 'DELETE ALL MEMOS' || isDeletingAll}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {isDeletingAll ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting Repository...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm & Purge All Memos</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

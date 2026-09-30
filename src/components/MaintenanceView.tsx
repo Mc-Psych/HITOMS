@@ -422,7 +422,7 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
                     {partsUsed.map((p, i) => (
                       <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border">
                         <span>{p.itemName} x{p.quantity}</span>
-                        <span className="font-mono text-slate-500">${p.totalCost}</span>
+                        <span className="font-mono text-slate-500">GH₵{p.totalCost?.toLocaleString()}</span>
                       </div>
                     ))}
                   </div>

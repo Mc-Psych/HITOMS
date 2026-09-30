@@ -337,6 +337,23 @@ class AssetService {
 
     return updatedAsset;
   }
+
+  public async deleteAsset(id: string, user: User, deleteReason?: string): Promise<void> {
+    const asset = await this.getAssetById(id);
+    if (!asset) return;
+
+    await deleteFromStore('assets', id);
+
+    await auditService.logAction('DELETE_ASSET', 'Assets', id, asset, {
+      assetTag: asset.assetTag,
+      model: `${asset.manufacturer} ${asset.model}`,
+      department: asset.department,
+      deletedBy: user.fullName,
+      reason: deleteReason || 'Manual deletion from IT asset register',
+    });
+
+    await syncService.enqueueOperation('assets', id, 'DELETE', { id });
+  }
 }
 
 export const assetService = new AssetService();

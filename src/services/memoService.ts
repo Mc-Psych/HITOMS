@@ -114,6 +114,9 @@ class MemoService {
    * Delete ALL sample and stored memos from the repository
    */
   async deleteAllMemos(currentUser?: User | null): Promise<void> {
+    if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+      throw new Error('Access Denied: Only Super Administrators have permission to delete all memorandums.');
+    }
     const items = await getAllFromStore<HospitalMemo>('memos');
     for (const item of items) {
       await deleteFromStore('memos', item.id);

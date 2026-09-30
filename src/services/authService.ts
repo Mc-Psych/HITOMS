@@ -15,6 +15,7 @@ import {
 } from './localDatabaseService';
 import { auditService } from './auditService';
 import { syncLatestStaffAccounts } from './seedData';
+import { departmentService } from './departmentService';
 
 // Extract surname from full name (e.g. "Dr. Sarah Mensah" -> "Mensah")
 export function extractSurname(fullName: string): string {
@@ -677,6 +678,14 @@ class AuthService {
     let skippedCount = 0;
     const generatedAccounts: Array<{ fullName: string; username: string; defaultPassword: string; role: Role; department: string }> = [];
 
+    // Ensure all departments in bulk staff list exist in departmentService
+    const distinctDepts = Array.from(new Set(staffList.map((s) => s.department?.trim()).filter(Boolean)));
+    try {
+      await departmentService.ensureDepartmentsExist(distinctDepts as string[], actor);
+    } catch (e) {
+      console.warn('[authService] Error auto-registering departments during bulk upload:', e);
+    }
+
     for (const item of staffList) {
       if (!item.fullName || !item.fullName.trim()) {
         skippedCount++;
@@ -695,13 +704,16 @@ class AuthService {
         continue;
       }
 
+      const dept = item.department?.trim() || 'General Clinical';
+
       const newUser: User = {
         id: 'usr-' + generateUUID().substring(0, 8),
         fullName,
         username,
         email,
         phone: item.phone?.trim() || '+233 24 000 0000',
-        department: item.department?.trim() || 'General Clinical',
+        department: dept,
+        departments: [dept],
         jobTitle: item.jobTitle?.trim() || 'Hospital Staff',
         role: item.role || 'STAFF_USER',
         status: 'Active',
@@ -816,6 +828,20 @@ class AuthService {
       throw new Error(`A user with email "${email}" or username "@${username}" already exists.`);
     }
 
+    // Process departments (tied by checkboxes)
+    const rawDepts = userData.departments && userData.departments.length > 0
+      ? userData.departments
+      : (userData.department ? [userData.department] : ['General Clinical']);
+    const cleanDepts = Array.from(new Set(rawDepts.map((d) => d.trim()).filter(Boolean)));
+    const primaryDept = userData.department?.trim() || cleanDepts[0] || 'General Clinical';
+
+    // Ensure all tied departments exist as STANDARD_DEPARTMENTS
+    try {
+      await departmentService.ensureDepartmentsExist(cleanDepts, actor);
+    } catch (e) {
+      console.warn('[authService] Error auto-registering departments during user creation:', e);
+    }
+
     const newUser: User = {
       id: userData.id || 'usr-' + generateUUID().substring(0, 8),
       fullName,
@@ -823,7 +849,8 @@ class AuthService {
       email,
       phone: userData.phone?.trim() || '+233 24 000 0000',
       photoURL: userData.photoURL || '',
-      department: userData.department?.trim() || 'General Clinical',
+      department: primaryDept,
+      departments: cleanDepts,
       jobTitle: userData.jobTitle?.trim() || 'Hospital Staff',
       role: userData.role || 'STAFF_USER',
       specialties: userData.specialties || [],
@@ -875,12 +902,36 @@ class AuthService {
     const oldSnapshot = `${user.fullName} (${user.role}, ${user.department}, ${user.status})`;
     const now = new Date().toISOString();
 
+    // Auto-register any new department in updates
+    if (updates.departments && updates.departments.length > 0) {
+      try {
+        await departmentService.ensureDepartmentsExist(updates.departments, actor);
+      } catch (e) {
+        console.warn('[authService] Error auto-registering departments during user update:', e);
+      }
+      user.departments = Array.from(new Set(updates.departments.map((d) => d.trim()).filter(Boolean)));
+      if (updates.department === undefined) {
+        user.department = user.departments[0] || user.department;
+      }
+    }
+
     // Field updates
     if (updates.fullName !== undefined) user.fullName = updates.fullName.trim();
     if (updates.username !== undefined) user.username = updates.username.trim().toLowerCase();
     if (updates.email !== undefined) user.email = updates.email.trim();
     if (updates.phone !== undefined) user.phone = updates.phone.trim();
-    if (updates.department !== undefined) user.department = updates.department.trim();
+    if (updates.department !== undefined) {
+      const cleanDept = updates.department.trim();
+      user.department = cleanDept;
+      if (!user.departments || !user.departments.includes(cleanDept)) {
+        user.departments = Array.from(new Set([...(user.departments || []), cleanDept]));
+      }
+      try {
+        await departmentService.ensureDepartmentExists(cleanDept, actor);
+      } catch (e) {
+        console.warn('[authService] Error ensuring department exists during user update:', e);
+      }
+    }
     if (updates.jobTitle !== undefined) user.jobTitle = updates.jobTitle.trim();
     if (updates.specialties !== undefined) user.specialties = updates.specialties;
     if (updates.specialtyNotes !== undefined) user.specialtyNotes = updates.specialtyNotes.trim();

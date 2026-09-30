@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   User,
@@ -8,8 +8,6 @@ import {
   Phone,
   Briefcase,
   Key,
-  Lock,
-  Unlock,
   AlertTriangle,
   Trash2,
   CheckCircle2,
@@ -23,7 +21,10 @@ import {
   Tag,
   Plus,
   Sparkles,
-  Info,
+  Search,
+  CheckSquare,
+  Square,
+  Star,
   Upload,
   FileText,
 } from 'lucide-react';
@@ -35,6 +36,7 @@ import {
   ROLE_DESCRIPTIONS,
   STANDARD_SPECIALTIES,
 } from '../services/authService';
+import { departmentService, INITIAL_STANDARD_DEPARTMENTS } from '../services/departmentService';
 
 interface UserEditModalProps {
   isOpen: boolean;
@@ -56,27 +58,6 @@ const ALL_ROLES: Role[] = [
   'STAFF_USER',
   'PROCUREMENT_OFFICER',
   'AUDITOR',
-];
-
-const STANDARD_DEPARTMENTS = [
-  'IT & Systems Administration',
-  'Accident & Emergency (A&E)',
-  'OPD (Outpatient Department)',
-  'Intensive Care Unit (ICU)',
-  'Main Surgical Theatre',
-  'Maternity & Labor Ward',
-  'Pediatrics Ward',
-  'Male Medical Ward',
-  'Female Medical Ward',
-  'Biomedical Engineering',
-  'Main Pharmacy & Dispensary',
-  'Clinical Diagnostic Laboratory',
-  'Radiology & Ultrasound',
-  'Hospital Administration & HR',
-  'Procurement & Stores',
-  'Finance & Billing',
-  'Quality Assurance & Audit',
-  'Health Information Management (LHIMS / Records)',
 ];
 
 export const UserEditModal: React.FC<UserEditModalProps> = ({
@@ -103,8 +84,15 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [department, setDepartment] = useState('IT & Systems Administration');
-  const [customDepartment, setCustomDepartment] = useState('');
+
+  // Department State with Checkboxes
+  const [standardDepartments, setStandardDepartments] = useState<string[]>(INITIAL_STANDARD_DEPARTMENTS);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
+  const [primaryDepartment, setPrimaryDepartment] = useState<string>('OPD (Outpatient Department)');
+  const [deptSearchQuery, setDeptSearchQuery] = useState('');
+  const [newCustomDeptInput, setNewCustomDeptInput] = useState('');
+  const [isAddingDept, setIsAddingDept] = useState(false);
+
   const [jobTitle, setJobTitle] = useState('');
   const [role, setRole] = useState<Role>('STAFF_USER');
   const [specialties, setSpecialties] = useState<string[]>([]);
@@ -129,6 +117,31 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [cursiveText, setCursiveText] = useState('');
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+
+  // Load latest standard departments from service & database
+  const loadStandardDepartments = async () => {
+    try {
+      const names = await departmentService.getStandardDepartmentNames();
+      if (names && names.length > 0) {
+        setStandardDepartments(names);
+      }
+    } catch (e) {
+      console.warn('[UserEditModal] Error loading departments:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadStandardDepartments();
+
+    const handleDeptsUpdated = () => {
+      loadStandardDepartments();
+    };
+
+    window.addEventListener('hitoms_departments_updated', handleDeptsUpdated);
+    return () => {
+      window.removeEventListener('hitoms_departments_updated', handleDeptsUpdated);
+    };
+  }, []);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -221,13 +234,15 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setUsername(targetUser.username || extractSurname(targetUser.fullName).toLowerCase());
       setEmail(targetUser.email || '');
       setPhone(targetUser.phone || '');
-      if (STANDARD_DEPARTMENTS.includes(targetUser.department)) {
-        setDepartment(targetUser.department);
-        setCustomDepartment('');
-      } else {
-        setDepartment('OTHER');
-        setCustomDepartment(targetUser.department || '');
-      }
+
+      // Initialize departments checkboxes
+      const userDepts = targetUser.departments && targetUser.departments.length > 0
+        ? targetUser.departments
+        : (targetUser.department ? [targetUser.department] : []);
+      
+      setSelectedDepartments(userDepts);
+      setPrimaryDepartment(targetUser.department || userDepts[0] || 'OPD (Outpatient Department)');
+
       setJobTitle(targetUser.jobTitle || '');
       setRole(targetUser.role || 'STAFF_USER');
       setSpecialties(targetUser.specialties || []);
@@ -248,8 +263,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setUsername('');
       setEmail('');
       setPhone('+233 24 ');
-      setDepartment('OPD (Outpatient Department)');
-      setCustomDepartment('');
+      setSelectedDepartments(['OPD (Outpatient Department)']);
+      setPrimaryDepartment('OPD (Outpatient Department)');
       setJobTitle('');
       setRole('STAFF_USER');
       setSpecialties([]);
@@ -266,7 +281,92 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setShowSuspendModal(false);
     setDeleteConfirmText('');
     setCustomSpecialtyInput('');
+    setDeptSearchQuery('');
+    setNewCustomDeptInput('');
   }, [targetUser, isOpen]);
+
+  // Filtered standard departments based on search query
+  const filteredDepartments = useMemo(() => {
+    // Combine standard departments with any selected user departments that might not be in standard list yet
+    const allNames = Array.from(new Set([...standardDepartments, ...selectedDepartments]));
+    if (!deptSearchQuery.trim()) return allNames;
+    const q = deptSearchQuery.toLowerCase();
+    return allNames.filter((d) => d.toLowerCase().includes(q));
+  }, [standardDepartments, selectedDepartments, deptSearchQuery]);
+
+  // Toggle department checkbox
+  const handleToggleDepartment = (deptName: string) => {
+    setSelectedDepartments((prev) => {
+      if (prev.includes(deptName)) {
+        const next = prev.filter((d) => d !== deptName);
+        // If unchecking the primary department, select another one as primary
+        if (primaryDepartment === deptName) {
+          setPrimaryDepartment(next[0] || '');
+        }
+        return next;
+      } else {
+        const next = [...prev, deptName];
+        if (!primaryDepartment || prev.length === 0) {
+          setPrimaryDepartment(deptName);
+        }
+        return next;
+      }
+    });
+  };
+
+  // Select All filtered departments
+  const handleSelectAllFilteredDepts = () => {
+    setSelectedDepartments((prev) => {
+      const set = new Set([...prev, ...filteredDepartments]);
+      const next = Array.from(set);
+      if (!primaryDepartment && next.length > 0) {
+        setPrimaryDepartment(next[0]);
+      }
+      return next;
+    });
+  };
+
+  // Clear all selected departments
+  const handleClearAllDepts = () => {
+    setSelectedDepartments([]);
+    setPrimaryDepartment('');
+  };
+
+  // Add a new department directly (which becomes a STANDARD_DEPARTMENT)
+  const handleAddNewDepartment = async () => {
+    const clean = newCustomDeptInput.trim();
+    if (!clean) return;
+
+    try {
+      setIsAddingDept(true);
+      setError(null);
+      // Ensure the department is saved to the store and dispatched as a standard department
+      await departmentService.ensureDepartmentExists(clean, currentUser);
+
+      // Update standard departments in state
+      setStandardDepartments((prev) => {
+        if (prev.includes(clean)) return prev;
+        return [...prev, clean].sort((a, b) => a.localeCompare(b));
+      });
+
+      // Automatically check the newly created department
+      setSelectedDepartments((prev) => {
+        if (prev.includes(clean)) return prev;
+        return [...prev, clean];
+      });
+
+      // If no primary department set yet, set this one
+      if (!primaryDepartment) {
+        setPrimaryDepartment(clean);
+      }
+
+      setNewCustomDeptInput('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to add new department.');
+    } finally {
+      setIsAddingDept(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -345,13 +445,14 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setLoading(true);
 
     try {
-      const effectiveDepartment = department === 'OTHER' ? customDepartment.trim() : department;
       if (!fullName.trim()) {
         throw new Error('Full Name is required.');
       }
-      if (!effectiveDepartment) {
-        throw new Error('Please select or specify a hospital department.');
+      if (selectedDepartments.length === 0) {
+        throw new Error('Please select at least one department using the checkboxes to tie this user.');
       }
+
+      const effectivePrimaryDept = primaryDepartment || selectedDepartments[0];
 
       if (isEditing && targetUser) {
         const updates: Partial<UserType> = {
@@ -359,7 +460,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           username: username.trim().toLowerCase(),
           email: email.trim(),
           phone: phone.trim(),
-          department: effectiveDepartment,
+          department: effectivePrimaryDept,
+          departments: selectedDepartments,
           jobTitle: jobTitle.trim(),
           role: role,
           specialties: specialties,
@@ -382,7 +484,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             username: username.trim().toLowerCase(),
             email: email.trim(),
             phone: phone.trim(),
-            department: effectiveDepartment,
+            department: effectivePrimaryDept,
+            departments: selectedDepartments,
             jobTitle: jobTitle.trim(),
             role: role,
             specialties: specialties,
@@ -457,7 +560,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-3xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
           <div className="flex items-center gap-3">
@@ -487,8 +590,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
               </h2>
               <p className="text-xs text-slate-500">
                 {isEditing
-                  ? `ID: ${userToEdit?.id} • Manage role authorization, specialties, credentials, and account lifecycle.`
-                  : 'Create a new staff member profile with offline-first login credentials and role specialties.'}
+                  ? `ID: ${userToEdit?.id} • Manage department assignments, role authorization, credentials, and account lifecycle.`
+                  : 'Create a new staff member profile, tie them to hospital departments via checkboxes, and set credentials.'}
               </p>
             </div>
           </div>
@@ -515,7 +618,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <User className="w-3.5 h-3.5" />
-              <span>Identity & Department</span>
+              <span>Identity & Contact Details</span>
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -551,7 +654,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Hospital Email
@@ -583,37 +686,6 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   />
                 </div>
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Department *
-                </label>
-                <select
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                >
-                  {STANDARD_DEPARTMENTS.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                  <option value="OTHER">Custom / Other Department...</option>
-                </select>
-
-                {department === 'OTHER' && (
-                  <input
-                    type="text"
-                    required
-                    value={customDepartment}
-                    onChange={(e) => setCustomDepartment(e.target.value)}
-                    placeholder="Type department name..."
-                    className="mt-2 w-full px-3.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none"
-                  />
-                )}
-              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -625,7 +697,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                     type="text"
                     value={jobTitle}
                     onChange={(e) => setJobTitle(e.target.value)}
-                    placeholder="e.g. Senior Medical Officer / Systems Engineer"
+                    placeholder="e.g. Senior Medical Officer"
                     className="w-full pl-8 pr-3.5 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
@@ -633,7 +705,171 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: Role & Security Authorization */}
+          {/* Section 2: Department Assignment by Checkboxes */}
+          <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Tie User to Hospital Departments (Checkboxes) *</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Check all departments and clinical units this staff member is tied to. Added departments automatically become standard hospital departments.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                  {selectedDepartments.length} Checked
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSelectAllFilteredDepts}
+                  className="text-[11px] text-sky-600 dark:text-sky-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Select All
+                </button>
+                <span className="text-slate-300 dark:text-slate-700">•</span>
+                <button
+                  type="button"
+                  onClick={handleClearAllDepts}
+                  className="text-[11px] text-slate-500 hover:text-rose-600 dark:text-slate-400 font-semibold cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            {/* Department Search & Quick Add */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={deptSearchQuery}
+                  onChange={(e) => setDeptSearchQuery(e.target.value)}
+                  placeholder="Search department list..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              {/* Add Custom Department on-the-fly */}
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={newCustomDeptInput}
+                  onChange={(e) => setNewCustomDeptInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddNewDepartment();
+                    }
+                  }}
+                  placeholder="New department name..."
+                  className="w-44 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+                <button
+                  type="button"
+                  disabled={!newCustomDeptInput.trim() || isAddingDept}
+                  onClick={handleAddNewDepartment}
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Dept</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Departments Checkbox Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-56 overflow-y-auto p-2 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
+              {filteredDepartments.map((deptName) => {
+                const isChecked = selectedDepartments.includes(deptName);
+                const isPrimary = primaryDepartment === deptName;
+
+                return (
+                  <div
+                    key={deptName}
+                    onClick={() => handleToggleDepartment(deptName)}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer flex items-start justify-between gap-2 select-none ${
+                      isChecked
+                        ? 'border-sky-500 bg-white dark:bg-slate-900 text-sky-950 dark:text-sky-200 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <div className="mt-0.5 shrink-0 text-sky-600">
+                        {isChecked ? (
+                          <CheckSquare className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400 dark:text-slate-600" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-semibold leading-tight">{deptName}</span>
+                        {isChecked && (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {isPrimary ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 rounded">
+                                <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                                Primary
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPrimaryDepartment(deptName);
+                                }}
+                                className="text-[10px] text-slate-400 hover:text-sky-600 hover:underline cursor-pointer"
+                              >
+                                Set Primary
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Selected Departments Summary */}
+            {selectedDepartments.length > 0 && (
+              <div className="p-3 rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900/50 space-y-1.5">
+                <div className="text-[11px] font-bold text-sky-900 dark:text-sky-200 flex items-center justify-between">
+                  <span>Tied Departments Summary:</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-normal">
+                    Primary Department: <strong className="text-sky-700 dark:text-sky-300">{primaryDepartment || selectedDepartments[0]}</strong>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedDepartments.map((d) => (
+                    <span
+                      key={d}
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium border ${
+                        d === primaryDepartment
+                          ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800 font-bold'
+                          : 'bg-white text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      {d === primaryDepartment && <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />}
+                      <span>{d}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleDepartment(d)}
+                        className="hover:text-rose-600 cursor-pointer ml-1"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 3: Role & Security Authorization */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5" />
@@ -690,7 +926,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Technical / Clinical Specialties */}
+          {/* Section 4: Technical / Clinical Specialties */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -803,7 +1039,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Official User Signature */}
+          {/* Section 5: Official User Signature */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -862,7 +1098,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             )}
           </div>
 
-          {/* Section 4: Credentials & Login Security */}
+          {/* Section 6: Credentials & Login Security */}
           <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">

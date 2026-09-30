@@ -767,6 +767,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
       {activeTab === 'DEPARTMENTS' && (
         <DepartmentManagementTab
           currentUser={currentUser}
+          allUsers={allUsers}
           onRefresh={onRefresh}
         />
       )}

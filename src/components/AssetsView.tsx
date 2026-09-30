@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import QRCode from 'qrcode';
 import {
   HardDrive,
@@ -27,6 +27,10 @@ import {
   Download,
   Image as ImageIcon,
   AlertTriangle,
+  Edit3,
+  Trash2,
+  Save,
+  DollarSign,
 } from 'lucide-react';
 import {
   type Asset,
@@ -35,9 +39,11 @@ import {
   type AssetHistoryEntry,
   type User as UserType,
   type SystemSettings,
+  type Department,
 } from '../types';
 import { assetService } from '../services/assetService';
 import { authService } from '../services/authService';
+import { departmentService } from '../services/departmentService';
 import {
   generateAssetQrMetadataPayload,
   downloadAssetQrJpeg,
@@ -69,6 +75,42 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [deptFilter, setDeptFilter] = useState('ALL');
 
+  // Loaded departments
+  const [departmentsList, setDepartmentsList] = useState<Department[]>([]);
+
+  useEffect(() => {
+    departmentService
+      .getDepartments()
+      .then((depts) => {
+        if (depts && depts.length > 0) {
+          setDepartmentsList(depts);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  const allDepartmentNames = useMemo(() => {
+    const fromDepts = departmentsList.map((d) => d.name);
+    const fromAssets = assets.map((a) => a.department).filter(Boolean);
+    const combined = Array.from(new Set([...fromDepts, ...fromAssets]));
+    if (combined.length === 0) {
+      return [
+        'Accident & Emergency (A&E)',
+        'Pharmacy',
+        'Laboratory & Pathology',
+        'Radiology & Imaging',
+        'Intensive Care Unit (ICU)',
+        'Outpatient Department (OPD)',
+        'Maternity & Neonatal Ward',
+        'Main Surgical Theatre',
+        'IT & Telecommunications',
+        'Hospital Administration & HR',
+        'Accounts & Billing',
+      ];
+    }
+    return combined.sort();
+  }, [departmentsList, assets]);
+
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [assetHistory, setAssetHistory] = useState<AssetHistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -84,8 +126,10 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newAssetType, setNewAssetType] = useState<string>('Desktop');
 
-  // Permission check: strictly Super Admin and IT unit staff can edit/add assets. Auditor and Management are read-only.
+  // Permission check: strictly Super Admin and IT unit staff can edit/add/delete assets.
   const canManageAssets = authService.canManageAssets(currentUser);
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
@@ -95,6 +139,38 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [condition, setCondition] = useState<AssetCondition>('Good');
   const [ipAddress, setIpAddress] = useState('192.168.10.');
   const [os, setOs] = useState('Windows 11 Pro');
+  const [purchasePrice, setPurchasePrice] = useState<number>(1250);
+  const [supplier, setSupplier] = useState('Hospital Authorized Vendor');
+
+  // Edit Asset Modal state
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [editAssetTag, setEditAssetTag] = useState('');
+  const [editAssetType, setEditAssetType] = useState('Desktop');
+  const [editManufacturer, setEditManufacturer] = useState('');
+  const [editModel, setEditModel] = useState('');
+  const [editSerialNumber, setEditSerialNumber] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editAssignedUser, setEditAssignedUser] = useState('');
+  const [editCondition, setEditCondition] = useState<AssetCondition>('Good');
+  const [editStatus, setEditStatus] = useState<AssetStatus>('Active');
+  const [editOperatingSystem, setEditOperatingSystem] = useState('');
+  const [editIpAddress, setEditIpAddress] = useState('');
+  const [editMacAddress, setEditMacAddress] = useState('');
+  const [editPurchaseDate, setEditPurchaseDate] = useState('');
+  const [editPurchasePrice, setEditPurchasePrice] = useState<number>(0);
+  const [editSupplier, setEditSupplier] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Delete Asset Modal state
+  const [assetToDelete, setAssetToDelete] = useState<Asset | null>(null);
+  const [isDeletingAsset, setIsDeletingAsset] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
 
   // QR Scanner modal
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -181,6 +257,123 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     }
   };
 
+  const handleOpenEditModal = (asset: Asset) => {
+    setEditingAsset(asset);
+    setEditAssetTag(asset.assetTag || '');
+    setEditAssetType(asset.assetType || 'Desktop');
+    setEditManufacturer(asset.manufacturer || '');
+    setEditModel(asset.model || '');
+    setEditSerialNumber(asset.serialNumber || '');
+    setEditDepartment(asset.department || (allDepartmentNames[0] || 'Pharmacy'));
+    setEditLocation(asset.location || '');
+    setEditAssignedUser(asset.assignedUser || '');
+    setEditCondition(asset.condition || 'Good');
+    setEditStatus(asset.status || 'Active');
+    setEditOperatingSystem(asset.operatingSystem || '');
+    setEditIpAddress(asset.ipAddress || '');
+    setEditMacAddress(asset.macAddress || '');
+    setEditPurchaseDate(asset.purchaseDate || '');
+    setEditPurchasePrice(asset.purchasePrice || 0);
+    setEditSupplier(asset.supplier || '');
+    setEditNotes(asset.notes || '');
+    setEditReason('');
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEditAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAsset || !currentUser) return;
+    setIsSavingEdit(true);
+    try {
+      const updated = await assetService.updateAsset(
+        editingAsset.id,
+        {
+          assetTag: editAssetTag.trim(),
+          assetType: editAssetType,
+          manufacturer: editManufacturer.trim(),
+          model: editModel.trim(),
+          serialNumber: editSerialNumber.trim(),
+          department: editDepartment.trim(),
+          location: editLocation.trim(),
+          assignedUser: editAssignedUser.trim() || undefined,
+          condition: editCondition,
+          status: editStatus,
+          operatingSystem: editOperatingSystem.trim() || undefined,
+          ipAddress: editIpAddress.trim() || undefined,
+          macAddress: editMacAddress.trim() || undefined,
+          purchaseDate: editPurchaseDate || undefined,
+          purchasePrice: Number(editPurchasePrice) || 0,
+          supplier: editSupplier.trim() || undefined,
+          notes: editNotes.trim() || undefined,
+          specifications: `${editManufacturer.trim()} ${editModel.trim()}${
+            editOperatingSystem ? ` - ${editOperatingSystem}` : ''
+          }`,
+        },
+        currentUser,
+        editReason || 'Hardware record modified by authorized IT Unit / Super Admin'
+      );
+      setEditModalOpen(false);
+      if (selectedAsset && selectedAsset.id === editingAsset.id) {
+        setSelectedAsset(updated);
+        const history = await assetService.getAssetHistory(updated.id);
+        setAssetHistory(history);
+      }
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to update asset:', err);
+      alert('Failed to update asset record.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleConfirmDeleteAsset = async () => {
+    if (!assetToDelete || !currentUser) return;
+    setIsDeletingAsset(true);
+    try {
+      await assetService.deleteAsset(
+        assetToDelete.id,
+        currentUser,
+        deleteReason || 'Removed by authorized IT Unit / Super Admin'
+      );
+      if (selectedAsset && selectedAsset.id === assetToDelete.id) {
+        setSelectedAsset(null);
+      }
+      setAssetToDelete(null);
+      setDeleteReason('');
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to delete asset:', err);
+      alert('Failed to delete asset record.');
+    } finally {
+      setIsDeletingAsset(false);
+    }
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    if (selectedAssetIds.size === 0 || !currentUser) return;
+    setIsBatchDeleting(true);
+    try {
+      for (const id of selectedAssetIds) {
+        await assetService.deleteAsset(
+          id,
+          currentUser,
+          'Batch deletion executed by IT / Super Admin'
+        );
+      }
+      if (selectedAsset && selectedAssetIds.has(selectedAsset.id)) {
+        setSelectedAsset(null);
+      }
+      setSelectedAssetIds(new Set());
+      setBatchDeleteModalOpen(false);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed batch delete:', err);
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
   const handleCreateAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manufacturer.trim() || !model.trim() || !currentUser) return;
@@ -196,8 +389,8 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           location,
           assignedUser: assignedUser.trim() || undefined,
           purchaseDate: new Date().toISOString().split('T')[0],
-          purchasePrice: 1250,
-          supplier: 'Hospital Authorized Vendor',
+          purchasePrice: Number(purchasePrice) || 0,
+          supplier: supplier.trim() || 'Hospital Authorized Vendor',
           warrantyStart: new Date().toISOString().split('T')[0],
           warrantyEnd: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 3).toISOString().split('T')[0],
           condition,
@@ -362,6 +555,18 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 </span>
               </button>
 
+              {canManageAssets && selectedAssetIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBatchDeleteModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+                  title="Delete all currently selected assets from repository"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-200" />
+                  <span>Delete Selected ({selectedAssetIds.size})</span>
+                </button>
+              )}
+
               {canManageAssets && (
                 <button
                   id="bulk-upload-assets-btn"
@@ -413,14 +618,14 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
           >
             <option value="ALL">All Asset Types</option>
-            <option value="Desktop">Desktop</option>
-            <option value="Laptop">Laptop</option>
-            <option value="Server">Server</option>
-            <option value="Switch">Switch</option>
-            <option value="Router">Router</option>
-            <option value="Access Point">Access Point</option>
-            <option value="Printer">Printer</option>
-            <option value="UPS">UPS</option>
+            <option value="Desktop">Desktop Workstations</option>
+            <option value="Laptop">Clinical Laptops</option>
+            <option value="Server">Servers & Hosts</option>
+            <option value="Switch">Network Switches</option>
+            <option value="Router">Routers</option>
+            <option value="Access Point">Wi-Fi Access Points</option>
+            <option value="Printer">Printers & Scanners</option>
+            <option value="UPS">UPS / Power Backup</option>
           </select>
 
           <select
@@ -431,6 +636,8 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           >
             <option value="ALL">All Statuses</option>
             <option value="Active">Active</option>
+            <option value="Assigned">Assigned</option>
+            <option value="Available">Available / In Storage</option>
             <option value="Under Repair">Under Repair</option>
             <option value="Maintenance">Maintenance</option>
             <option value="Decommissioned">Decommissioned</option>
@@ -443,7 +650,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
           >
             <option value="ALL">All Departments</option>
-            {departments.map((d) => (
+            {allDepartmentNames.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
@@ -583,6 +790,37 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {canManageAssets && (
+                            <>
+                              <button
+                                type="button"
+                                title="Edit Asset Specifications & Custodian"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditModal(asset);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 font-semibold transition cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                                <span>Edit</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                title="Delete Asset from Registry"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAssetToDelete(asset);
+                                  setDeleteReason('');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                <span>Delete</span>
+                              </button>
+                            </>
+                          )}
+
                           <button
                             type="button"
                             title="Download scannable QR Code as JPEG image with Name, Serial Number, and Department details rendered below"
@@ -698,18 +936,46 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   </button>
 
                   {canManageAssets && (
-                    <button
-                      onClick={() => {
-                        setNewDepartment(selectedAsset.department);
-                        setNewLocation(selectedAsset.location);
-                        setNewAssignedUser(selectedAsset.assignedUser || '');
-                        setTransferModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold cursor-pointer transition"
-                    >
-                      <ArrowRightLeft className="w-3.5 h-3.5" />
-                      <span>Transfer / Reassign</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedAsset) handleOpenEditModal(selectedAsset);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold cursor-pointer transition"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit Asset</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewDepartment(selectedAsset.department);
+                          setNewLocation(selectedAsset.location);
+                          setNewAssignedUser(selectedAsset.assignedUser || '');
+                          setTransferModalOpen(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer transition"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        <span>Transfer / Reassign</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedAsset) {
+                            setAssetToDelete(selectedAsset);
+                            setDeleteReason('');
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Asset</span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -788,21 +1054,35 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
       {transferModalOpen && selectedAsset && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <ArrowRightLeft className="w-5 h-5 text-sky-600" />
-              <span>Transfer Asset {selectedAsset.assetTag}</span>
-            </h3>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5 text-sky-600" />
+                <span>Transfer Asset {selectedAsset.assetTag}</span>
+              </h3>
+              <button
+                onClick={() => setTransferModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <form onSubmit={handleTransferAsset} className="space-y-3">
               <div>
                 <label className="block text-slate-500 font-semibold mb-1">Target Department *</label>
-                <input
-                  type="text"
+                <select
                   required
                   value={newDepartment}
                   onChange={(e) => setNewDepartment(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                />
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                >
+                  <option value="">-- Select Target Department --</option>
+                  {allDepartmentNames.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -810,6 +1090,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 <input
                   type="text"
                   required
+                  placeholder="e.g. Ward Bed 4, Triage Desk 2, Server Rack B"
                   value={newLocation}
                   onChange={(e) => setNewLocation(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
@@ -817,13 +1098,23 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-500 font-semibold mb-1">Assigned Custodian (Staff Name)</label>
-                <input
-                  type="text"
+                <label className="block text-slate-500 font-semibold mb-1">Assigned Custodian (Staff User)</label>
+                <select
                   value={newAssignedUser}
                   onChange={(e) => setNewAssignedUser(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                />
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                >
+                  <option value="">-- Department Shared / Unassigned --</option>
+                  {allUsers.map((u) => (
+                    <option key={u.id} value={u.fullName}>
+                      {u.fullName} ({u.department || 'Clinical'} • {u.role.replace(/_/g, ' ')})
+                    </option>
+                  ))}
+                  {newAssignedUser &&
+                    !allUsers.some((u) => u.fullName === newAssignedUser) && (
+                      <option value={newAssignedUser}>{newAssignedUser} (Custom)</option>
+                    )}
+                </select>
               </div>
 
               <div>
@@ -841,13 +1132,13 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setTransferModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold"
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
                 >
                   Confirm Transfer
                 </button>
@@ -991,7 +1282,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
       {/* Register Asset Modal */}
       {createModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <HardDrive className="w-5 h-5 text-sky-600" />
@@ -1009,7 +1300,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   <select
                     value={newAssetType}
                     onChange={(e) => setNewAssetType(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
                     <option value="Desktop">Desktop Workstation</option>
                     <option value="Laptop">Clinical Laptop</option>
@@ -1027,7 +1318,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   <select
                     value={condition}
                     onChange={(e) => setCondition(e.target.value as AssetCondition)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
                     <option value="New">Brand New</option>
                     <option value="Excellent">Excellent</option>
@@ -1072,7 +1363,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     placeholder="e.g. CN-0K9821-7281"
                     value={serialNumber}
                     onChange={(e) => setSerialNumber(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
                   />
                 </div>
 
@@ -1090,13 +1381,18 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">Department *</label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  />
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    {allDepartmentNames.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -1114,11 +1410,40 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">Assigned Custodian (Staff)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Dr. Kwesi, Nurse Joyce"
+                  <select
                     value={assignedUser}
                     onChange={(e) => setAssignedUser(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">-- Department Shared / Available --</option>
+                    {allUsers.map((u) => (
+                      <option key={u.id} value={u.fullName}>
+                        {u.fullName} ({u.department || 'Clinical'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Purchase Price (GH₵)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={purchasePrice}
+                    onChange={(e) => setPurchasePrice(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Supplier / Vendor</label>
+                  <input
+                    type="text"
+                    value={supplier}
+                    onChange={(e) => setSupplier(e.target.value)}
+                    placeholder="e.g. Hospital Procurement Agency"
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
                   />
                 </div>
@@ -1130,7 +1455,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     placeholder="192.168.10.X"
                     value={ipAddress}
                     onChange={(e) => setIpAddress(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
                   />
                 </div>
               </div>
@@ -1139,18 +1464,400 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold"
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
                 >
                   Save to Local Register
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT ASSET MODAL */}
+      {editModalOpen && editingAsset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-sky-600" />
+                <span>Edit IT Asset: {editingAsset.assetTag}</span>
+              </h3>
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditAsset} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Asset Tag *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editAssetTag}
+                    onChange={(e) => setEditAssetTag(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Asset Type *</label>
+                  <select
+                    value={editAssetType}
+                    onChange={(e) => setEditAssetType(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="Desktop">Desktop Workstation</option>
+                    <option value="Laptop">Clinical Laptop</option>
+                    <option value="Server">Local Server</option>
+                    <option value="Switch">Network Switch</option>
+                    <option value="Router">Core Router</option>
+                    <option value="Access Point">Wi-Fi Access Point</option>
+                    <option value="Printer">Printer / Scanner</option>
+                    <option value="UPS">Power Backup UPS</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Serial Number (S/N) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSerialNumber}
+                    onChange={(e) => setEditSerialNumber(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Manufacturer *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editManufacturer}
+                    onChange={(e) => setEditManufacturer(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Model *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editModel}
+                    onChange={(e) => setEditModel(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Department *</label>
+                  <select
+                    required
+                    value={editDepartment}
+                    onChange={(e) => setEditDepartment(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    {allDepartmentNames.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Room / Location *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editLocation}
+                    onChange={(e) => setEditLocation(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Assigned Custodian</label>
+                  <select
+                    value={editAssignedUser}
+                    onChange={(e) => setEditAssignedUser(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">-- Shared / Unassigned --</option>
+                    {allUsers.map((u) => (
+                      <option key={u.id} value={u.fullName}>
+                        {u.fullName} ({u.department || 'Clinical'})
+                      </option>
+                    ))}
+                    {editAssignedUser &&
+                      !allUsers.some((u) => u.fullName === editAssignedUser) && (
+                        <option value={editAssignedUser}>{editAssignedUser} (Custom)</option>
+                      )}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Hardware Condition</label>
+                  <select
+                    value={editCondition}
+                    onChange={(e) => setEditCondition(e.target.value as AssetCondition)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="New">Brand New</option>
+                    <option value="Excellent">Excellent</option>
+                    <option value="Good">Good (Operational)</option>
+                    <option value="Fair">Fair (Needs attention)</option>
+                    <option value="Poor">Poor (Requires Service)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Operational Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as AssetStatus)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Assigned">Assigned</option>
+                    <option value="Available">Available / In Storage</option>
+                    <option value="Under Repair">Under Repair</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Decommissioned">Decommissioned</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
+                  <input
+                    type="text"
+                    value={editOperatingSystem}
+                    onChange={(e) => setEditOperatingSystem(e.target.value)}
+                    placeholder="Windows 11 Pro"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Static IP Address</label>
+                  <input
+                    type="text"
+                    value={editIpAddress}
+                    onChange={(e) => setEditIpAddress(e.target.value)}
+                    placeholder="192.168.10.X"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">MAC Address</label>
+                  <input
+                    type="text"
+                    value={editMacAddress}
+                    onChange={(e) => setEditMacAddress(e.target.value)}
+                    placeholder="00:1A:2B:3C:4D:5E"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Purchase Date</label>
+                  <input
+                    type="date"
+                    value={editPurchaseDate}
+                    onChange={(e) => setEditPurchaseDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Purchase Price (GH₵)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editPurchasePrice}
+                    onChange={(e) => setEditPurchasePrice(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Supplier / Vendor</label>
+                  <input
+                    type="text"
+                    value={editSupplier}
+                    onChange={(e) => setEditSupplier(e.target.value)}
+                    placeholder="Hospital Procurement"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Clinical Notes & Hardware Specifics</label>
+                <textarea
+                  rows={2}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Hardware modifications, dual-monitor setup, or dedicated clinical role..."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Modification Reason (for Audit Log)</label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="e.g. Upgraded RAM, updated custodian, corrected serial number"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer shadow-sm transition disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE ASSET CONFIRMATION MODAL */}
+      {assetToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  Delete Hardware Asset
+                </h3>
+                <p className="text-[11px] text-slate-500">Permanent removal from IT registry</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+              <div className="font-mono font-bold text-sky-600 text-sm">{assetToDelete.assetTag}</div>
+              <div className="font-semibold text-slate-900 dark:text-white">
+                {assetToDelete.manufacturer} {assetToDelete.model}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                S/N: <span className="font-mono">{assetToDelete.serialNumber}</span> • Dept: {assetToDelete.department} ({assetToDelete.location})
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">
+                Reason for Deletion (Recorded in Audit Trail)
+              </label>
+              <input
+                type="text"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="e.g. Scrapped, damaged beyond repair, returned to vendor"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAssetToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAsset}
+                disabled={isDeletingAsset}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer transition shadow-sm disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeletingAsset ? 'Deleting...' : 'Confirm Deletion'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BATCH DELETE ASSETS CONFIRMATION MODAL */}
+      {batchDeleteModalOpen && selectedAssetIds.size > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  Batch Delete {selectedAssetIds.size} Assets
+                </h3>
+                <p className="text-[11px] text-slate-500">Removal of multiple selected hardware records</p>
+              </div>
+            </div>
+
+            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-slate-900 dark:text-white">{selectedAssetIds.size}</strong> selected assets from the hospital registry? This action will create audit logs for each record.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setBatchDeleteModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchDelete}
+                disabled={isBatchDeleting}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer transition shadow-sm disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isBatchDeleting ? 'Deleting Selected...' : `Delete ${selectedAssetIds.size} Assets`}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

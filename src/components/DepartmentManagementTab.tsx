@@ -16,25 +16,42 @@ import {
   Flame,
   X,
   Save,
+  Upload,
 } from 'lucide-react';
 import { type Department, type User as UserType } from '../types';
 import { departmentService } from '../services/departmentService';
+import { authService } from '../services/authService';
+import { DepartmentBulkUploadModal } from './DepartmentBulkUploadModal';
 
 interface DepartmentManagementTabProps {
   currentUser: UserType | null;
+  allUsers?: UserType[];
   onRefresh?: () => void;
 }
 
 export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = ({
   currentUser,
+  allUsers = [],
   onRefresh,
 }) => {
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const canManageDepartments =
+    isSuperAdmin ||
+    currentUser?.role === 'IT_ADMIN' ||
+    currentUser?.role === 'IT_OFFICER' ||
+    (currentUser?.department
+      ? currentUser.department.toLowerCase().includes('it') ||
+        currentUser.department.toLowerCase().includes('information technology')
+      : false);
 
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [loadedUsers, setLoadedUsers] = useState<UserType[]>(allUsers || []);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'EMERGENCY' | 'STANDARD'>('ALL');
+
+  // Bulk Upload Modal State
+  const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState(false);
 
   // Add / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,7 +96,20 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
 
   useEffect(() => {
     loadDepartments();
-  }, []);
+    authService
+      .getAllUsers()
+      .then((users) => {
+        if (users && users.length > 0) {
+          setLoadedUsers(users);
+        } else if (allUsers && allUsers.length > 0) {
+          setLoadedUsers(allUsers);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load users for HOD dropdown:', err);
+        if (allUsers && allUsers.length > 0) setLoadedUsers(allUsers);
+      });
+  }, [allUsers]);
 
   const openAddModal = () => {
     setEditingDept(null);
@@ -109,8 +139,8 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
 
   const handleSaveDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSuperAdmin) {
-      setFormError('Only Super Administrators can create or update hospital departments.');
+    if (!canManageDepartments) {
+      setFormError('Only Super Administrators and IT Unit can create or update hospital departments.');
       return;
     }
     if (!name.trim()) {
@@ -259,15 +289,25 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
             </div>
           </div>
 
-          {isSuperAdmin && (
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm hover:shadow"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Department</span>
-            </button>
+          {canManageDepartments && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBulkUploadModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold rounded-xl transition cursor-pointer shadow-3xs"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Bulk Upload</span>
+              </button>
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm hover:shadow"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Department</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -549,13 +589,21 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     Head of Department (HOD)
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={headOfDepartment}
                     onChange={(e) => setHeadOfDepartment(e.target.value)}
-                    placeholder="Dr. K. Adjei"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                  />
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    <option value="">-- Select Staff User as HOD --</option>
+                    {loadedUsers.map((u) => (
+                      <option key={u.id} value={u.fullName}>
+                        {u.fullName} ({u.department || 'Clinical'} • {u.role.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                    {headOfDepartment && !loadedUsers.some((u) => u.fullName === headOfDepartment) && (
+                      <option value={headOfDepartment}>{headOfDepartment} (Custom)</option>
+                    )}
+                  </select>
                 </div>
 
                 <div>
@@ -673,6 +721,20 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
           </div>
         </div>
       )}
+
+      {/* MODAL: BULK DEPARTMENT UPLOAD */}
+      <DepartmentBulkUploadModal
+        isOpen={isBulkUploadModalOpen}
+        onClose={() => setIsBulkUploadModalOpen(false)}
+        currentUser={currentUser}
+        existingDepartments={departments}
+        allUsers={loadedUsers}
+        onSuccess={async (created) => {
+          showNotification('success', `Successfully registered ${created.length} new hospital departments.`);
+          await loadDepartments();
+          if (onRefresh) onRefresh();
+        }}
+      />
     </div>
   );
 };

@@ -164,7 +164,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({ currentUser })
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Quantity & Cost:</span>
                   <span className="font-mono font-bold text-slate-900 dark:text-white">
-                    {req.quantity} units (${req.estimatedCost})
+                    {req.quantity} units (GH₵{req.estimatedCost?.toLocaleString()})
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -243,7 +243,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({ currentUser })
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Estimated Cost ($)</label>
+                  <label className="block text-slate-500 font-semibold mb-1">Estimated Cost (GH₵)</label>
                   <input
                     type="number"
                     min={0}

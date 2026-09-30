@@ -19,6 +19,17 @@ import {
   CheckSquare,
   Square,
   Users,
+  Table,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Columns,
+  Grid,
+  DollarSign,
+  Calendar,
+  ListTodo,
+  Check,
+  RotateCcw,
 } from 'lucide-react';
 import {
   type HospitalMemo,
@@ -271,9 +282,162 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  const handleInsertTable = () => {
-    const tableTemplate = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Cell 1 | Cell 2 | Cell 3 |\n| Cell 4 | Cell 5 | Cell 6 |\n`;
-    setExecutiveSummary(prev => prev + tableTemplate);
+  // Hospital Table Builder Presets
+  const TABLE_PRESETS = [
+    {
+      id: 'financial',
+      name: '💰 Financial & Price Breakdown (GH₵)',
+      description: 'Equipment procurement, spare parts cost, or expenditure breakdown in Ghana Cedis',
+      headers: ['Item Description', 'Qty', 'Unit Cost (GH₵)', 'Total Cost (GH₵)', 'Target Department'],
+      alignments: ['left', 'center', 'right', 'right', 'left'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['CAT6 High-Speed UTP Cable (305m Drum)', '4', 'GH₵ 1,450.00', 'GH₵ 5,800.00', 'IT & LHIMS Network'],
+        ['Dell OptiPlex Core i7 Desktop Units', '3', 'GH₵ 8,200.00', 'GH₵ 24,600.00', 'Pharmacy & OPD'],
+        ['Zebra Barcode Wristband Printer', '2', 'GH₵ 3,100.00', 'GH₵ 6,200.00', 'Accident & Emergency'],
+      ],
+    },
+    {
+      id: 'downtime',
+      name: '⚡ Scheduled Downtime & Maintenance Plan',
+      description: 'Maintenance schedule, impacted subsystems, lead engineers, and fallback protocols',
+      headers: ['Hospital Subsystem', 'Planned Window', 'Downtime Impact', 'Lead Engineer', 'Backup Protocol'],
+      alignments: ['left', 'left', 'center', 'left', 'left'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['LHIMS Core Database Server', 'Saturday 22:00 - 02:00', 'Full Offline Mode', 'Courage Kekesi (CIO)', 'Paper register charts'],
+        ['Main OPD Network Switch', 'Sunday 06:00 - 08:00', 'Intermittent LAN', 'Edmond Gadzekpo', 'Secondary Starlink WAN'],
+        ['Pharmacy Server Backup', 'Sunday 12:00 - 14:00', 'Read-Only Access', 'Senior IT Officer', 'Local DB cache'],
+      ],
+    },
+    {
+      id: 'action_plan',
+      name: '🏥 Ward Action Plan & Deliverables',
+      description: 'Mandatory clinical tasks, target wards, responsible officers, deadlines, and priorities',
+      headers: ['Directive / Task', 'Target Ward / Unit', 'Action Lead', 'Deadline', 'Priority Level'],
+      alignments: ['left', 'left', 'left', 'center', 'center'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['Deploy bedside LHIMS barcode scanners', 'Maternity & ICU', 'Ward In-Charge', 'Within 48 Hours', 'Critical'],
+        ['Audit emergency red power outlets', 'Main Surgical Theatre', 'Biomedical Tech', 'Friday 17:00', 'High'],
+        ['Complete cybersecurity password rotation', 'All Clinical Units', 'Unit Supervisors', '30/09/2026', 'Mandatory'],
+      ],
+    },
+    {
+      id: 'hardware_allocation',
+      name: '💻 IT Hardware & Endpoint Allocation',
+      description: 'Hardware distribution list, serial numbers, custodians, and network IP addresses',
+      headers: ['Department / Unit', 'Device / Equipment', 'Asset Tag', 'Serial Number', 'Assigned Custodian'],
+      alignments: ['left', 'left', 'center', 'center', 'left'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['Laboratory (Haematology)', 'HP LaserJet Pro M404dn', 'AST-0042', 'VNB3K92110', 'Lab Head'],
+        ['Emergency Triage Desk', 'Dell All-in-One Touch', 'AST-0089', 'CN-0X9810', 'Triage Nurse'],
+        ['Main Pharmacy Store', 'Honeywell 2D Scanner', 'AST-0115', 'HW-88912', 'Chief Pharmacist'],
+      ],
+    },
+    {
+      id: 'duty_roster',
+      name: '👥 IT & Clinical Coverage Roster',
+      description: 'Shift coverage, assigned wards, and on-call telephone extensions',
+      headers: ['Staff Name', 'Rank / Role', 'Shift Hours', 'Assigned Coverage', 'Contact Extension'],
+      alignments: ['left', 'left', 'center', 'left', 'center'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['Courage Kekesi', 'Senior IT Officer', 'Morning (07:00 - 15:00)', 'LHIMS & Server Room', 'Ext. 201'],
+        ['Edmond Gadzekpo', 'Systems Administrator', 'Evening (15:00 - 23:00)', 'Wards & Network Nodes', 'Ext. 204'],
+        ['On-Call Support Desk', 'IT Unit Specialist', 'Night (23:00 - 07:00)', 'Emergency & ICU Care', 'Ext. 200 / +233 24 100 0001'],
+      ],
+    },
+    {
+      id: 'custom',
+      name: '📝 Blank Custom Grid (3x3)',
+      description: 'Start from an empty 3-column by 3-row grid and customize headers & cells',
+      headers: ['Column 1', 'Column 2', 'Column 3'],
+      alignments: ['left', 'left', 'left'] as ('left' | 'center' | 'right')[],
+      rows: [
+        ['', '', ''],
+        ['', '', ''],
+      ],
+    },
+  ];
+
+  // Table Builder State
+  const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
+  const [selectedPresetId, setSelectedPresetId] = useState('financial');
+  const [tableHeaders, setTableHeaders] = useState<string[]>(['Item Description', 'Qty', 'Unit Cost (GH₵)', 'Total Cost (GH₵)', 'Target Department']);
+  const [tableAlignments, setTableAlignments] = useState<('left' | 'center' | 'right')[]>(['left', 'center', 'right', 'right', 'left']);
+  const [tableRows, setTableRows] = useState<string[][]>([
+    ['CAT6 High-Speed UTP Cable (305m Drum)', '4', 'GH₵ 1,450.00', 'GH₵ 5,800.00', 'IT & LHIMS Network'],
+    ['Dell OptiPlex Core i7 Desktop Units', '3', 'GH₵ 8,200.00', 'GH₵ 24,600.00', 'Pharmacy & OPD'],
+    ['Zebra Barcode Wristband Printer', '2', 'GH₵ 3,100.00', 'GH₵ 6,200.00', 'Accident & Emergency'],
+  ]);
+
+  const handleApplyTablePreset = (preset: typeof TABLE_PRESETS[0]) => {
+    setSelectedPresetId(preset.id);
+    setTableHeaders([...preset.headers]);
+    setTableAlignments([...preset.alignments]);
+    setTableRows(preset.rows.map(r => [...r]));
+  };
+
+  const handleAddTableRow = () => {
+    setTableRows(prev => [...prev, new Array(tableHeaders.length).fill('')]);
+  };
+
+  const handleRemoveTableRow = (rowIndex: number) => {
+    if (tableRows.length <= 1) return;
+    setTableRows(prev => prev.filter((_, idx) => idx !== rowIndex));
+  };
+
+  const handleAddTableColumn = () => {
+    setTableHeaders(prev => [...prev, `Column ${prev.length + 1}`]);
+    setTableAlignments(prev => [...prev, 'left']);
+    setTableRows(prev => prev.map(row => [...row, '']));
+  };
+
+  const handleRemoveTableColumn = (colIndex: number) => {
+    if (tableHeaders.length <= 1) return;
+    setTableHeaders(prev => prev.filter((_, idx) => idx !== colIndex));
+    setTableAlignments(prev => prev.filter((_, idx) => idx !== colIndex));
+    setTableRows(prev => prev.map(row => row.filter((_, idx) => idx !== colIndex)));
+  };
+
+  const handleUpdateHeader = (colIndex: number, val: string) => {
+    setTableHeaders(prev => {
+      const copy = [...prev];
+      copy[colIndex] = val;
+      return copy;
+    });
+  };
+
+  const handleToggleColumnAlignment = (colIndex: number) => {
+    setTableAlignments(prev => {
+      const copy = [...prev];
+      const current = copy[colIndex] || 'left';
+      copy[colIndex] = current === 'left' ? 'center' : current === 'center' ? 'right' : 'left';
+      return copy;
+    });
+  };
+
+  const handleUpdateCell = (rowIndex: number, colIndex: number, val: string) => {
+    setTableRows(prev => {
+      const copy = prev.map(r => [...r]);
+      if (!copy[rowIndex]) copy[rowIndex] = new Array(tableHeaders.length).fill('');
+      copy[rowIndex][colIndex] = val;
+      return copy;
+    });
+  };
+
+  const handleInsertBuiltTable = () => {
+    const headerLine = `| ${tableHeaders.map(h => (h.trim() || ' ')).join(' | ')} |`;
+    const separatorLine = `| ${tableAlignments.map(align => {
+      if (align === 'center') return ':---:';
+      if (align === 'right') return '---:';
+      return ':---';
+    }).join(' | ')} |`;
+    const dataLines = tableRows.map(row => {
+      const cells = tableHeaders.map((_, colIdx) => (row[colIdx]?.trim() || '-'));
+      return `| ${cells.join(' | ')} |`;
+    });
+
+    const markdownTable = `\n\n${headerLine}\n${separatorLine}\n${dataLines.join('\n')}\n\n`;
+    setExecutiveSummary(prev => (prev ? `${prev.trimEnd()}${markdownTable}` : markdownTable.trim()));
+    setIsTableBuilderOpen(false);
   };
   const [generationSuccess, setGenerationSuccess] = useState(false);
   const [refinePrompt, setRefinePrompt] = useState('');
@@ -863,14 +1027,12 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                           </label>
                           <button
                             type="button"
-                            onClick={handleInsertTable}
-                            className="flex items-center gap-1 text-[10px] font-sans font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-slate-700 px-2 py-1 rounded transition border border-slate-200 dark:border-slate-700 cursor-pointer shadow-3xs"
-                            title="Click to insert a markdown table grid into the body text"
+                            onClick={() => setIsTableBuilderOpen(true)}
+                            className="flex items-center gap-1.5 text-[10px] font-sans font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-lg transition border border-sky-200 dark:border-sky-800 cursor-pointer shadow-3xs"
+                            title="Open interactive visual table builder and presets"
                           >
-                            <svg className="w-3 h-3 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M3 10h18M3 14h18m-9-4v8m-6-8v8m12-8v8" />
-                            </svg>
-                            <span>Insert Table Grid</span>
+                            <Table className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                            <span>Insert Table Builder</span>
                           </button>
                         </div>
                         <textarea
@@ -982,9 +1144,20 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
 
                   {/* Document Body / Content */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">
-                      Document Body / Content *
-                    </label>
+                    <div className="flex items-center justify-between pb-1">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">
+                        Document Body / Content *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsTableBuilderOpen(true)}
+                        className="flex items-center gap-1.5 text-[10px] font-sans font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-lg transition border border-sky-200 dark:border-sky-800 cursor-pointer shadow-3xs"
+                        title="Open interactive visual table builder and presets"
+                      >
+                        <Table className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                        <span>Insert Table Builder</span>
+                      </button>
+                    </div>
                     <textarea
                       rows={10}
                       value={executiveSummary}
@@ -1300,6 +1473,294 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                 </div>
               </div>
             )}
+
+          </div>
+        </div>
+      )}
+
+      {/* Hospital Document Table Builder Modal */}
+      {isTableBuilderOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 max-w-4xl w-full max-h-[92vh] shadow-2xl flex flex-col space-y-4">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400">
+                  <Table className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                    Hospital Document Table Builder
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Visually compose, format, and insert hospital tables with column alignments and currency support
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTableBuilderOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Builder Body */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              
+              {/* Table Presets */}
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Hospital Table Presets & Templates:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {TABLE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => handleApplyTablePreset(preset)}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        selectedPresetId === preset.id
+                          ? 'border-sky-500 bg-sky-50/60 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 shadow-2xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="font-bold text-xs truncate">{preset.name}</span>
+                      <span className="text-[10px] text-slate-400 mt-1 line-clamp-1">{preset.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Grid Dimensions & Toolbar Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Grid Dimensions:</span>
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <Columns className="w-3.5 h-3.5 text-sky-600" />
+                    <span>{tableHeaders.length} Columns</span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <Grid className="w-3.5 h-3.5 text-sky-600" />
+                    <span>{tableRows.length} Rows</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={handleAddTableColumn}
+                    className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-sky-600 text-xs flex items-center gap-1 transition cursor-pointer shadow-3xs"
+                    title="Add new column to right"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Column</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddTableRow}
+                    className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-sky-600 text-xs flex items-center gap-1 transition cursor-pointer shadow-3xs"
+                    title="Add new row to bottom"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Row</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTableRows((prev) => prev.map((r) => new Array(tableHeaders.length).fill('')));
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 text-xs font-semibold transition cursor-pointer shadow-3xs flex items-center gap-1"
+                    title="Clear all cell values"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Clear Cells</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Interactive Spreadsheet-style Grid */}
+              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xs">
+                <div className="overflow-x-auto max-h-72">
+                  <table className="w-full text-xs border-collapse">
+                    {/* Header Inputs & Alignment Controls */}
+                    <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-2 w-10 text-center font-bold text-slate-400">#</th>
+                        {tableHeaders.map((header, colIdx) => (
+                          <th key={colIdx} className="p-2 min-w-[160px] border-r border-slate-200 dark:border-slate-700">
+                            <div className="space-y-1.5">
+                              <input
+                                type="text"
+                                value={header}
+                                onChange={(e) => handleUpdateHeader(colIdx, e.target.value)}
+                                placeholder={`Header ${colIdx + 1}`}
+                                className="w-full px-2.5 py-1 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500"
+                              />
+                              <div className="flex items-center justify-between gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleColumnAlignment(colIdx)}
+                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+                                  title={`Current alignment: ${tableAlignments[colIdx] || 'left'}. Click to toggle.`}
+                                >
+                                  {tableAlignments[colIdx] === 'center' ? (
+                                    <>
+                                      <AlignCenter className="w-3 h-3 text-sky-600" />
+                                      <span>Center</span>
+                                    </>
+                                  ) : tableAlignments[colIdx] === 'right' ? (
+                                    <>
+                                      <AlignRight className="w-3 h-3 text-sky-600" />
+                                      <span>Right</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AlignLeft className="w-3 h-3 text-sky-600" />
+                                      <span>Left</span>
+                                    </>
+                                  )}
+                                </button>
+                                {tableHeaders.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveTableColumn(colIdx)}
+                                    className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                    title="Delete this column"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </th>
+                        ))}
+                        <th className="p-2 w-10 text-center"></th>
+                      </tr>
+                    </thead>
+
+                    {/* Cell Inputs */}
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {tableRows.map((row, rowIdx) => (
+                        <tr key={rowIdx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                          <td className="p-2 text-center font-mono font-bold text-[10px] text-slate-400 bg-slate-50/50 dark:bg-slate-900/50">
+                            {rowIdx + 1}
+                          </td>
+                          {tableHeaders.map((_, colIdx) => (
+                            <td key={colIdx} className="p-1.5 border-r border-slate-100 dark:border-slate-800">
+                              <input
+                                type="text"
+                                value={row[colIdx] ?? ''}
+                                onChange={(e) => handleUpdateCell(rowIdx, colIdx, e.target.value)}
+                                placeholder="Value..."
+                                className={`w-full px-2 py-1 text-xs bg-transparent hover:bg-white dark:hover:bg-slate-950 focus:bg-white dark:focus:bg-slate-950 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-sky-500 rounded-md text-slate-800 dark:text-slate-200 focus:outline-none ${
+                                  tableAlignments[colIdx] === 'center'
+                                    ? 'text-center'
+                                    : tableAlignments[colIdx] === 'right'
+                                    ? 'text-right'
+                                    : 'text-left'
+                                }`}
+                              />
+                            </td>
+                          ))}
+                          <td className="p-1.5 text-center">
+                            {tableRows.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTableRow(rowIdx)}
+                                className="p-1 text-slate-300 hover:text-rose-500 transition cursor-pointer"
+                                title="Delete this row"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Live Preview Box */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Live Memo Letterhead Preview:
+                </label>
+                <div
+                  className="p-4 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-inner"
+                  style={{ fontFamily: "'Times New Roman', Times, serif" }}
+                >
+                  <table className="min-w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-300 dark:border-slate-700">
+                        {tableHeaders.map((h, i) => (
+                          <th
+                            key={i}
+                            className={`px-3 py-2 font-bold uppercase text-slate-900 dark:text-slate-100 border-r border-slate-300 dark:border-slate-700 last:border-r-0 ${
+                              tableAlignments[i] === 'center'
+                                ? 'text-center'
+                                : tableAlignments[i] === 'right'
+                                ? 'text-right'
+                                : 'text-left'
+                            }`}
+                          >
+                            {h || `Column ${i + 1}`}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {tableRows.map((row, rIdx) => (
+                        <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/70 dark:bg-slate-800/40'}>
+                          {tableHeaders.map((_, cIdx) => (
+                            <td
+                              key={cIdx}
+                              className={`px-3 py-1.5 text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-800 last:border-r-0 ${
+                                tableAlignments[cIdx] === 'center'
+                                  ? 'text-center'
+                                  : tableAlignments[cIdx] === 'right'
+                                  ? 'text-right'
+                                  : 'text-left'
+                              }`}
+                            >
+                              {row[cIdx] || '-'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <span className="text-[11px] text-slate-400">
+                Generated Markdown table will be inserted directly into your memo body.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTableBuilderOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleInsertBuiltTable}
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Insert Table into Memo</span>
+                </button>
+              </div>
+            </div>
 
           </div>
         </div>

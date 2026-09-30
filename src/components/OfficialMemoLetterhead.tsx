@@ -4,6 +4,33 @@ import { Shield, CheckCircle2, Clock, FileText, Printer, Edit3, X, Sparkles, Ima
 import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 
+const renderFormattedCellText = (cellText: string) => {
+  const trimmed = cellText.trim();
+  if (!trimmed) return <span className="text-slate-300">-</span>;
+  const parts = trimmed.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return (
+            <strong key={index} className="font-bold text-slate-950 dark:text-white">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return (
+            <em key={index} className="italic text-slate-800 dark:text-slate-200">
+              {part.slice(1, -1)}
+            </em>
+          );
+        }
+        return part;
+      })}
+    </>
+  );
+};
+
 const renderContentWithMarkdownTables = (text: string) => {
   if (!text) return null;
 
@@ -27,33 +54,77 @@ const renderContentWithMarkdownTables = (text: string) => {
 
   const renderCurrentTable = () => {
     if (tableRows.length > 0) {
-      const hasSeparator = tableRows.length > 1 && tableRows[1].every(cell => cell.trim().match(/^:?-+:?$/) || cell.trim() === '');
-      
+      const hasSeparator =
+        tableRows.length > 1 &&
+        tableRows[1].every((cell) => cell.trim().match(/^:?-+:?$/) || cell.trim() === '');
+
       const headers = hasSeparator ? tableRows[0] : [];
+      const separatorRow = hasSeparator ? tableRows[1] : [];
       const dataRows = hasSeparator ? tableRows.slice(2) : tableRows;
 
+      // Determine column alignments from separator
+      const alignments = separatorRow.map((sep) => {
+        const s = sep.trim();
+        if (s.startsWith(':') && s.endsWith(':')) return 'center';
+        if (s.endsWith(':')) return 'right';
+        return 'left';
+      });
+
       elements.push(
-        <div key={`table-container-${tableKey++}`} className="overflow-x-auto my-6" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
-          <table className="min-w-full border border-slate-300 dark:border-slate-800 text-sm">
+        <div
+          key={`table-container-${tableKey++}`}
+          className="overflow-x-auto my-5 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs"
+          style={{ fontFamily: "'Times New Roman', Times, serif" }}
+        >
+          <table className="min-w-full text-xs sm:text-sm border-collapse">
             {headers.length > 0 && (
               <thead>
-                <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-300">
-                  {headers.map((h, idx) => (
-                    <th key={`th-${idx}`} className="px-4 py-2 text-left font-bold text-slate-800 dark:text-slate-200 border-r border-slate-300">
-                      {h.trim()}
-                    </th>
-                  ))}
+                <tr className="bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-300 dark:border-slate-700">
+                  {headers.map((h, idx) => {
+                    const align = alignments[idx] || 'left';
+                    const alignClass =
+                      align === 'center'
+                        ? 'text-center'
+                        : align === 'right'
+                        ? 'text-right'
+                        : 'text-left';
+                    return (
+                      <th
+                        key={`th-${idx}`}
+                        className={`px-3 py-2.5 font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 border-r border-slate-300 dark:border-slate-700 last:border-r-0 ${alignClass}`}
+                      >
+                        {renderFormattedCellText(h)}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
             )}
-            <tbody>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
               {dataRows.map((row, rowIdx) => (
-                <tr key={`tr-${rowIdx}`} className="border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-50/50">
-                  {row.map((cell, cellIdx) => (
-                    <td key={`td-${cellIdx}`} className="px-4 py-2 text-slate-700 dark:text-slate-300 border-r border-slate-200">
-                      {cell.trim()}
-                    </td>
-                  ))}
+                <tr
+                  key={`tr-${rowIdx}`}
+                  className={`${
+                    rowIdx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/70 dark:bg-slate-800/40'
+                  } hover:bg-sky-50/40 transition`}
+                >
+                  {row.map((cell, cellIdx) => {
+                    const align = alignments[cellIdx] || 'left';
+                    const alignClass =
+                      align === 'center'
+                        ? 'text-center'
+                        : align === 'right'
+                        ? 'text-right'
+                        : 'text-left';
+                    return (
+                      <td
+                        key={`td-${cellIdx}`}
+                        className={`px-3 py-2 text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-800 last:border-r-0 ${alignClass}`}
+                      >
+                        {renderFormattedCellText(cell)}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

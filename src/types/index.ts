@@ -28,6 +28,7 @@ export interface User extends SyncMetadata {
   phone: string;
   photoURL?: string;
   department: string;
+  departments?: string[]; // Multiple assigned departments tied by checkboxes
   jobTitle: string;
   role: Role;
   specialties?: string[]; // Technical & clinical specializations (e.g., Network, Hardware, LHIMS, Servers, Database, etc.)
