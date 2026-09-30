@@ -130,11 +130,13 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
         const username = (u.username || '').toLowerCase();
         const dept = (u.department || '').toLowerCase();
         const jobTitle = (u.jobTitle || '').toLowerCase();
+        const matchesTiedDepts = u.departments?.some((d) => d.toLowerCase().includes(q)) ?? false;
         return (
           fullName.includes(q) ||
           email.includes(q) ||
           username.includes(q) ||
           dept.includes(q) ||
+          matchesTiedDepts ||
           jobTitle.includes(q)
         );
       }
@@ -1206,8 +1208,18 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
 
                       {/* Department & Title */}
                       <td className="py-3 px-4">
-                        <div className="font-medium text-slate-800 dark:text-slate-200">
-                          {user.department || 'General Staff'}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-slate-800 dark:text-slate-200">
+                            {user.department || 'General Staff'}
+                          </span>
+                          {user.departments && user.departments.length > 1 && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800"
+                              title={`Tied departments (${user.departments.length}): ${user.departments.join(', ')}`}
+                            >
+                              +{user.departments.length - 1} more
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-400 truncate">
                           {user.jobTitle || 'Hospital Officer'}

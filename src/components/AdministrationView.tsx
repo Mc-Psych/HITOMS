@@ -18,6 +18,8 @@ import {
   Plus,
   ShieldAlert,
   Trash2,
+  Gauge,
+  Radio,
 } from 'lucide-react';
 import {
   type User as UserType,
@@ -232,6 +234,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           reNotificationIntervalMinutes: settings.reNotificationIntervalMinutes ?? 30,
           ringToneDurationSeconds: settings.ringToneDurationSeconds ?? 5,
           emergencyReNotificationMinutes: settings.emergencyReNotificationMinutes ?? 15,
+          emergencyBroadcastSpeedSeconds: settings.emergencyBroadcastSpeedSeconds ?? 22,
         },
         currentUser
       );
@@ -1022,6 +1025,109 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     className="w-24 px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
                   />
                   <span className="text-[11px] text-slate-400">seconds (2 - 120s)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Field 3: Emergency Broadcast Badge Text Motion Speed (Super Admin Controlled) */}
+            <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-rose-600 text-white shadow-xs">
+                    <Gauge className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <span>Emergency Broadcast Badge Text Motion Speed</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200">
+                        Super Admin Master Control
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                      Controls how quickly or smoothly the emergency broadcast marquee text moves from left to right in a continuous loop across all ward workstations and hospital terminals.
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-xs font-mono font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950 px-2.5 py-1 rounded-md border border-rose-300 dark:border-rose-800 whitespace-nowrap">
+                  {settings.emergencyBroadcastSpeedSeconds || 22}s per loop
+                </span>
+              </div>
+
+              {/* Quick Speed Presets */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Pacing Presets:</span>
+                {[
+                  { label: 'Rapid (8s)', val: 8 },
+                  { label: 'Fast (14s)', val: 14 },
+                  { label: 'Normal (22s - Default)', val: 22 },
+                  { label: 'Slow (32s)', val: 32 },
+                  { label: 'Relaxed (45s)', val: 45 },
+                ].map((item) => {
+                  const isSelected = (settings.emergencyBroadcastSpeedSeconds || 22) === item.val;
+                  return (
+                    <button
+                      key={item.val}
+                      type="button"
+                      disabled={!isSuperAdmin}
+                      onClick={() => setSettings((prev) => ({ ...prev, emergencyBroadcastSpeedSeconds: item.val }))}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:bg-rose-100 hover:text-rose-800'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Slider for fine tuning */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 items-center">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-slate-500 font-medium">
+                    <span>Speed Slider (Fine Tune):</span>
+                    <span className="font-mono font-bold text-rose-600 dark:text-rose-400">{settings.emergencyBroadcastSpeedSeconds || 22} seconds</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="6"
+                    max="60"
+                    step="1"
+                    disabled={!isSuperAdmin}
+                    value={settings.emergencyBroadcastSpeedSeconds || 22}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 6;
+                      setSettings((prev) => ({ ...prev, emergencyBroadcastSpeedSeconds: val }));
+                    }}
+                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-400">
+                    <span>6s (Ultra Fast)</span>
+                    <span>22s (Standard)</span>
+                    <span>60s (Slow Glide)</span>
+                  </div>
+                </div>
+
+                {/* Live Animated Ticker Demonstration */}
+                <div className="rounded-xl bg-slate-900 border border-rose-900/60 p-2 overflow-hidden select-none shadow-inner">
+                  <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block mb-1">
+                    Live Marquee Pacing Test:
+                  </span>
+                  <div className="w-full overflow-hidden">
+                    <div
+                      className="animate-broadcast-ltr flex items-center whitespace-nowrap text-[11px] font-bold text-white gap-3"
+                      style={{ animationDuration: `${settings.emergencyBroadcastSpeedSeconds || 22}s` }}
+                    >
+                      <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-black text-[9px] uppercase">
+                        DEMO TEST
+                      </span>
+                      <span>🚨 EMERGENCY BROADCAST MOTION TEST 🚨</span>
+                      <span className="text-amber-400 font-mono">[{settings.emergencyBroadcastSpeedSeconds || 22}s LOOP]</span>
+                      <span className="text-white/60">✦ TEXT MOVING FROM LEFT TO RIGHT IN LOOP ✦</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

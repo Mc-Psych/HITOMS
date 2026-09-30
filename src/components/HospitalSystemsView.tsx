@@ -19,6 +19,9 @@ import {
   Power,
   ChevronUp,
   ChevronDown,
+  Info,
+  Phone,
+  HelpCircle,
 } from 'lucide-react';
 import {
   type HospitalSystem,
@@ -53,6 +56,17 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
   // Super Admin and IT unit staff have full edit and ping authority
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
   const canPing = authService.canRunPingTest(currentUser);
+
+  // Listen for instant emergency system status changes (e.g. Quick Emergency Trigger set to Down)
+  React.useEffect(() => {
+    const handleSystemsUpdated = () => {
+      onRefresh();
+    };
+    window.addEventListener('hitoms_systems_updated', handleSystemsUpdated);
+    return () => {
+      window.removeEventListener('hitoms_systems_updated', handleSystemsUpdated);
+    };
+  }, [onRefresh]);
 
   const handleTestSystem = async (sys: HospitalSystem) => {
     if (!canPing) return;
@@ -168,10 +182,16 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
             <Activity className="w-5 h-5 text-sky-600" />
-            <span>Core Hospital Systems & Telemetry</span>
+            <span>
+              {isSuperAdminOrIT
+                ? 'Core Hospital Systems & Telemetry'
+                : 'Hospital Systems Directory & Availability'}
+            </span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time latency, availability, and clinical service operational tracking for {systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}.
+            {isSuperAdminOrIT
+              ? `Real-time latency, availability, and clinical service operational tracking for ${systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital'}.`
+              : 'Overview of all active hospital platforms, what each system is used for, and its current set status.'}
           </p>
         </div>
 
@@ -223,8 +243,8 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
         })}
       </div>
 
-      {/* Systems Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Systems Grid - Compact, responsive layout */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
         {filteredSystems.map((sys) => {
           const isOperational = sys.status === 'Operational';
           const isMaintenance = sys.status === 'Maintenance';
@@ -235,111 +255,147 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
           return (
             <div
               key={sys.id}
-              className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-2xs flex flex-col justify-between space-y-4 transition ${
+              className={`bg-white dark:bg-slate-900 border rounded-xl p-3.5 shadow-xs flex flex-col justify-between space-y-2.5 transition ${
                 isDown
-                  ? 'border-rose-300 dark:border-rose-900/60 ring-1 ring-rose-500/20'
+                  ? 'border-rose-400 dark:border-rose-900/70 ring-1 ring-rose-500/20'
                   : isMaintenance
-                  ? 'border-blue-300 dark:border-blue-900/60 ring-1 ring-blue-500/20'
+                  ? 'border-blue-400 dark:border-blue-900/70 ring-1 ring-blue-500/20'
                   : isDegraded
-                  ? 'border-amber-300 dark:border-amber-900/60 ring-1 ring-amber-500/20'
+                  ? 'border-amber-400 dark:border-amber-900/70 ring-1 ring-amber-500/20'
                   : 'border-slate-200 dark:border-slate-800 hover:border-sky-300'
               }`}
             >
-              <div>
-                {/* Status Badges & Quick Action Header */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {/* Status Pill */}
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        isOperational
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                          : isMaintenance
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300'
-                          : isDegraded
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                          : isDown
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 animate-pulse'
-                          : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          isOperational
-                            ? 'bg-emerald-500'
-                            : isMaintenance
-                            ? 'bg-blue-500'
-                            : isDegraded
-                            ? 'bg-amber-500'
-                            : isDown
-                            ? 'bg-rose-500 animate-ping'
-                            : 'bg-slate-500'
-                        }`}
-                      />
-                      {sys.status}
-                    </span>
+              <div className="space-y-2.5">
+                {/* 1. Header: System Name and Role Controls */}
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      {sys.vendor && (
+                        <span className="text-[9px] uppercase font-bold text-sky-800 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/70 border border-sky-200 dark:border-sky-900 px-1.5 py-0.2 rounded truncate max-w-[150px]">
+                          {sys.vendor}
+                        </span>
+                      )}
+                      <span className="text-[9px] uppercase font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
+                        {sys.criticality || 'Standard'}
+                      </span>
+                    </div>
 
-                    <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
-                      {sys.criticality || 'High'}
-                    </span>
+                    {/* NAME OF THE SYSTEM */}
+                    <h3
+                      className="font-bold text-sm text-slate-900 dark:text-white leading-snug line-clamp-1"
+                      title={sys.systemName}
+                    >
+                      {sys.systemName}
+                    </h3>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-mono font-bold text-slate-500">
-                      {sys.latencyMs !== undefined ? `${sys.latencyMs} ms` : 'N/A'}
-                    </span>
-
-                    {isSuperAdminOrIT && (
-                      <div className="flex items-center gap-1">
-                        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                          <button
-                            onClick={() => handleMoveSystemOrder(sys, 'UP')}
-                            className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
-                            title="Move Service Order Up"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleMoveSystemOrder(sys, 'DOWN')}
-                            className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
-                            title="Move Service Order Down"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                  {/* IT Administrative Controls if Super Admin/IT */}
+                  {isSuperAdminOrIT && (
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-md border border-slate-200 dark:border-slate-700">
                         <button
-                          onClick={() => handleOpenEdit(sys)}
-                          className="p-1 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer"
-                          title="Edit System Status & Configuration"
+                          onClick={() => handleMoveSystemOrder(sys, 'UP')}
+                          className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
+                          title="Move Service Order Up"
                         >
-                          <Edit3 className="w-4 h-4" />
+                          <ChevronUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => handleMoveSystemOrder(sys, 'DOWN')}
+                          className="p-0.5 text-slate-400 hover:text-sky-500 rounded cursor-pointer"
+                          title="Move Service Order Down"
+                        >
+                          <ChevronDown className="w-3 h-3" />
                         </button>
                       </div>
-                    )}
+                      <button
+                        onClick={() => handleOpenEdit(sys)}
+                        className="p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                        title="Edit System Status & Details"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. WHAT IT IS USED FOR */}
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800/80">
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-0.5">
+                    <Info className="w-3 h-3 text-sky-500 shrink-0" />
+                    <span>What It's Used For</span>
+                  </div>
+                  <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-snug line-clamp-2 font-medium">
+                    {sys.description || 'Clinical hospital operational workflow and patient care management.'}
+                  </p>
+                </div>
+
+                {/* 3. SET STATUS DISPLAYED */}
+                <div
+                  className={`p-2 rounded-lg border flex items-center justify-between gap-2 ${
+                    isOperational
+                      ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                      : isMaintenance
+                      ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
+                      : isDegraded
+                      ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
+                      : isDown
+                      ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
+                      : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Set Status
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                          isOperational
+                            ? 'bg-emerald-600 text-white'
+                            : isMaintenance
+                            ? 'bg-blue-600 text-white'
+                            : isDegraded
+                            ? 'bg-amber-600 text-white'
+                            : isDown
+                            ? 'bg-rose-600 text-white animate-pulse'
+                            : 'bg-slate-600 text-white'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            isDown ? 'bg-white animate-ping' : 'bg-white'
+                          }`}
+                        />
+                        {sys.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[9px] text-slate-400 block font-medium">Department Unit</span>
+                    <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate block max-w-[110px]">
+                      {sys.owner || 'Clinical Operations'}
+                    </span>
                   </div>
                 </div>
 
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white mt-2.5">
-                  {sys.systemName}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{sys.description}</p>
-
-                {/* Active Status Advisory Notice if any */}
+                {/* Active Advisory Notice if any */}
                 {(sys.statusMessage || sys.maintenanceWindow) && (
                   <div
-                    className={`mt-2.5 p-2 rounded-xl text-xs flex items-start gap-2 ${
+                    className={`p-2 rounded-lg text-[11px] flex items-start gap-1.5 ${
                       isDown
-                        ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50'
+                        ? 'bg-rose-100/70 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300 dark:border-rose-800'
                         : isMaintenance
-                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-900/50'
-                        : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50'
+                        ? 'bg-blue-100/70 dark:bg-blue-950/60 text-blue-900 dark:text-blue-200 border border-blue-300 dark:border-blue-800'
+                        : 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800'
                     }`}
                   >
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-current" />
                     <div className="leading-tight">
-                      {sys.statusMessage && <p className="font-semibold">{sys.statusMessage}</p>}
+                      {sys.statusMessage && <p className="font-bold">{sys.statusMessage}</p>}
                       {sys.maintenanceWindow && (
-                        <p className="text-[11px] opacity-90 mt-0.5">
+                        <p className="text-[10px] opacity-90 mt-0.5 font-medium">
                           Window: {sys.maintenanceWindow}
                         </p>
                       )}
@@ -347,104 +403,114 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
                   </div>
                 )}
 
-                {/* Technical specs */}
-                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Host / IP:</span>
-                    <span className="font-mono text-slate-700 dark:text-slate-300 font-semibold">
-                      {sys.ipOrHost || sys.server || 'LAN Gateway'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Target Port:</span>
-                    <span className="font-mono text-slate-700 dark:text-slate-300">
-                      {sys.port || '80 / HTTP'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Availability SLA:</span>
-                    <span className="font-semibold text-emerald-600 font-mono">
-                      {sys.uptimePercentage || sys.uptimePercent || 99.5}%
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Managing Unit:</span>
-                    <span className="text-slate-700 dark:text-slate-300 font-medium">
-                      {sys.owner || 'IT Operations'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
-                    <span>Last Telemetry Ping:</span>
-                    <span>{new Date(sys.lastChecked || sys.updatedAt || new Date()).toLocaleTimeString()}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons & Super Admin Quick Status Bar */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                {/* Technical specs (Shown for IT Unit & Super Admins) */}
                 {isSuperAdminOrIT && (
-                  <div className="flex items-center justify-between gap-1 text-[10px] bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded-xl">
-                    <span className="font-bold text-slate-500 pl-1">Set Status:</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleQuickStatusChange(sys, 'Operational')}
-                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                          isOperational
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-950/60'
-                        }`}
-                      >
-                        Operational
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickStatusChange(sys, 'Maintenance')}
-                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                          isMaintenance
-                            ? 'bg-blue-600 text-white'
-                            : 'text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/60'
-                        }`}
-                      >
-                        Maintenance
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickStatusChange(sys, 'Down')}
-                        className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                          isDown
-                            ? 'bg-rose-600 text-white'
-                            : 'text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/60'
-                        }`}
-                      >
-                        Down
-                      </button>
+                  <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 space-y-1 text-[10px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Host / IP:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300 font-semibold truncate max-w-[130px]">
+                        {sys.ipOrHost || sys.server || 'LAN Gateway'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Target Port:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {sys.port || '80 / HTTP'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Latency:</span>
+                      <span className="font-mono font-bold text-slate-600 dark:text-slate-400">
+                        {sys.latencyMs !== undefined ? `${sys.latencyMs} ms` : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 )}
+              </div>
 
-                <div className="flex items-center gap-2">
-                  {canPing && (
-                    <button
-                      onClick={() => handleTestSystem(sys)}
-                      disabled={testingId === sys.id}
-                      className="flex-1 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${testingId === sys.id ? 'animate-spin' : ''}`} />
-                      <span>{testingId === sys.id ? 'Checking...' : 'Run Local Ping Test'}</span>
-                    </button>
-                  )}
+              {/* Card Footer: Quick Actions (Set Status toolbar for IT) */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                {isSuperAdminOrIT ? (
+                  <>
+                    <div className="flex items-center justify-between gap-1 text-[9px] bg-slate-50 dark:bg-slate-800/60 p-1 rounded-lg">
+                      <span className="font-bold text-slate-500 pl-0.5">Quick Set:</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickStatusChange(sys, 'Operational')}
+                          className={`px-1.5 py-0.5 rounded font-bold transition cursor-pointer ${
+                            isOperational
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-950/60'
+                          }`}
+                        >
+                          Operational
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickStatusChange(sys, 'Maintenance')}
+                          className={`px-1.5 py-0.5 rounded font-bold transition cursor-pointer ${
+                            isMaintenance
+                              ? 'bg-blue-600 text-white'
+                              : 'text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/60'
+                          }`}
+                        >
+                          Maint
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickStatusChange(sys, 'Down')}
+                          className={`px-1.5 py-0.5 rounded font-bold transition cursor-pointer ${
+                            isDown
+                              ? 'bg-rose-600 text-white'
+                              : 'text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/60'
+                          }`}
+                        >
+                          Down
+                        </button>
+                      </div>
+                    </div>
 
-                  {isSuperAdminOrIT && (
-                    <button
-                      onClick={() => handleOpenEdit(sys)}
-                      className="px-3 py-2 rounded-xl bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 font-bold text-xs flex items-center gap-1 cursor-pointer transition border border-sky-200 dark:border-sky-800"
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                      <span>Configure</span>
-                    </button>
-                  )}
-                </div>
+                    <div className="flex items-center gap-1.5">
+                      {canPing && (
+                        <button
+                          onClick={() => handleTestSystem(sys)}
+                          disabled={testingId === sys.id}
+                          className="flex-1 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-[10px] flex items-center justify-center gap-1 cursor-pointer transition"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${testingId === sys.id ? 'animate-spin' : ''}`} />
+                          <span>{testingId === sys.id ? 'Pinging...' : 'Ping'}</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleOpenEdit(sys)}
+                        className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition border border-sky-200 dark:border-sky-800"
+                      >
+                        <Wrench className="w-3 h-3" />
+                        <span>Config</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* Staff User bottom info */
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+                    <span className="flex items-center gap-1 font-medium">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>Verified:</span>
+                      <strong className="text-slate-700 dark:text-slate-300 font-mono">
+                        {new Date(sys.lastChecked || sys.updatedAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </strong>
+                    </span>
+
+                    {sys.vendorSupportHotline && (
+                      <span className="text-[9px] text-sky-600 dark:text-sky-400 font-semibold flex items-center gap-1">
+                        <Phone className="w-2.5 h-2.5" />
+                        <span>{sys.vendorSupportHotline}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );

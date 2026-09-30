@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+@keyframes broadcast-scroll-ltr {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100vw);
+  }
+}
+
+.animate-broadcast-ltr {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  animation: broadcast-scroll-ltr 22s linear infinite;
+  will-change: transform;
+}
+
+.animate-broadcast-ltr:hover {
+  animation-play-state: paused;
+}
+
 @media print {
   body {
     background: #ffffff !important;

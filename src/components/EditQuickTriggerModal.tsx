@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, RotateCcw, AlertTriangle, Sparkles, Flame, Radio } from 'lucide-react';
+import { X, Save, RotateCcw, AlertTriangle, Sparkles, Flame, Radio, Activity, Server } from 'lucide-react';
 import { type QuickTriggerPreset, emergencyService, DEFAULT_QUICK_TRIGGERS } from '../services/emergencyService';
-import { type User } from '../types';
+import { type User, type HospitalSystem, type SystemOperationalStatus } from '../types';
+import { getAllFromStore } from '../services/localDatabaseService';
 
 interface EditQuickTriggerModalProps {
   preset: QuickTriggerPreset | null;
@@ -25,8 +26,22 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
   const [defaultMessage, setDefaultMessage] = useState('');
   const [severity, setSeverity] = useState<'CRITICAL' | 'HIGH' | 'WARNING'>('CRITICAL');
   const [codeType, setCodeType] = useState<QuickTriggerPreset['codeType']>('CODE_BLUE_IT');
+  const [targetSystemId, setTargetSystemId] = useState<string>('');
+  const [autoSetSystemStatus, setAutoSetSystemStatus] = useState<SystemOperationalStatus>('Down');
+
+  const [availableSystems, setAvailableSystems] = useState<HospitalSystem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      getAllFromStore<HospitalSystem>('hospitalSystems')
+        .then((sysList) => {
+          setAvailableSystems(sysList || []);
+        })
+        .catch(console.error);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (preset) {
@@ -37,6 +52,8 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
       setDefaultMessage(preset.defaultMessage || '');
       setSeverity(preset.severity || 'CRITICAL');
       setCodeType(preset.codeType || 'CODE_BLUE_IT');
+      setTargetSystemId(preset.targetSystemId || '');
+      setAutoSetSystemStatus(preset.autoSetSystemStatus || 'Down');
     }
   }, [preset, isOpen]);
 
@@ -58,6 +75,8 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
     setErrorMessage(null);
 
     try {
+      const selectedSys = availableSystems.find((s) => s.id === targetSystemId);
+
       const updated: QuickTriggerPreset = {
         id: preset.id,
         codeType,
@@ -67,6 +86,9 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
         defaultTitle: defaultTitle.trim(),
         defaultMessage: defaultMessage.trim(),
         severity,
+        targetSystemId: targetSystemId || undefined,
+        targetSystemName: selectedSys?.systemName || undefined,
+        autoSetSystemStatus: targetSystemId ? autoSetSystemStatus : undefined,
       };
 
       await emergencyService.saveQuickTrigger(updated, currentUser);
@@ -91,6 +113,8 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
       setDefaultMessage(defaultItem.defaultMessage);
       setSeverity(defaultItem.severity);
       setCodeType(defaultItem.codeType);
+      setTargetSystemId(defaultItem.targetSystemId || '');
+      setAutoSetSystemStatus(defaultItem.autoSetSystemStatus || 'Down');
     }
   };
 
@@ -157,33 +181,47 @@ export const EditQuickTriggerModal: React.FC<EditQuickTriggerModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Code Type Classification</label>
-              <select
-                value={codeType}
-                onChange={(e: any) => setCodeType(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none"
-              >
-                <option value="CODE_BLUE_IT">Code Blue IT</option>
-                <option value="EHR_DOWNTIME">EHR Downtime</option>
-                <option value="CODE_RED_NETWORK">Network / PACS Outage</option>
-                <option value="CYBER_LOCKDOWN">Cyber Lockdown</option>
-                <option value="GENERAL_EMERGENCY">General Emergency</option>
-              </select>
+          {/* Tied Hospital System & Instant Downtime Automation */}
+          <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+              <Server className="w-4 h-4 text-amber-400" />
+              <span>Tied Hospital System (Instant Status Sync)</span>
             </div>
+            <p className="text-[11px] text-slate-400">
+              When this emergency trigger is activated, HITOMS will immediately update this system's status in the Hospital Systems module and alert clinical wards.
+            </p>
 
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Broadcast Severity</label>
-              <select
-                value={severity}
-                onChange={(e: any) => setSeverity(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none"
-              >
-                <option value="CRITICAL">CRITICAL (Red Siren)</option>
-                <option value="HIGH">HIGH (Amber Banner)</option>
-                <option value="WARNING">WARNING (Sky Blue Banner)</option>
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Tied Target System</label>
+                <select
+                  value={targetSystemId}
+                  onChange={(e) => setTargetSystemId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-amber-500 font-semibold"
+                >
+                  <option value="">-- No Tied System (General Alert) --</option>
+                  {availableSystems.map((sys) => (
+                    <option key={sys.id} value={sys.id}>
+                      {sys.systemName} ({sys.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Auto-Set System Status To</label>
+                <select
+                  value={autoSetSystemStatus}
+                  onChange={(e: any) => setAutoSetSystemStatus(e.target.value)}
+                  disabled={!targetSystemId}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-rose-400 text-xs font-bold focus:outline-none disabled:opacity-50"
+                >
+                  <option value="Down">Down (Immediate Outage)</option>
+                  <option value="Degraded">Degraded (Partial Service)</option>
+                  <option value="Maintenance">Maintenance (Scheduled Window)</option>
+                  <option value="Offline">Offline</option>
+                </select>
+              </div>
             </div>
           </div>
 

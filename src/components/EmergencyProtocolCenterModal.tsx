@@ -18,10 +18,14 @@ import {
   ShieldCheck,
   Edit3,
   Settings,
+  Server,
+  Gauge,
+  Zap,
 } from 'lucide-react';
 import { type EmergencyBroadcastAlert, type User, type Asset, type SystemSettings } from '../types';
 import { emergencyService, type QuickTriggerPreset, DEFAULT_QUICK_TRIGGERS } from '../services/emergencyService';
 import { authService } from '../services/authService';
+import { settingsService } from '../services/settingsService';
 import { EditQuickTriggerModal } from './EditQuickTriggerModal';
 
 interface EmergencyProtocolCenterModalProps {
@@ -45,14 +49,21 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
 }) => {
   if (!isOpen) return null;
 
-  const [activeTab, setActiveTab] = useState<'TRIGGERS' | 'BROADCAST' | 'PRINT_PACK' | 'HISTORY'>('TRIGGERS');
+  const [activeTab, setActiveTab] = useState<'TRIGGERS' | 'BROADCAST' | 'SPEED_SETTINGS' | 'PRINT_PACK'>('TRIGGERS');
 
   // Quick Triggers Preset State
   const [quickTriggers, setQuickTriggers] = useState<QuickTriggerPreset[]>(DEFAULT_QUICK_TRIGGERS);
   const [editingTrigger, setEditingTrigger] = useState<QuickTriggerPreset | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // Marquee Speed State (Controlled by Super Admin / IT)
+  const [broadcastSpeed, setBroadcastSpeed] = useState<number>(
+    systemSettings?.emergencyBroadcastSpeedSeconds || 22
+  );
+  const [speedSavedSuccess, setSpeedSavedSuccess] = useState(false);
+
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const loadQuickTriggers = async () => {
     const loaded = await emergencyService.getQuickTriggers();
@@ -62,8 +73,28 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
   useEffect(() => {
     if (isOpen) {
       loadQuickTriggers();
+      if (systemSettings?.emergencyBroadcastSpeedSeconds) {
+        setBroadcastSpeed(systemSettings.emergencyBroadcastSpeedSeconds);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, systemSettings]);
+
+  // Save Broadcast Marquee Speed
+  const handleSaveSpeed = async (newSpeed: number) => {
+    setBroadcastSpeed(newSpeed);
+    if (!currentUser) return;
+    try {
+      await settingsService.updateSettings(
+        { emergencyBroadcastSpeedSeconds: newSpeed },
+        currentUser
+      );
+      setSpeedSavedSuccess(true);
+      setTimeout(() => setSpeedSavedSuccess(false), 2500);
+      onRefresh();
+    } catch (e) {
+      console.error('Failed to update emergency broadcast speed:', e);
+    }
+  };
 
   // Custom Broadcast Form State
   const [codeType, setCodeType] = useState<EmergencyBroadcastAlert['codeType']>('CODE_BLUE_IT');
@@ -75,23 +106,21 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
 
   const activeAlerts = alerts.filter((a) => a.isActive);
 
-  // Trigger quick broadcast
-  const handleQuickTrigger = async (
-    type: EmergencyBroadcastAlert['codeType'],
-    defaultTitle: string,
-    defaultMsg: string,
-    sev: 'CRITICAL' | 'HIGH' | 'WARNING' = 'CRITICAL'
-  ) => {
+  // Trigger quick broadcast with immediate system downtime integration
+  const handleQuickTrigger = async (trig: QuickTriggerPreset) => {
     if (!currentUser) return;
     setIsSubmitting(true);
     try {
       await emergencyService.createBroadcast(
         {
-          codeType: type,
-          title: defaultTitle,
-          message: defaultMsg,
-          severity: sev,
+          codeType: trig.codeType,
+          title: trig.defaultTitle,
+          message: trig.defaultMessage,
+          severity: trig.severity,
           targetUnits: [targetUnit],
+          targetSystemId: trig.targetSystemId,
+          targetSystemName: trig.targetSystemName,
+          autoSetSystemStatus: trig.autoSetSystemStatus || 'Down',
         },
         currentUser
       );
@@ -344,6 +373,18 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
             <Printer className="w-4 h-4 text-sky-400" />
             <span>Offline Disaster Recovery Pack</span>
           </button>
+
+          {isSuperAdminOrIT && (
+            <button
+              onClick={() => setActiveTab('SPEED_SETTINGS')}
+              className={`py-3 px-4 flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                activeTab === 'SPEED_SETTINGS' ? 'border-purple-500 text-purple-400 bg-purple-950/20' : 'border-transparent text-slate-400 hover:text-white'
+              }`}
+            >
+              <Gauge className="w-4 h-4 text-purple-400" />
+              <span>Badge Text Speed</span>
+            </button>
+          )}
         </div>
 
         {/* Content Area */}
@@ -436,17 +477,34 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
 
                       <p className="text-xs text-slate-300 leading-relaxed">{trig.description}</p>
 
+                      {/* Tied Hospital System info */}
+                      {trig.targetSystemName ? (
+                        <div className="flex items-center justify-between text-[11px] bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-lg">
+                          <span className="flex items-center gap-1.5 text-slate-400 font-semibold">
+                            <Server className="w-3.5 h-3.5 text-sky-400" />
+                            <span>Tied System:</span>
+                          </span>
+                          <span className="font-extrabold text-sky-300 flex items-center gap-1.5">
+                            <span>{trig.targetSystemName}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-600/30 text-rose-300 border border-rose-500/40 uppercase">
+                              Sets &rarr; {trig.autoSetSystemStatus || 'Down'}
+                            </span>
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between text-[11px] bg-slate-900/60 border border-slate-800 px-2.5 py-1.5 rounded-lg text-slate-400">
+                          <span className="flex items-center gap-1.5">
+                            <Server className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Tied System:</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">None configured</span>
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         disabled={isSubmitting}
-                        onClick={() =>
-                          handleQuickTrigger(
-                            trig.codeType,
-                            trig.defaultTitle,
-                            trig.defaultMessage,
-                            trig.severity
-                          )
-                        }
+                        onClick={() => handleQuickTrigger(trig)}
                         className={`w-full py-2.5 px-4 ${colorStyles.btn} disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg`}
                       >
                         <Radio className="w-4 h-4 animate-pulse" />
@@ -633,6 +691,88 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
                     Includes static IP addresses, rack locations, and serial numbers of all registered core switches, routers, and PACS servers for manual console restoration.
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'SPEED_SETTINGS' && (
+            <div className="space-y-6">
+              <div className="p-5 rounded-2xl bg-purple-950/40 border border-purple-800/80 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-md">
+                    <Gauge className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white text-sm">Emergency Broadcast Badge Text Motion Speed</h3>
+                    <p className="text-xs text-purple-200/80">
+                      Super Admin Master Control: Adjust how fast the emergency ticker text loops from left to right across ward workstations and hospital monitors.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Active speed indicator */}
+                <div className="flex items-center justify-between bg-slate-900/80 border border-slate-700/80 p-3 rounded-xl">
+                  <span className="text-xs text-slate-300 font-semibold">Active Marquee Duration:</span>
+                  <span className="px-3 py-1 rounded-lg bg-purple-600 text-white text-xs font-mono font-bold">
+                    {broadcastSpeed}s per loop {broadcastSpeed <= 10 ? '(Rapid)' : broadcastSpeed <= 18 ? '(Fast)' : broadcastSpeed <= 28 ? '(Normal)' : '(Slow)'}
+                  </span>
+                </div>
+
+                {/* Speed Presets */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Pacing Presets</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {[
+                      { label: 'Rapid (8s)', val: 8 },
+                      { label: 'Fast (14s)', val: 14 },
+                      { label: 'Normal (22s)', val: 22 },
+                      { label: 'Slow (32s)', val: 32 },
+                      { label: 'Relaxed (45s)', val: 45 },
+                    ].map((p) => (
+                      <button
+                        key={p.val}
+                        type="button"
+                        onClick={() => handleSaveSpeed(p.val)}
+                        className={`py-2 px-3 rounded-xl font-bold text-xs transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                          broadcastSpeed === p.val
+                            ? 'bg-purple-600 text-white shadow-md border border-purple-400'
+                            : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        <span>{p.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-semibold">Live Speed Slider:</span>
+                    <span className="font-mono text-purple-300 font-bold">{broadcastSpeed} seconds</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="4"
+                    max="60"
+                    step="1"
+                    value={broadcastSpeed}
+                    onChange={(e) => handleSaveSpeed(parseInt(e.target.value, 10))}
+                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                    <span>4s (Extremely Fast)</span>
+                    <span>22s (Standard Default)</span>
+                    <span>60s (Slow Motion)</span>
+                  </div>
+                </div>
+
+                {speedSavedSuccess && (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Emergency broadcast marquee speed updated and broadcasted to all client screens!</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

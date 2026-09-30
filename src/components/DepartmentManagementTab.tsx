@@ -109,6 +109,14 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
         console.error('Failed to load users for HOD dropdown:', err);
         if (allUsers && allUsers.length > 0) setLoadedUsers(allUsers);
       });
+
+    const handleDeptsUpdated = () => {
+      loadDepartments();
+    };
+    window.addEventListener('hitoms_departments_updated', handleDeptsUpdated);
+    return () => {
+      window.removeEventListener('hitoms_departments_updated', handleDeptsUpdated);
+    };
   }, [allUsers]);
 
   const openAddModal = () => {

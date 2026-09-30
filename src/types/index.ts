@@ -805,6 +805,7 @@ export interface SystemSettings {
   ringToneDurationSeconds?: number; // How long audible alarm/chime sounds (e.g. 3, 5, 10, 15, 30, 60 seconds; default: 5)
   intervalVisibleRoles?: Role[]; // User roles permitted to view ticket turnaround time intervals (controlled by Super Admin / IT)
   emergencyReNotificationMinutes?: number; // How often emergency broadcasts re-alert unacknowledged terminals (default: 15)
+  emergencyBroadcastSpeedSeconds?: number; // Speed of text motion on emergency broadcast badge in seconds (e.g. 10 to 60; default: 22)
   officerMonthlySpecialties?: OfficerMonthlySpecialty[]; // Auto-assignment specialty roster per month
   customTexts?: Record<string, string>;
   rolePermissionsOverrides?: Record<string, string[]>;
@@ -828,6 +829,9 @@ export interface EmergencyBroadcastAlert {
   message: string;
   severity: 'CRITICAL' | 'HIGH' | 'WARNING';
   targetUnits: string[]; // ['ALL'] or specific departments
+  targetSystemId?: string; // Tied Hospital System ID (e.g. 'sys-lhims')
+  targetSystemName?: string;
+  previousSystemStatus?: SystemOperationalStatus; // To restore when resolved
   issuedBy: {
     uid: string;
     name: string;

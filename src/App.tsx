@@ -260,6 +260,16 @@ export default function App() {
     };
     window.addEventListener('hitoms_data_synced', handleDataSynced);
 
+    const handleSystemsUpdated = () => {
+      getAllFromStore<HospitalSystem>('hospitalSystems').then((sys) => {
+        if (sys && sys.length > 0) {
+          setHospitalSystems(sys);
+        }
+      });
+      refreshAllData();
+    };
+    window.addEventListener('hitoms_systems_updated', handleSystemsUpdated);
+
     return () => {
       isMounted = false;
       ticketSoundService.stopRecurringBellMonitor();
@@ -267,6 +277,7 @@ export default function App() {
       window.removeEventListener('hitoms_settings_updated', handleSettingsUpdated);
       window.removeEventListener('hitoms_users_synced', handleUsersSynced);
       window.removeEventListener('hitoms_data_synced', handleDataSynced);
+      window.removeEventListener('hitoms_systems_updated', handleSystemsUpdated);
     };
   }, [refreshAllData]);
 
@@ -444,6 +455,7 @@ export default function App() {
       <EmergencyBroadcastBanner
         alerts={emergencyAlerts}
         currentUser={currentUser}
+        systemSettings={systemSettings}
         onRefresh={refreshAllData}
         onOpenEmergencyCenter={() => setEmergencyModalOpen(true)}
       />

@@ -1687,7 +1687,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
               {/* Live Preview Box */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Live Memo Letterhead Preview:
+                  Live Memo Table Preview:
                 </label>
                 <div
                   className="p-4 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-inner"

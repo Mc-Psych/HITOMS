@@ -1,6 +1,7 @@
-import { type EmergencyBroadcastAlert, type User } from '../types';
+import { type EmergencyBroadcastAlert, type User, type HospitalSystem, type SystemOperationalStatus } from '../types';
 import {
   getAllFromStore,
+  getFromStore,
   putToStore,
   STORE_NAMES,
   generateUUID,
@@ -8,6 +9,7 @@ import {
 import { auditService } from './auditService';
 import { notificationService } from './notificationService';
 import { systemNotificationRingService } from './ticketSoundService';
+import { syncService } from './syncService';
 
 export interface QuickTriggerPreset {
   id: string; // 'CODE_BLUE_IT', 'EHR_DOWNTIME', 'CODE_RED_NETWORK', 'CYBER_LOCKDOWN'
@@ -18,9 +20,25 @@ export interface QuickTriggerPreset {
   defaultTitle: string;
   defaultMessage: string;
   severity: 'CRITICAL' | 'HIGH' | 'WARNING';
+  targetSystemId?: string; // Tied Hospital System ID (e.g. 'sys-lhims')
+  targetSystemName?: string; // Display name of tied system
+  autoSetSystemStatus?: SystemOperationalStatus; // Status to set immediately (defaults to 'Down')
 }
 
 export const DEFAULT_QUICK_TRIGGERS: QuickTriggerPreset[] = [
+  {
+    id: 'EHR_DOWNTIME',
+    codeType: 'EHR_DOWNTIME',
+    badgeTitle: 'LHIMS DOWNTIME',
+    subTitle: 'Offline Paper Chart Protocol',
+    description: 'Notifies all clinical ward staff to switch to offline paper patient chart logging procedures due to unexpected LHIMS Electronic Health Record outage.',
+    defaultTitle: '🚨 LHIMS DOWNTIME PROTOCOL ACTIVE: Switch to Paper Charts',
+    defaultMessage: 'LHIMS (Hospital Information Management System) is currently experiencing unexpected downtime. All ward and clinical staff must switch to physical downtime paper charts immediately.',
+    severity: 'CRITICAL',
+    targetSystemId: 'sys-lhims',
+    targetSystemName: 'LHIMS (Hospital Information Management System)',
+    autoSetSystemStatus: 'Down',
+  },
   {
     id: 'CODE_BLUE_IT',
     codeType: 'CODE_BLUE_IT',
@@ -30,36 +48,35 @@ export const DEFAULT_QUICK_TRIGGERS: QuickTriggerPreset[] = [
     defaultTitle: '🚨 CODE BLUE IT: Rapid Response Dispatched to ICU / ER',
     defaultMessage: 'Critical patient monitoring or surgical telemetry system issue reported. On-call IT engineer dispatched immediately.',
     severity: 'CRITICAL',
-  },
-  {
-    id: 'EHR_DOWNTIME',
-    codeType: 'EHR_DOWNTIME',
-    badgeTitle: 'EHR DOWNTIME',
-    subTitle: 'Paper Chart Protocol',
-    description: 'Notifies all ward staff to switch to offline paper patient chart logging procedures due to unexpected Electronic Health Record database outage.',
-    defaultTitle: '🟧 EHR DOWNTIME PROTOCOL ACTIVE: Switch to Paper Charts',
-    defaultMessage: 'Electronic Health Record database is undergoing emergency maintenance. Clinical ward staff must switch to offline paper logging procedures.',
-    severity: 'HIGH',
+    targetSystemId: 'sys-quixmo',
+    targetSystemName: 'Quixmo Pharmacy & Ward Telemetry Suite',
+    autoSetSystemStatus: 'Down',
   },
   {
     id: 'CODE_RED_NETWORK',
     codeType: 'CODE_RED_NETWORK',
-    badgeTitle: 'PACS / NETWORK OUTAGE',
-    subTitle: 'Radiology Gateway',
-    description: 'Alerts Radiology and ER departments of imaging gateway or core fiber switch failure, redirecting CT/MRI scans to local USB image stores.',
-    defaultTitle: '⚠️ PACS Imaging Gateway Network Degradation',
-    defaultMessage: 'Radiology PACS server link degraded. Use local DICOM viewer storage for urgent CT / Ultrasound imaging.',
+    badgeTitle: 'NETWORK / PACS OUTAGE',
+    subTitle: 'Starlink & Gateway Outage',
+    description: 'Alerts hospital departments of core network or internet gateway outage, isolating critical LAN systems.',
+    defaultTitle: '⚠️ STARLINK NETWORK OUTAGE: Core Gateway Down',
+    defaultMessage: 'Core network uplink / Starlink gateway is down. Offline LAN operations active.',
     severity: 'HIGH',
+    targetSystemId: 'sys-starlink',
+    targetSystemName: 'Starlink High-Performance Gateway',
+    autoSetSystemStatus: 'Down',
   },
   {
     id: 'CYBER_LOCKDOWN',
     codeType: 'CYBER_LOCKDOWN',
     badgeTitle: 'CYBER LOCKDOWN',
     subTitle: 'Security Isolation',
-    description: 'Isolates non-essential subnet VLANs in response to suspected ransomware or unauthorized external network access attempts.',
+    description: 'Isolates non-essential subnet VLANs and financial gateways in response to suspected ransomware or security incidents.',
     defaultTitle: '🔒 CYBERSECURITY ISOLATION LOCKDOWN IN EFFECT',
     defaultMessage: 'Precautionary VLAN isolation active. Disconnect non-critical external USB devices and log out of external web portals.',
     severity: 'CRITICAL',
+    targetSystemId: 'sys-quickbooks',
+    targetSystemName: 'QuickBooks Enterprise',
+    autoSetSystemStatus: 'Down',
   },
 ];
 
@@ -81,9 +98,106 @@ class EmergencyService {
       message: string;
       severity: 'CRITICAL' | 'HIGH' | 'WARNING';
       targetUnits?: string[];
+      targetSystemId?: string;
+      targetSystemName?: string;
+      autoSetSystemStatus?: SystemOperationalStatus;
     },
     user: User
   ): Promise<EmergencyBroadcastAlert> {
+    // 1. Resolve tied system if not directly supplied
+    let systemIdToUpdate = data.targetSystemId;
+    let targetSystemName: string | undefined;
+    let autoStatus: SystemOperationalStatus = data.autoSetSystemStatus || 'Down';
+    let previousStatus: SystemOperationalStatus | undefined;
+
+    if (!systemIdToUpdate) {
+      const presets = await this.getQuickTriggers();
+      const match = presets.find((p) => p.codeType === data.codeType || data.title.toLowerCase().includes(p.badgeTitle.toLowerCase()));
+      if (match?.targetSystemId) {
+        systemIdToUpdate = match.targetSystemId;
+        targetSystemName = match.targetSystemName;
+        if (match.autoSetSystemStatus) {
+          autoStatus = match.autoSetSystemStatus;
+        }
+      }
+    }
+
+    // 2. Fetch all hospital systems from store and match target system
+    try {
+      const allSystems = await getAllFromStore<HospitalSystem>('hospitalSystems');
+      let targetSys: HospitalSystem | undefined;
+
+      if (systemIdToUpdate) {
+        targetSys = allSystems.find((s) => s.id === systemIdToUpdate);
+      }
+
+      // Strong fallbacks for core emergency codes
+      if (!targetSys) {
+        if (
+          data.codeType === 'EHR_DOWNTIME' ||
+          data.title.toLowerCase().includes('lhims') ||
+          data.message.toLowerCase().includes('lhims')
+        ) {
+          targetSys = allSystems.find(
+            (s) => s.id === 'sys-lhims' || s.systemName.toLowerCase().includes('lhims')
+          );
+        } else if (
+          data.codeType === 'CODE_RED_NETWORK' ||
+          data.title.toLowerCase().includes('network') ||
+          data.title.toLowerCase().includes('starlink')
+        ) {
+          targetSys = allSystems.find(
+            (s) => s.id === 'sys-starlink' || s.systemName.toLowerCase().includes('starlink') || s.systemName.toLowerCase().includes('network')
+          );
+        } else if (data.codeType === 'CODE_BLUE_IT') {
+          targetSys = allSystems.find(
+            (s) => s.id === 'sys-quixmo' || s.systemName.toLowerCase().includes('quixmo') || s.systemName.toLowerCase().includes('telemetry')
+          );
+        } else if (data.codeType === 'CYBER_LOCKDOWN') {
+          targetSys = allSystems.find(
+            (s) => s.id === 'sys-quickbooks' || s.systemName.toLowerCase().includes('quickbooks')
+          );
+        }
+      }
+
+      if (targetSys) {
+        previousStatus = targetSys.status;
+        targetSystemName = targetSys.systemName;
+        systemIdToUpdate = targetSys.id;
+
+        const now = new Date().toISOString();
+        const updatedSys: HospitalSystem = {
+          ...targetSys,
+          status: autoStatus,
+          statusMessage: `🚨 EMERGENCY TRIGGER ACTIVE: ${data.title} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+          lastChecked: now,
+          updatedAt: now,
+          _syncStatus: 'PENDING_SYNC',
+        };
+
+        await putToStore('hospitalSystems', updatedSys);
+        await syncService.enqueueOperation('hospitalSystems', updatedSys.id, 'UPDATE', updatedSys);
+
+        await auditService.logAction(
+          'EMERGENCY_SYSTEM_STATUS_CHANGE',
+          'Hospital Systems',
+          updatedSys.id,
+          previousStatus,
+          `${updatedSys.systemName} status immediately updated to "${autoStatus}" by Emergency Trigger: ${data.title}`
+        );
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('hitoms_systems_updated', {
+              detail: { systemId: updatedSys.id, status: autoStatus, title: data.title },
+            })
+          );
+        }
+      }
+    } catch (err) {
+      console.error('[EmergencyService] Error immediately updating tied hospital system status:', err);
+    }
+
     const alert: EmergencyBroadcastAlert = {
       id: generateUUID(),
       codeType: data.codeType,
@@ -91,6 +205,9 @@ class EmergencyService {
       message: data.message,
       severity: data.severity,
       targetUnits: data.targetUnits && data.targetUnits.length > 0 ? data.targetUnits : ['ALL'],
+      targetSystemId: systemIdToUpdate,
+      targetSystemName,
+      previousSystemStatus: previousStatus,
       issuedBy: {
         uid: user.id,
         name: user.fullName,
@@ -120,7 +237,7 @@ class EmergencyService {
       'EMERGENCY',
       alert.id,
       null,
-      { codeType: data.codeType, title: data.title, message: data.message }
+      { codeType: data.codeType, title: data.title, message: data.message, tiedSystem: targetSystemName || 'None' }
     );
 
     // Also push a high priority notification
@@ -164,12 +281,53 @@ class EmergencyService {
         target.isActive = false;
         await putToStore(STORE_NAMES.emergencyBroadcasts, target);
 
+        // If this alert was tied to a hospital system, restore its status!
+        if (target.targetSystemId) {
+          try {
+            const allSystems = await getAllFromStore<HospitalSystem>('hospitalSystems');
+            const tiedSys = allSystems.find((s) => s.id === target.targetSystemId);
+            if (tiedSys) {
+              const now = new Date().toISOString();
+              const restoredStatus: SystemOperationalStatus = target.previousSystemStatus || 'Operational';
+              const restoredSys: HospitalSystem = {
+                ...tiedSys,
+                status: restoredStatus,
+                statusMessage: undefined,
+                lastChecked: now,
+                updatedAt: now,
+                _syncStatus: 'PENDING_SYNC',
+              };
+
+              await putToStore('hospitalSystems', restoredSys);
+              await syncService.enqueueOperation('hospitalSystems', restoredSys.id, 'UPDATE', restoredSys);
+
+              await auditService.logAction(
+                'RESTORE_SYSTEM_STATUS_EMERGENCY_RESOLVED',
+                'Hospital Systems',
+                restoredSys.id,
+                tiedSys.status,
+                `${restoredSys.systemName} status restored to "${restoredStatus}" upon resolving emergency alert ${target.title}`
+              );
+
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('hitoms_systems_updated', {
+                    detail: { systemId: restoredSys.id, status: restoredStatus, restored: true },
+                  })
+                );
+              }
+            }
+          } catch (e) {
+            console.error('[EmergencyService] Failed to restore tied system status on resolve:', e);
+          }
+        }
+
         await auditService.logAction(
           'EMERGENCY_BROADCAST_RESOLVED',
           'EMERGENCY',
           alertId,
           { isActive: true },
-          { isActive: false }
+          { isActive: false, tiedSystem: target.targetSystemName || 'None' }
         );
       }
     } catch (err) {
@@ -183,7 +341,17 @@ class EmergencyService {
       const settings = await getAllFromStore<any>(STORE_NAMES.settings);
       const record = settings.find((s) => s.id === 'emergency_quick_triggers');
       if (record && Array.isArray(record.triggers) && record.triggers.length > 0) {
-        return record.triggers;
+        return record.triggers.map((t: QuickTriggerPreset) => {
+          const defaultMatch = DEFAULT_QUICK_TRIGGERS.find(
+            (d) => d.id === t.id || d.codeType === t.codeType
+          );
+          return {
+            ...t,
+            targetSystemId: t.targetSystemId || defaultMatch?.targetSystemId,
+            targetSystemName: t.targetSystemName || defaultMatch?.targetSystemName,
+            autoSetSystemStatus: t.autoSetSystemStatus || defaultMatch?.autoSetSystemStatus || 'Down',
+          };
+        });
       }
       return DEFAULT_QUICK_TRIGGERS;
     } catch (err) {
