@@ -30,6 +30,8 @@ import {
   ListTodo,
   Check,
   RotateCcw,
+  Eye,
+  Edit3,
 } from 'lucide-react';
 import {
   type HospitalMemo,
@@ -145,6 +147,189 @@ const PRESET_TOPICS = [
     notes: 'Total tickets logged: 148. Average response 14 mins. Thermal barcode printers in pharmacy need roller replacements. Preventive maintenance completed on 100% of ICU terminals.',
   },
 ];
+
+const renderFormattedCellText = (cellText: string) => {
+  const trimmed = cellText.trim();
+  if (!trimmed || trimmed === '-') return <span className="text-slate-400 dark:text-slate-500">-</span>;
+  const parts = trimmed.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return (
+            <strong key={index} className="font-bold text-slate-950 dark:text-white">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return (
+            <em key={index} className="italic text-slate-800 dark:text-slate-200">
+              {part.slice(1, -1)}
+            </em>
+          );
+        }
+        return part;
+      })}
+    </>
+  );
+};
+
+const hasMarkdownTable = (text: string): boolean => {
+  if (!text) return false;
+  return text.split('\n').some((line) => line.trim().startsWith('|') && line.trim().endsWith('|'));
+};
+
+const renderMemoContentWithTables = (
+  text: string,
+  onEditTable?: (headers: string[], alignments: ('left' | 'center' | 'right')[], rows: string[][]) => void
+) => {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentParagraphLines: string[] = [];
+  let inTable = false;
+  let tableRows: string[][] = [];
+  let tableKey = 0;
+
+  const renderCurrentParagraph = () => {
+    if (currentParagraphLines.length > 0) {
+      elements.push(
+        <p key={`p-${elements.length}`} className="whitespace-pre-line text-justify mb-4 leading-relaxed font-serif">
+          {currentParagraphLines.join('\n')}
+        </p>
+      );
+      currentParagraphLines = [];
+    }
+  };
+
+  const renderCurrentTable = () => {
+    if (tableRows.length > 0) {
+      const hasSeparator =
+        tableRows.length > 1 &&
+        tableRows[1].every((cell) => cell.trim().match(/^:?-+:?$/) || cell.trim() === '');
+
+      const headers = hasSeparator ? tableRows[0].map((c) => c.trim()) : [];
+      const separatorRow = hasSeparator ? tableRows[1] : [];
+      const rawDataRows = hasSeparator ? tableRows.slice(2) : tableRows;
+
+      const alignments: ('left' | 'center' | 'right')[] = separatorRow.map((sep) => {
+        const s = sep.trim();
+        if (s.startsWith(':') && s.endsWith(':')) return 'center';
+        if (s.endsWith(':')) return 'right';
+        return 'left';
+      });
+
+      const cleanDataRows = rawDataRows.map((r) => r.map((c) => c.trim()));
+
+      elements.push(
+        <div key={`table-container-${tableKey++}`} className="group relative my-4">
+          {onEditTable && headers.length > 0 && (
+            <div className="absolute right-2 -top-3 z-10 opacity-0 group-hover:opacity-100 transition">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditTable(headers, alignments, cleanDataRows);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-sans font-bold text-[10px] shadow-md transition cursor-pointer"
+                title="Edit this table in Hospital Document Table Builder"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>Edit Table in Builder</span>
+              </button>
+            </div>
+          )}
+          <div
+            className="p-4 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-inner"
+            style={{ fontFamily: "'Times New Roman', Times, serif" }}
+          >
+            <table className="min-w-full text-xs border-collapse">
+              {headers.length > 0 && (
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-300 dark:border-slate-700">
+                    {headers.map((h, i) => {
+                      const align = alignments[i] || 'left';
+                      const alignClass =
+                        align === 'center'
+                          ? 'text-center'
+                          : align === 'right'
+                          ? 'text-right'
+                          : 'text-left';
+                      return (
+                        <th
+                          key={i}
+                          className={`px-3 py-2 font-bold uppercase text-slate-900 dark:text-slate-100 border-r border-slate-300 dark:border-slate-700 last:border-r-0 ${alignClass}`}
+                        >
+                          {renderFormattedCellText(h || `Column ${i + 1}`)}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+              )}
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {cleanDataRows.map((row, rIdx) => (
+                  <tr
+                    key={rIdx}
+                    className={
+                      rIdx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/70 dark:bg-slate-800/40'
+                    }
+                  >
+                    {(headers.length > 0 ? headers : row).map((_, cIdx) => {
+                      const align = alignments[cIdx] || 'left';
+                      const alignClass =
+                        align === 'center'
+                          ? 'text-center'
+                          : align === 'right'
+                          ? 'text-right'
+                          : 'text-left';
+                      return (
+                        <td
+                          key={cIdx}
+                          className={`px-3 py-1.5 text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-800 last:border-r-0 ${alignClass}`}
+                        >
+                          {renderFormattedCellText(row[cIdx] || '-')}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+      tableRows = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isTableLine = line.trim().startsWith('|') && line.trim().endsWith('|');
+
+    if (isTableLine) {
+      renderCurrentParagraph();
+      inTable = true;
+      const cells = line.split('|').slice(1, -1);
+      tableRows.push(cells);
+    } else {
+      if (inTable) {
+        renderCurrentTable();
+        inTable = false;
+      }
+      currentParagraphLines.push(line);
+    }
+  }
+
+  renderCurrentParagraph();
+  if (inTable) {
+    renderCurrentTable();
+  }
+
+  return elements;
+};
 
 export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
   isOpen,
@@ -359,6 +544,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
 
   // Table Builder State
   const [isTableBuilderOpen, setIsTableBuilderOpen] = useState(false);
+  const [bodyViewMode, setBodyViewMode] = useState<'FORMATTED' | 'EDIT'>('FORMATTED');
   const [selectedPresetId, setSelectedPresetId] = useState('financial');
   const [tableHeaders, setTableHeaders] = useState<string[]>(['Item Description', 'Qty', 'Unit Cost (GH₵)', 'Total Cost (GH₵)', 'Target Department']);
   const [tableAlignments, setTableAlignments] = useState<('left' | 'center' | 'right')[]>(['left', 'center', 'right', 'right', 'left']);
@@ -367,6 +553,18 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
     ['Dell OptiPlex Core i7 Desktop Units', '3', 'GH₵ 8,200.00', 'GH₵ 24,600.00', 'Pharmacy & OPD'],
     ['Zebra Barcode Wristband Printer', '2', 'GH₵ 3,100.00', 'GH₵ 6,200.00', 'Accident & Emergency'],
   ]);
+
+  const handleOpenEditTable = (
+    headers: string[],
+    alignments: ('left' | 'center' | 'right')[],
+    rows: string[][]
+  ) => {
+    setSelectedPresetId('custom');
+    setTableHeaders(headers);
+    setTableAlignments(alignments);
+    setTableRows(rows);
+    setIsTableBuilderOpen(true);
+  };
 
   const handleApplyTablePreset = (preset: typeof TABLE_PRESETS[0]) => {
     setSelectedPresetId(preset.id);
@@ -437,6 +635,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
 
     const markdownTable = `\n\n${headerLine}\n${separatorLine}\n${dataLines.join('\n')}\n\n`;
     setExecutiveSummary(prev => (prev ? `${prev.trimEnd()}${markdownTable}` : markdownTable.trim()));
+    setBodyViewMode('FORMATTED');
     setIsTableBuilderOpen(false);
   };
   const [generationSuccess, setGenerationSuccess] = useState(false);
@@ -1019,30 +1218,94 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                     </div>
 
                     {/* Body Content */}
-                    <div className="space-y-4 text-xs sm:text-sm text-left">
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between pb-1">
+                    <div className="space-y-3 text-xs sm:text-sm text-left">
+                      <div className="flex items-center justify-between pb-1 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
                           <label className="block text-[10px] font-sans font-bold text-slate-400 uppercase tracking-wider">
                             Document Body / Content *
                           </label>
-                          <button
-                            type="button"
-                            onClick={() => setIsTableBuilderOpen(true)}
-                            className="flex items-center gap-1.5 text-[10px] font-sans font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-lg transition border border-sky-200 dark:border-sky-800 cursor-pointer shadow-3xs"
-                            title="Open interactive visual table builder and presets"
-                          >
-                            <Table className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                            <span>Insert Table Builder</span>
-                          </button>
+                          {/* Formatted Sheet vs Edit Text Toggle */}
+                          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-sans">
+                            <button
+                              type="button"
+                              onClick={() => setBodyViewMode('FORMATTED')}
+                              className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                                bodyViewMode === 'FORMATTED'
+                                  ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-2xs'
+                                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                              }`}
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Formatted Sheet</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBodyViewMode('EDIT')}
+                              className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                                bodyViewMode === 'EDIT'
+                                  ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-2xs'
+                                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                              }`}
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              <span>Edit Text</span>
+                            </button>
+                          </div>
                         </div>
-                        <textarea
-                          value={executiveSummary}
-                          onChange={(e) => setExecutiveSummary(e.target.value)}
-                          placeholder="Write the primary memorandum directives or content body here... You can insert beautiful markdown tables typing '| Header 1 | Header 2 |' or clicking the helper button above!"
-                          rows={16}
-                          className="w-full bg-transparent hover:bg-slate-50 focus:bg-slate-50 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded p-2 focus:outline-none font-serif text-xs sm:text-sm leading-relaxed text-slate-900 text-justify resize-y"
-                        />
+
+                        <button
+                          type="button"
+                          onClick={() => setIsTableBuilderOpen(true)}
+                          className="flex items-center gap-1.5 text-[10px] font-sans font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-lg transition border border-sky-200 dark:border-sky-800 cursor-pointer shadow-3xs"
+                          title="Open interactive visual table builder and presets"
+                        >
+                          <Table className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                          <span>Insert Table Builder</span>
+                        </button>
                       </div>
+
+                      {bodyViewMode === 'FORMATTED' ? (
+                        <div
+                          className="min-h-[160px] p-3 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 hover:border-slate-300 transition cursor-text bg-white dark:bg-slate-950/40"
+                          onClick={() => {
+                            if (!executiveSummary.trim()) setBodyViewMode('EDIT');
+                          }}
+                        >
+                          {executiveSummary.trim() ? (
+                            renderMemoContentWithTables(executiveSummary, handleOpenEditTable)
+                          ) : (
+                            <p className="text-slate-400 italic text-xs font-serif">
+                              Document body is currently empty. Click "Insert Table Builder" above or click here to write memo directives...
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <textarea
+                            value={executiveSummary}
+                            onChange={(e) => setExecutiveSummary(e.target.value)}
+                            placeholder="Write the primary memorandum directives or content body here... You can insert beautiful markdown tables typing '| Header 1 | Header 2 |' or clicking the helper button above!"
+                            rows={14}
+                            className="w-full bg-transparent hover:bg-slate-50 focus:bg-slate-50 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded p-2 focus:outline-none font-serif text-xs sm:text-sm leading-relaxed text-slate-900 text-justify resize-y"
+                          />
+                          {hasMarkdownTable(executiveSummary) && (
+                            <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                              <div className="flex items-center justify-between text-[10px] font-sans font-bold text-slate-400 uppercase tracking-wider">
+                                <span>Live Memo Table Preview:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setBodyViewMode('FORMATTED')}
+                                  className="text-sky-600 hover:underline cursor-pointer flex items-center gap-1"
+                                >
+                                  <span>View in Formatted Sheet</span>
+                                  <span>&rarr;</span>
+                                </button>
+                              </div>
+                              {renderMemoContentWithTables(executiveSummary, handleOpenEditTable)}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Officer Sign Block */}
@@ -1165,6 +1428,15 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                       placeholder="Write the primary memorandum directives or content body here... You can use markdown and tables too!"
                       className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-serif leading-relaxed resize-y"
                     />
+                    {hasMarkdownTable(executiveSummary) && (
+                      <div className="space-y-1.5 pt-2">
+                        <div className="flex items-center justify-between text-[10px] font-sans font-bold text-slate-400 uppercase tracking-wider">
+                          <span>Live Memo Table Preview:</span>
+                          <span className="text-sky-600 font-semibold">100% Matching Layout & Design</span>
+                        </div>
+                        {renderMemoContentWithTables(executiveSummary, handleOpenEditTable)}
+                      </div>
+                    )}
                   </div>
 
                   {/* Action Checklist */}
