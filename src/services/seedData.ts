@@ -84,11 +84,36 @@ export async function purgeAllPastUsersAndDepartments(): Promise<void> {
 
 export async function syncLatestStaffAccounts(): Promise<User[]> {
   try {
-    const existingUsers = await getAllFromStore<User>('users');
-    for (const u of existingUsers) {
-      const isSuperAdmin = u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
-      if (!isSuperAdmin) {
-        await deleteFromStore('users', u.id);
+    if (isFirebaseConfigured() && firebaseClients.firestore) {
+      console.log('[SeedData] Syncing latest staff accounts from Firestore...');
+      const db = firebaseClients.firestore;
+      const usersRef = collection(db, 'users');
+      // Fetch with timeout to prevent hanging if offline or credentials are bad
+      const snap = await withTimeout(getDocs(usersRef), 4000).catch(() => null);
+
+      if (snap && !snap.empty) {
+        // Clear local non-super-admin users first to ensure we sync clean cloud state
+        const existingUsers = await getAllFromStore<User>('users');
+        for (const u of existingUsers) {
+          const isSuperAdmin = u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
+          if (!isSuperAdmin) {
+            await deleteFromStore('users', u.id);
+          }
+        }
+
+        const items: User[] = [];
+        snap.forEach((doc) => {
+          items.push({
+            ...doc.data(),
+            id: doc.id,
+            _syncStatus: 'SYNCED',
+            _lastSyncedAt: new Date().toISOString()
+          } as User);
+        });
+
+        if (items.length > 0) {
+          await putBatchToStore('users', items);
+        }
       }
     }
 
