@@ -297,9 +297,9 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   const users: User[] = [
     {
       id: 'usr-admin-001',
-      fullName: 'Courage Kekesi',
-      username: 'kay',
-      email: 'courage.kay@hospital.local',
+      fullName: 'Super Administrator',
+      username: 'admin',
+      email: 'admin@hospital.local',
       phone: '+233 24 100 0001',
       department: 'IT & Systems Administration',
       jobTitle: 'Chief Information Officer & Super Administrator',
@@ -309,7 +309,6 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
       updatedAt: now,
       lastLoginAt: now,
       offlineAccessAllowed: true,
-      password: '1234',
       _syncStatus: 'SYNCED',
       _syncVersion: 1,
       _lastSyncedAt: now,

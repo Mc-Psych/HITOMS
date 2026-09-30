@@ -744,6 +744,14 @@ class AuthService {
       };
 
       await putToStore('users', newUser);
+      
+      try {
+        const { syncService } = await import('./syncService');
+        await syncService.enqueueOperation('users', newUser.id, 'CREATE', newUser);
+      } catch (e) {
+        console.warn('[authService] Error enqueuing bulk created user to syncService:', e);
+      }
+
       existingEmails.add(email.toLowerCase());
       createdCount++;
 
@@ -885,6 +893,13 @@ class AuthService {
 
     await putToStore('users', newUser);
 
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('users', newUser.id, 'CREATE', newUser);
+    } catch (e) {
+      console.warn('[authService] Error enqueuing created user to syncService:', e);
+    }
+
     await auditService.logAction(
       'CREATE_USER',
       'Administration',
@@ -976,6 +991,13 @@ class AuthService {
 
     await putToStore('users', user);
 
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('users', user.id, 'UPDATE', user);
+    } catch (e) {
+      console.warn('[authService] Error enqueuing updated user to syncService:', e);
+    }
+
     if (this.currentUser && this.currentUser.id === userId) {
       this.currentUser = { ...user };
       this.notify();
@@ -1061,6 +1083,13 @@ class AuthService {
 
     await deleteFromStore('users', userId);
 
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('users', userId, 'DELETE', user);
+    } catch (e) {
+      console.warn('[authService] Error enqueuing deleted user to syncService:', e);
+    }
+
     // Clean up any permission overrides
     try {
       const stored = localStorage.getItem(USER_PERMS_KEY);
@@ -1115,6 +1144,14 @@ class AuthService {
       }
 
       await deleteFromStore('users', id);
+
+      try {
+        const { syncService } = await import('./syncService');
+        await syncService.enqueueOperation('users', id, 'DELETE', user);
+      } catch (e) {
+        console.warn('[authService] Error enqueuing bulk deleted user to syncService:', e);
+      }
+
       deletedCount++;
     }
 

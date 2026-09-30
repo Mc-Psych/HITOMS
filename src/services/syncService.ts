@@ -307,6 +307,10 @@ class SyncService {
           if (!localItem || !localItem.id) continue;
           if (storeName === 'settings') continue; // Never delete settings from local store via sync pull reconciliation!
           if (!remoteDocIds.has(localItem.id)) {
+            // Never delete local-only/un-synced items that only exist in local database
+            const isLocalOnly = localItem._syncStatus === 'LOCAL_ONLY' || localItem._syncStatus === 'PENDING_SYNC' || !localItem._lastSyncedAt;
+            if (isLocalOnly) continue;
+
             // Do not delete if the item has a pending local CREATE mutation
             const hasPendingCreate = queue.some(
               (q) => q.entityType === storeName && q.entityId === localItem.id && q.operation === 'CREATE'
