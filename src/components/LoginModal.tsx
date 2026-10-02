@@ -236,12 +236,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
                   Quick Terminal Profiles (Click to prefill)
                 </span>
-                {isRefreshingStaff && (
-                  <span className="flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400 font-mono">
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                    <span>Auto-syncing...</span>
-                  </span>
-                )}
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
