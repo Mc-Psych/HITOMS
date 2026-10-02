@@ -270,14 +270,40 @@ export default function App() {
     };
     window.addEventListener('hitoms_systems_updated', handleSystemsUpdated);
 
+    // Fast multi-tab & cross-user emergency broadcast listener
+    const handleEmergencyUpdated = () => {
+      emergencyService.getActiveBroadcasts().then(setEmergencyAlerts);
+    };
+    window.addEventListener('hitoms_emergency_updated', handleEmergencyUpdated);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        bc = new BroadcastChannel('hitoms_emergency_bus');
+        bc.onmessage = () => {
+          emergencyService.getActiveBroadcasts().then(setEmergencyAlerts);
+        };
+      }
+    } catch (e) {}
+
+    // 4-second background polling for hospital-wide emergency broadcasts across devices
+    const emergencyInterval = setInterval(() => {
+      emergencyService.getActiveBroadcasts().then((active) => {
+        setEmergencyAlerts(active || []);
+      }).catch(() => {});
+    }, 4000);
+
     return () => {
       isMounted = false;
+      clearInterval(emergencyInterval);
+      if (bc) bc.close();
       ticketSoundService.stopRecurringBellMonitor();
       unsubSync();
       window.removeEventListener('hitoms_settings_updated', handleSettingsUpdated);
       window.removeEventListener('hitoms_users_synced', handleUsersSynced);
       window.removeEventListener('hitoms_data_synced', handleDataSynced);
       window.removeEventListener('hitoms_systems_updated', handleSystemsUpdated);
+      window.removeEventListener('hitoms_emergency_updated', handleEmergencyUpdated);
     };
   }, [refreshAllData]);
 

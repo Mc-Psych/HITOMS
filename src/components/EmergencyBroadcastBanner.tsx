@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, AlertOctagon, Volume2, ShieldAlert } from 'lucide-react';
+import { Radio, AlertOctagon, Volume2, ShieldAlert, CheckCircle } from 'lucide-react';
 import { type EmergencyBroadcastAlert, type User, type SystemSettings } from '../types';
 
 interface EmergencyBroadcastBannerProps {
@@ -12,11 +12,19 @@ interface EmergencyBroadcastBannerProps {
 
 export const EmergencyBroadcastBanner: React.FC<EmergencyBroadcastBannerProps> = ({
   alerts,
+  currentUser,
   systemSettings,
+  onRefresh,
 }) => {
   const [speedSeconds, setSpeedSeconds] = useState<number>(
     systemSettings?.emergencyBroadcastSpeedSeconds || 22
   );
+  const [isResolving, setIsResolving] = useState(false);
+
+  const isSuperAdminOrIT =
+    currentUser?.role === 'SUPER_ADMIN' ||
+    currentUser?.role === 'IT_ADMIN' ||
+    currentUser?.role === 'IT_OFFICER';
 
   useEffect(() => {
     if (systemSettings?.emergencyBroadcastSpeedSeconds) {
@@ -43,6 +51,21 @@ export const EmergencyBroadcastBanner: React.FC<EmergencyBroadcastBannerProps> =
 
   const currentAlert = activeAlerts[0];
   if (!currentAlert) return null;
+
+  const handleResolve = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentAlert || !currentUser || !isSuperAdminOrIT || isResolving) return;
+    setIsResolving(true);
+    try {
+      const { emergencyService } = await import('../services/emergencyService');
+      await emergencyService.resolveBroadcast(currentAlert.id, currentUser);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to resolve broadcast from banner:', err);
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   const codeColorMap: Record<string, { bg: string; border: string; text: string; badge: string; accent: string }> = {
     CODE_BLUE_IT: {
@@ -147,10 +170,25 @@ export const EmergencyBroadcastBanner: React.FC<EmergencyBroadcastBannerProps> =
           </div>
         </div>
 
-        {/* Static right status pill (non-clickable, authoritative) */}
-        <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 bg-black/40 backdrop-blur-xs border-l border-white/10 text-white/80 text-[10px] font-bold uppercase tracking-wider shrink-0 z-10">
-          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />
-          <span>HOSPITAL-WIDE ACTIVE</span>
+        {/* Right Actions & Status Pill */}
+        <div className="flex items-center gap-2 pr-3 z-10 shrink-0">
+          {isSuperAdminOrIT && (
+            <button
+              type="button"
+              onClick={handleResolve}
+              disabled={isResolving}
+              className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg shadow-md cursor-pointer transition disabled:opacity-50"
+              title="Resolve this emergency alert hospital-wide"
+            >
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>{isResolving ? 'Resolving...' : 'Resolve Alert'}</span>
+            </button>
+          )}
+
+          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 bg-black/40 backdrop-blur-xs border-l border-white/10 text-white/80 text-[10px] font-bold uppercase tracking-wider">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />
+            <span>HOSPITAL-WIDE ACTIVE</span>
+          </div>
         </div>
       </div>
     </div>

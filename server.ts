@@ -330,8 +330,8 @@ Always return clean JSON complying with the schema.`,
       const topic = req.body.topic || "Hospital IT Infrastructure & Systems Operational Notice";
       const rawNotes = req.body.rawNotes || "";
       const hospitalName = req.body.hospitalName || "St. Mary Theresa Catholic Hospital";
-      const senderName = req.body.senderName || "Courage Kay";
-      const senderTitle = req.body.senderTitle || "Super Administrator & Head of IT";
+      const senderName = req.body.senderName || "Super Administrator";
+      const senderTitle = req.body.senderTitle || "Chief Information Officer & Super Administrator";
 
       return res.json({
         success: true,
@@ -364,6 +364,113 @@ All hospital personnel are reminded that patient health information (PHI) must n
           recommendedDistribution: "Circulate to All Clinical Department Heads, Ward In-Charges, Pharmacy Lead, Laboratory Supervisor, and Inpatient Noticeboards",
         },
       });
+    }
+  });
+
+  // Dedicated AI Draft Body Endpoint based on Subject
+  app.post("/api/ai/memo-draft-body", async (req, res) => {
+    try {
+      const {
+        subject,
+        recipient = "All Clinical & Administrative Staff",
+        department = "Hospital Administration & IT",
+        hospitalName = "St. Mary Theresa Catholic Hospital",
+        senderName = "Super Administrator",
+      } = req.body;
+
+      if (!subject || !subject.trim()) {
+        return res.status(400).json({ error: "Subject is required to draft memorandum body." });
+      }
+
+      const prompt = `You are the Lead Clinical Systems & Hospital Communications Executive at ${hospitalName}.
+Write a formal, comprehensive, professional body for an official hospital memorandum based on this subject:
+"${subject.trim()}"
+
+Target Recipients: ${recipient}
+Authoring Department: ${department}
+Author: ${senderName}
+
+Guidelines:
+1. Tone: Authoritative, formal, polite, and clinical/executive healthcare standard.
+2. Structure:
+   - Concise executive introduction explaining the reason for this memorandum.
+   - Core directives, operational impact, or clinical protocols formatted in clean paragraphs or bullet points.
+   - Specific mandatory actions, compliance timelines, or department-level responsibilities.
+   - Technical / emergency escalation channels and contacts.
+3. Length: Professional, thorough (approximately 150 - 300 words).
+4. Output: Return ONLY the drafted memorandum body text. Do not wrap in markdown quotes or preamble.`;
+
+      const response = await generateContentWithRetry({
+        primaryModel: "gemini-3.8-flash",
+        fallbackModel: "gemini-3.1-flash-lite",
+        contents: prompt,
+        config: {
+          systemInstruction: "You are an expert hospital executive communications specialist. Output only the memorandum body text.",
+        },
+      });
+
+      const bodyText = response.text?.trim() || "";
+      return res.json({ success: true, body: bodyText, isFallback: false });
+    } catch (err: any) {
+      console.warn("[HITOMS Server] AI Draft Body failed, using offline template:", err?.message || err);
+      const subject = req.body.subject || "Hospital Operational Directive";
+      const hospitalName = req.body.hospitalName || "St. Mary Theresa Catholic Hospital";
+      const fallbackBody = `This memorandum serves as official operational guidance regarding **${subject}** across all departments of ${hospitalName}.
+
+### 1. Purpose & Directives
+In line with hospital quality assurance and patient care standards, all departmental heads, clinical supervisors, and administrative officers are instructed to implement the operational guidelines specified below with immediate effect.
+
+### 2. Mandatory Departmental Action Items
+- Review clinical workflows and verify all frontline ward terminals are operating normally.
+- Coordinate with unit shift leaders to ensure uninterrupted shift handovers and patient record integrity.
+- Promptly report any system, hardware, or logistical constraints to the IT & Operations Management helpdesk.
+
+### 3. Compliance & Inquiries
+Compliance with this directive is mandatory across all shifts. For technical support, clarification, or immediate escalation, please contact the IT Operations Center via Extension 2101 or the on-call supervisor.`;
+
+      return res.json({ success: true, body: fallbackBody, isFallback: true });
+    }
+  });
+
+  // Dedicated AI Refine & Polish Body Endpoint (corrects grammar, formal tone, strictly preserves concept)
+  app.post("/api/ai/memo-refine-body", async (req, res) => {
+    try {
+      const { subject, body } = req.body;
+
+      if (!body || !body.trim()) {
+        return res.status(400).json({ error: "Body text is required to refine." });
+      }
+
+      const prompt = `You are a professional Hospital Executive Editor and Clinical Communications Specialist.
+Your task is to refine, correct grammar, and polish the following hospital memorandum body into a more formal, authoritative, and professional tone.
+
+CRITICAL CONSTRAINTS:
+1. Do NOT change the concept, core message, factual details, instructions, numbers, names, or subject matter.
+2. If there are tables (markdown format starting and ending with |), PRESERVE the table structure, column headers, and data rows intact.
+3. Improve grammar, sentence flow, vocabulary, and executive healthcare formatting.
+4. Keep the output grounded and practical for hospital staff.
+
+Subject: "${subject || "Official Hospital Directive"}"
+
+Original Body to Refine:
+${body}
+
+Output ONLY the refined body text without meta-commentary, introductory notes, or markdown wrappers.`;
+
+      const response = await generateContentWithRetry({
+        primaryModel: "gemini-3.8-flash",
+        fallbackModel: "gemini-3.1-flash-lite",
+        contents: prompt,
+        config: {
+          systemInstruction: "You are an executive editor. Polish grammar and tone while strictly preserving meaning, numbers, tables, and instructions. Output only the refined text.",
+        },
+      });
+
+      const refinedText = response.text?.trim() || body;
+      return res.json({ success: true, refinedBody: refinedText, isFallback: false });
+    } catch (err: any) {
+      console.warn("[HITOMS Server] AI Refine Body failed:", err?.message || err);
+      return res.json({ success: true, refinedBody: req.body.body, isFallback: true });
     }
   });
 

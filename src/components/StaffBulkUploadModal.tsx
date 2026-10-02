@@ -24,6 +24,18 @@ import {
   getDefaultPasswordForSurname,
 } from '../services/authService';
 import { downloadTextFile } from '../utils/fileDownloader';
+import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
+
+const VALID_ROLES: Role[] = [
+  'SUPER_ADMIN',
+  'IT_ADMIN',
+  'IT_OFFICER',
+  'HOSPITAL_MANAGEMENT',
+  'DEPARTMENT_HEAD',
+  'STAFF_USER',
+  'PROCUREMENT_OFFICER',
+  'AUDITOR',
+];
 
 interface StaffBulkUploadModalProps {
   isOpen: boolean;
@@ -47,6 +59,7 @@ export interface ParsedStaffRecord {
   email?: string;
   isValid: boolean;
   warnings: string[];
+  flaggedIssues: string[];
 }
 
 export function generateStaffCsvTemplate(existingUsers: UserType[] = [], withSamples: boolean = true): string {
@@ -67,7 +80,7 @@ export function generateStaffCsvTemplate(existingUsers: UserType[] = [], withSam
 
   const rows = nonSuperAdmins.map((u) => {
     const fullName = u.fullName || '';
-    const dept = u.department || 'General Clinical';
+    const dept = u.department || 'OPD (Outpatient Department)';
     const role = u.role || 'STAFF_USER';
     const escapedName = fullName.includes(',') ? `"${fullName}"` : fullName;
     const escapedDept = dept.includes(',') ? `"${dept}"` : dept;
@@ -174,6 +187,8 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     }>;
   } | null>(null);
 
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
@@ -256,6 +271,31 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     }
 
     const records: ParsedStaffRecord[] = [];
+    const existingNameSet = new Set(
+      activeUserList.map((u) => (u.fullName || '').trim().toLowerCase())
+    );
+    const existingEmailSet = new Set(
+      activeUserList.map((u) => (u.email || '').trim().toLowerCase())
+    );
+    const seenBatchNames = new Set<string>();
+
+    const validDepartments = Array.from(
+      new Set([
+        'OPD (Outpatient Department)',
+        'Pharmacy',
+        'Emergency & Triage',
+        'Maternity Ward',
+        'Surgical Theatre',
+        'Laboratory',
+        'Radiology',
+        'IT & Health Informatics',
+        'Administration',
+        'Procurement & Stores',
+        'Pediatrics Ward',
+        'Internal Medicine',
+        ...activeUserList.map((u) => u.department).filter(Boolean),
+      ])
+    );
 
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i];
@@ -263,7 +303,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue;
 
       let fullName = '';
-      let department = 'General Clinical';
+      let department = 'OPD (Outpatient Department)';
       let roleRaw = '';
       let jobTitle = 'Hospital Staff';
       let phone = '+233 24 000 0000';
@@ -289,7 +329,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       } else {
         // Positional fallback
         fullName = cols[0] || '';
-        department = cols[1] || 'General Clinical';
+        department = cols[1] || 'OPD (Outpatient Department)';
         roleRaw = cols[2] || '';
 
         // If col 3 looks like a phone number, treat as phone
@@ -304,23 +344,45 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       }
 
       const warnings: string[] = [];
+      const flaggedIssues: string[] = [];
       let isValid = true;
 
       const cleanFullName = (fullName || '').trim();
-      const cleanDept = (department || '').trim();
+      const rawDept = (department || 'OPD (Outpatient Department)').trim();
       const cleanJobTitle = (jobTitle || '').trim();
       const cleanPhone = (phone || '').trim();
       let cleanEmail = (email || '').trim();
 
+      // Pre-populated Fuzzy Value Matching for Department and Role
+      const deptMatch = matchOptionWithFallback(rawDept, validDepartments, 'OPD (Outpatient Department)', 'Department');
+      const roleMatch = matchOptionWithFallback(roleRaw, VALID_ROLES, 'STAFF_USER', 'Role');
+
+      if (!deptMatch.isExactMatch) {
+        flaggedIssues.push(deptMatch.issueDescription!);
+        warnings.push(deptMatch.issueDescription!);
+      }
+      if (!roleMatch.isExactMatch && roleRaw.trim()) {
+        flaggedIssues.push(roleMatch.issueDescription!);
+        warnings.push(roleMatch.issueDescription!);
+      }
+
       if (!cleanFullName) {
         isValid = false;
         warnings.push('Full Name is required');
+      } else {
+        const lowerName = cleanFullName.toLowerCase();
+        if (existingNameSet.has(lowerName)) {
+          isValid = false;
+          warnings.push('Duplicate: User already exists in staff directory');
+        } else if (seenBatchNames.has(lowerName)) {
+          isValid = false;
+          warnings.push('Duplicate: Appears multiple times in this upload file');
+        } else {
+          seenBatchNames.add(lowerName);
+        }
       }
 
-      const role = normalizeStaffRole(roleRaw);
-      if (roleRaw && roleRaw.toUpperCase().replace(/\s+/g, '_') !== role) {
-        warnings.push(`Mapped "${roleRaw}" to role "${role}"`);
-      }
+      const role = roleMatch.matchedValue;
 
       const surname = extractSurname(cleanFullName);
       const username = surname.toLowerCase();
@@ -330,30 +392,31 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         cleanEmail = `${username}@hospital.local`;
       }
 
+      if (cleanEmail && existingEmailSet.has(cleanEmail.toLowerCase())) {
+        if (isValid) {
+          warnings.push('Note: Email already exists, unique handle will be assigned');
+        }
+      }
+
       records.push({
         id: `rec-${i}`,
         fullName: cleanFullName,
         surname,
         username,
         defaultPassword,
-        department: cleanDept || 'General Clinical',
+        department: deptMatch.matchedValue,
         role,
         jobTitle: cleanJobTitle || 'Hospital Staff',
         phone: cleanPhone || '+233 24 000 0000',
         email: cleanEmail,
         isValid,
         warnings,
+        flaggedIssues,
       });
     }
 
     setParsedRecords(records);
-
-    if (autoSubmit) {
-      const validRecords = records.filter((r) => r.isValid);
-      if (validRecords.length > 0) {
-        handleExecuteUpload(records);
-      }
-    }
+    // Explicit: Never auto-submit on paste/file load. Upload ONLY occurs when the user clicks the Import button and confirms.
   };
 
   // Handle file selection
@@ -484,7 +547,15 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         currentUser
       );
 
+      try {
+        const { syncService } = await import('../services/syncService');
+        await syncService.runAutomaticSync();
+      } catch (e) {
+        console.warn('[StaffBulkUploadModal] Error triggering post-upload sync:', e);
+      }
+
       setBulkResult(res);
+      setShowConfirmDialog(false);
       onSuccess();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to bulk provision staff accounts.');
@@ -817,9 +888,16 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                       >
                         <td className="p-2.5">
                           {rec.isValid ? (
-                            <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400" title="Ready to provision">
-                              <CheckCircle2 className="w-4 h-4" />
-                            </span>
+                            rec.flaggedIssues && rec.flaggedIssues.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help" title={rec.flaggedIssues.join('\n')}>
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Flagged</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400" title="Ready to provision">
+                                <CheckCircle2 className="w-4 h-4" />
+                              </span>
+                            )
                           ) : (
                             <span className="inline-flex items-center text-rose-600 dark:text-rose-400" title={rec.warnings.join(', ')}>
                               <AlertTriangle className="w-4 h-4" />
@@ -939,19 +1017,19 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
             {!bulkResult && (
               <button
                 type="button"
-                onClick={handleExecuteUpload}
+                onClick={() => setShowConfirmDialog(true)}
                 disabled={isProcessing || validCount === 0}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-xs transition flex items-center gap-1.5 cursor-pointer"
               >
                 {isProcessing ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Provisioning Accounts...</span>
+                    <span>Importing & Syncing...</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Provision {validCount > 0 ? `${validCount} Staff Accounts` : 'Staff Accounts'}</span>
+                    <span>Import & Confirm {validCount > 0 ? `(${validCount} Staff)` : ''}</span>
                   </>
                 )}
               </button>
@@ -959,6 +1037,56 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-6 h-6 shrink-0" />
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                Confirm Staff Import to Firestore
+              </h4>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              You are about to provision and save <strong>{validCount} verified hospital staff accounts</strong> into the local terminal and synchronize them directly to the Firestore cloud database.
+            </p>
+
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-[11px] text-emerald-800 dark:text-emerald-300">
+              ✓ Initial passwords set to surname lowercase<br />
+              ✓ Automatic cloud replication to Firestore active<br />
+              ✓ Instant access across all connected terminals
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmDialog(false)}
+                disabled={isProcessing}
+                className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExecuteUpload()}
+                disabled={isProcessing}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-2"
+              >
+                {isProcessing ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Saving to Firestore...</span>
+                  </>
+                ) : (
+                  <span>Confirm & Save to Firestore</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

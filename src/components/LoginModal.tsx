@@ -87,6 +87,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     };
     if (isOpen) {
       window.addEventListener('keydown', handleKeyDown);
+      // Automatically sync latest hospital staff accounts in the background
+      handleManualSyncStaff();
     }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, allowClose, onClose]);
@@ -234,23 +236,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
                   Quick Terminal Profiles (Click to prefill)
                 </span>
-                <button
-                  type="button"
-                  onClick={handleManualSyncStaff}
-                  disabled={isRefreshingStaff}
-                  className="flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-mono cursor-pointer disabled:opacity-50"
-                  title="Sync latest hospital staff accounts from cloud and seed"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isRefreshingStaff ? 'animate-spin' : ''}`} />
-                  <span>{isRefreshingStaff ? 'Syncing...' : 'Sync Staff'}</span>
-                </button>
+                {isRefreshingStaff && (
+                  <span className="flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400 font-mono">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    <span>Auto-syncing...</span>
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
                 {[...allUsers]
                   .sort((a, b) => {
-                    if (a.fullName.toLowerCase().includes('courage') || a.role === 'SUPER_ADMIN') return -1;
-                    if (b.fullName.toLowerCase().includes('courage') || b.role === 'SUPER_ADMIN') return 1;
+                    if (a.role === 'SUPER_ADMIN') return -1;
+                    if (b.role === 'SUPER_ADMIN') return 1;
                     return 0;
                   })
                   .slice(0, 9)

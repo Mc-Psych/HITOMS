@@ -256,6 +256,18 @@ class EmergencyService {
       }
     );
 
+    // Instant multi-tab & cross-user notification dispatch
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hitoms_emergency_updated', { detail: alert }));
+      try {
+        if ('BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('hitoms_emergency_bus');
+          bc.postMessage({ type: 'BROADCAST_CREATED', alert });
+          bc.close();
+        }
+      } catch (e) {}
+    }
+
     return alert;
   }
 
@@ -284,14 +296,20 @@ class EmergencyService {
         await putToStore(STORE_NAMES.emergencyBroadcasts, target);
         await syncService.enqueueOperation(STORE_NAMES.emergencyBroadcasts, target.id, 'UPDATE', target);
 
-        // If this alert was tied to a hospital system, restore its status!
+        // If this alert was tied to a hospital system, restore its status to Operational!
         if (target.targetSystemId) {
           try {
             const allSystems = await getAllFromStore<HospitalSystem>('hospitalSystems');
             const tiedSys = allSystems.find((s) => s.id === target.targetSystemId);
             if (tiedSys) {
               const now = new Date().toISOString();
-              const restoredStatus: SystemOperationalStatus = target.previousSystemStatus || 'Operational';
+              const restoredStatus: SystemOperationalStatus =
+                target.previousSystemStatus &&
+                target.previousSystemStatus !== 'Down' &&
+                target.previousSystemStatus !== 'Maintenance' &&
+                target.previousSystemStatus !== 'Offline'
+                  ? target.previousSystemStatus
+                  : 'Operational';
               const restoredSys: HospitalSystem = {
                 ...tiedSys,
                 status: restoredStatus,
@@ -332,6 +350,18 @@ class EmergencyService {
           { isActive: true },
           { isActive: false, tiedSystem: target.targetSystemName || 'None' }
         );
+
+        // Instant multi-tab & cross-user notification dispatch
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('hitoms_emergency_updated', { detail: target }));
+          try {
+            if ('BroadcastChannel' in window) {
+              const bc = new BroadcastChannel('hitoms_emergency_bus');
+              bc.postMessage({ type: 'BROADCAST_RESOLVED', alertId });
+              bc.close();
+            }
+          } catch (e) {}
+        }
       }
     } catch (err) {
       console.error('[EmergencyService] Failed to resolve broadcast:', err);

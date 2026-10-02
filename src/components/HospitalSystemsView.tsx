@@ -33,6 +33,7 @@ import { putToStore } from '../services/localDatabaseService';
 import { authService } from '../services/authService';
 import { auditService } from '../services/auditService';
 import { syncService } from '../services/syncService';
+import { emergencyService } from '../services/emergencyService';
 import { SystemEditModal } from './SystemEditModal';
 
 interface HospitalSystemsViewProps {
@@ -89,16 +90,29 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
   const handleQuickStatusChange = async (sys: HospitalSystem, newStatus: SystemOperationalStatus) => {
     if (!isSuperAdminOrIT) return;
     try {
+      // 1. If changing to Operational, resolve any active emergency broadcasts for this system first
+      if (currentUser && newStatus === 'Operational') {
+        const activeBroadcasts = await emergencyService.getActiveBroadcasts();
+        const tiedAlerts = activeBroadcasts.filter(
+          (b) => b.targetSystemId === sys.id || b.title.includes(sys.systemName.toUpperCase())
+        );
+        for (const alert of tiedAlerts) {
+          await emergencyService.resolveBroadcast(alert.id, currentUser);
+        }
+      }
+
       const now = new Date().toISOString();
       const updated: HospitalSystem = {
         ...sys,
         status: newStatus,
+        statusMessage: newStatus === 'Operational' ? undefined : sys.statusMessage,
         lastChecked: now,
         updatedAt: now,
         _syncStatus: 'PENDING_SYNC',
       };
 
       await putToStore('hospitalSystems', updated);
+      await syncService.enqueueOperation('hospitalSystems', updated.id, 'UPDATE', updated);
 
       await auditService.logAction(
         'QUICK_STATUS_CHANGE',
@@ -107,6 +121,37 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
         sys.status,
         `${sys.systemName} status toggled to ${newStatus}`
       );
+
+      // Automatic Emergency Trigger Integration when setting to Down or Maintenance
+      if (currentUser && (newStatus === 'Down' || newStatus === 'Maintenance')) {
+        let codeType: 'CODE_BLUE_IT' | 'CODE_RED_NETWORK' | 'EHR_DOWNTIME' | 'CYBER_LOCKDOWN' | 'GENERAL_EMERGENCY' = 'GENERAL_EMERGENCY';
+        const lowerName = sys.systemName.toLowerCase();
+        if (lowerName.includes('lhims') || lowerName.includes('health') || lowerName.includes('ehr')) {
+          codeType = 'EHR_DOWNTIME';
+        } else if (lowerName.includes('starlink') || lowerName.includes('network') || lowerName.includes('gateway')) {
+          codeType = 'CODE_RED_NETWORK';
+        } else if (lowerName.includes('quickbooks') || lowerName.includes('finance') || lowerName.includes('security')) {
+          codeType = 'CYBER_LOCKDOWN';
+        } else if (lowerName.includes('quixmo') || lowerName.includes('telemetry') || lowerName.includes('pharmacy')) {
+          codeType = 'CODE_BLUE_IT';
+        }
+
+        const statusHeadline = `🚨 ${sys.systemName.toUpperCase()} STATUS: ${newStatus.toUpperCase()}`;
+        const statusMessage = `${sys.systemName} is currently ${newStatus.toUpperCase()}. Clinical and administrative operations please observe hospital contingency protocols.`;
+
+        await emergencyService.createBroadcast(
+          {
+            codeType,
+            title: statusHeadline,
+            message: statusMessage,
+            severity: newStatus === 'Down' ? 'CRITICAL' : 'HIGH',
+            targetSystemId: sys.id,
+            targetSystemName: sys.systemName,
+            autoSetSystemStatus: newStatus,
+          },
+          currentUser
+        );
+      }
 
       onRefresh();
     } catch (e) {
@@ -373,9 +418,9 @@ export const HospitalSystemsView: React.FC<HospitalSystemsViewProps> = ({
                   </div>
 
                   <div className="text-right">
-                    <span className="text-[9px] text-slate-400 block font-medium">Department Unit</span>
-                    <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate block max-w-[110px]">
-                      {sys.owner || 'Clinical Operations'}
+                    <span className="text-[9px] text-slate-400 block font-medium">Department</span>
+                    <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate block max-w-[130px]">
+                      {sys.department || sys.owner || 'IT Infrastructure'}
                     </span>
                   </div>
                 </div>

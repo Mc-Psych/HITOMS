@@ -31,6 +31,7 @@ import {
   Trash2,
   Save,
   DollarSign,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   type Asset,
@@ -51,6 +52,7 @@ import {
 import { SoftwareSubscriptionsTab } from './SoftwareSubscriptionsTab';
 import { AssetQRLabelModal } from './AssetQRLabelModal';
 import { AssetBulkUploadModal } from './AssetBulkUploadModal';
+import { AssetRegisterReportModal } from './AssetRegisterReportModal';
 
 interface AssetsViewProps {
   assets: Asset[];
@@ -124,11 +126,83 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
   // Create Asset Modal state
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [assetName, setAssetName] = useState('');
   const [newAssetType, setNewAssetType] = useState<string>('Desktop');
 
   // Permission check: strictly Super Admin and IT unit staff can edit/add/delete assets.
   const canManageAssets = authService.canManageAssets(currentUser);
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const isSuperAdminOrIT =
+    currentUser?.role === 'SUPER_ADMIN' ||
+    currentUser?.role === 'IT_ADMIN' ||
+    currentUser?.role === 'IT_OFFICER';
+
+  // Dynamic asset types, conditions & statuses state
+  const [assetTypesList, setAssetTypesList] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('hitoms_custom_asset_types');
+      return saved ? JSON.parse(saved) : ['Desktop', 'Laptop', 'Server', 'Switch', 'Router', 'Access Point', 'Printer', 'UPS', 'Barcode Scanner', 'Tablet', 'Network Cable', 'Mouse', 'Keyboard', 'Wi-Fi Adapter', 'Bluetooth Adapter'];
+    } catch {
+      return ['Desktop', 'Laptop', 'Server', 'Switch', 'Router', 'Access Point', 'Printer', 'UPS', 'Barcode Scanner', 'Tablet', 'Network Cable', 'Mouse', 'Keyboard', 'Wi-Fi Adapter', 'Bluetooth Adapter'];
+    }
+  });
+
+  const [assetConditionsList, setAssetConditionsList] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('hitoms_custom_asset_conditions');
+      return saved ? JSON.parse(saved) : ['New', 'Excellent', 'Good', 'Fair', 'Poor', 'Defective'];
+    } catch {
+      return ['New', 'Excellent', 'Good', 'Fair', 'Poor', 'Defective'];
+    }
+  });
+
+  const [assetStatusesList, setAssetStatusesList] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('hitoms_custom_asset_statuses');
+      return saved ? JSON.parse(saved) : ['Active', 'In Use', 'In Storage', 'Assigned', 'Available', 'Under Repair', 'Maintenance', 'Decommissioned', 'Disposed', 'Reserved'];
+    } catch {
+      return ['Active', 'In Use', 'In Storage', 'Assigned', 'Available', 'Under Repair', 'Maintenance', 'Decommissioned', 'Disposed', 'Reserved'];
+    }
+  });
+
+  const [typesConditionsModalOpen, setTypesConditionsModalOpen] = useState(false);
+  const [configModalTab, setConfigModalTab] = useState<'TYPES' | 'CONDITIONS' | 'STATUSES'>('TYPES');
+  const [newTypeInput, setNewTypeInput] = useState('');
+  const [newConditionInput, setNewConditionInput] = useState('');
+  const [newStatusInput, setNewStatusInput] = useState('');
+  const [editingTypeOriginal, setEditingTypeOriginal] = useState<string | null>(null);
+  const [editingTypeValue, setEditingTypeValue] = useState('');
+  const [editingCondOriginal, setEditingCondOriginal] = useState<string | null>(null);
+  const [editingCondValue, setEditingCondValue] = useState('');
+  const [editingStatusOriginal, setEditingStatusOriginal] = useState<string | null>(null);
+  const [editingStatusValue, setEditingStatusValue] = useState('');
+
+  const handleSaveAssetTypes = (types: string[]) => {
+    setAssetTypesList(types);
+    try {
+      localStorage.setItem('hitoms_custom_asset_types', JSON.stringify(types));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleSaveAssetConditions = (conds: string[]) => {
+    setAssetConditionsList(conds);
+    try {
+      localStorage.setItem('hitoms_custom_asset_conditions', JSON.stringify(conds));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleSaveAssetStatuses = (statuses: string[]) => {
+    setAssetStatusesList(statuses);
+    try {
+      localStorage.setItem('hitoms_custom_asset_statuses', JSON.stringify(statuses));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
 
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
@@ -137,14 +211,34 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [location, setLocation] = useState('Dispensing Counter 1');
   const [assignedUser, setAssignedUser] = useState('');
   const [condition, setCondition] = useState<AssetCondition>('Good');
+  const [assetStatus, setAssetStatus] = useState<string>('Active');
   const [ipAddress, setIpAddress] = useState('192.168.10.');
   const [os, setOs] = useState('Windows 11 Pro');
   const [purchasePrice, setPurchasePrice] = useState<number>(1250);
   const [supplier, setSupplier] = useState('Hospital Authorized Vendor');
 
+  // Type-specific specification states (Create)
+  const [upsCapacity, setUpsCapacity] = useState('1000VA (1 kVA)');
+  const [printerOutputType, setPrinterOutputType] = useState('Monochrome (Black & White)');
+  const [printerTech, setPrinterTech] = useState('LaserJet');
+  const [environmentSpec, setEnvironmentSpec] = useState('Indoor');
+  const [cableCategory, setCableCategory] = useState('Cat 6');
+  const [serverFormFactor, setServerFormFactor] = useState('Rackmount 2U');
+  const [switchPorts, setSwitchPorts] = useState('24-Port Managed PoE+');
+  const [computerSpecs, setComputerSpecs] = useState('Intel Core i5 / 16GB RAM / 512GB SSD');
+  const [scannerType, setScannerType] = useState('Handheld USB Barcode Scanner');
+  const [mouseConnectivity, setMouseConnectivity] = useState('Wired');
+  const [keyboardConnectivity, setKeyboardConnectivity] = useState('Wired');
+  const [wifiAdapterType, setWifiAdapterType] = useState('Dongle (USB)');
+  const [bluetoothAdapterType, setBluetoothAdapterType] = useState('Dongle (USB)');
+
+  // Asset Register Modal State
+  const [assetRegisterModalOpen, setAssetRegisterModalOpen] = useState(false);
+
   // Edit Asset Modal state
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [editAssetName, setEditAssetName] = useState('');
   const [editAssetTag, setEditAssetTag] = useState('');
   const [editAssetType, setEditAssetType] = useState('Desktop');
   const [editManufacturer, setEditManufacturer] = useState('');
@@ -164,6 +258,21 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [editNotes, setEditNotes] = useState('');
   const [editReason, setEditReason] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Type-specific specification states (Edit)
+  const [editUpsCapacity, setEditUpsCapacity] = useState('1000VA (1 kVA)');
+  const [editPrinterOutputType, setEditPrinterOutputType] = useState('Monochrome (Black & White)');
+  const [editPrinterTech, setEditPrinterTech] = useState('LaserJet');
+  const [editEnvironmentSpec, setEditEnvironmentSpec] = useState('Indoor');
+  const [editCableCategory, setEditCableCategory] = useState('Cat 6');
+  const [editServerFormFactor, setEditServerFormFactor] = useState('Rackmount 2U');
+  const [editSwitchPorts, setEditSwitchPorts] = useState('24-Port Managed PoE+');
+  const [editComputerSpecs, setEditComputerSpecs] = useState('Intel Core i5 / 16GB RAM / 512GB SSD');
+  const [editScannerType, setEditScannerType] = useState('Handheld USB Barcode Scanner');
+  const [editMouseConnectivity, setEditMouseConnectivity] = useState('Wired');
+  const [editKeyboardConnectivity, setEditKeyboardConnectivity] = useState('Wired');
+  const [editWifiAdapterType, setEditWifiAdapterType] = useState('Dongle (USB)');
+  const [editBluetoothAdapterType, setEditBluetoothAdapterType] = useState('Dongle (USB)');
 
   // Delete Asset Modal state
   const [assetToDelete, setAssetToDelete] = useState<Asset | null>(null);
@@ -189,9 +298,10 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const filteredAssets = assets.filter((a) => {
     const matchesSearch =
       a.assetTag.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (a.name && a.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
       a.manufacturer.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ((a.serialNumber || '').toLowerCase().includes(searchQuery.toLowerCase())) ||
       a.department.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (a.assignedUser && a.assignedUser.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -259,6 +369,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
   const handleOpenEditModal = (asset: Asset) => {
     setEditingAsset(asset);
+    setEditAssetName(asset.name || '');
     setEditAssetTag(asset.assetTag || '');
     setEditAssetType(asset.assetType || 'Desktop');
     setEditManufacturer(asset.manufacturer || '');
@@ -276,6 +387,22 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     setEditPurchasePrice(asset.purchasePrice || 0);
     setEditSupplier(asset.supplier || '');
     setEditNotes(asset.notes || '');
+
+    // Prefill type-specific fields
+    setEditUpsCapacity(asset.upsCapacity || '1000VA (1 kVA)');
+    setEditPrinterOutputType(asset.printerOutputType || 'Monochrome (Black & White)');
+    setEditPrinterTech('LaserJet');
+    setEditEnvironmentSpec(asset.accessPointEnvironment || asset.cableEnvironment || 'Indoor');
+    setEditCableCategory('Cat 6');
+    setEditServerFormFactor('Rackmount 2U');
+    setEditSwitchPorts('24-Port Managed PoE+');
+    setEditComputerSpecs('Intel Core i5 / 16GB RAM / 512GB SSD');
+    setEditScannerType('Handheld USB Barcode Scanner');
+    setEditMouseConnectivity(asset.mouseConnectivity || 'Wired');
+    setEditKeyboardConnectivity(asset.keyboardConnectivity || 'Wired');
+    setEditWifiAdapterType(asset.wifiAdapterType || 'Dongle (USB)');
+    setEditBluetoothAdapterType(asset.bluetoothAdapterType || 'Dongle (USB)');
+
     setEditReason('');
     setEditModalOpen(true);
   };
@@ -285,29 +412,71 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     if (!editingAsset || !currentUser) return;
     setIsSavingEdit(true);
     try {
+      const typeUpper = editAssetType.toUpperCase();
+      const isEditUps = typeUpper.includes('UPS');
+      const isEditCompute = ['DESKTOP', 'LAPTOP', 'SERVER', 'WORKSTATION', 'TABLET'].some((k) => typeUpper.includes(k));
+
+      let typeSpecSummary = '';
+      if (typeUpper.includes('UPS')) {
+        typeSpecSummary = `Capacity: ${editUpsCapacity}`;
+      } else if (typeUpper.includes('PRINTER')) {
+        typeSpecSummary = `Print Mode: ${editPrinterOutputType} | Tech: ${editPrinterTech}`;
+      } else if (typeUpper.includes('ACCESS POINT') || typeUpper.includes('AP')) {
+        typeSpecSummary = `Environment: ${editEnvironmentSpec} | Dual-Band Wi-Fi`;
+      } else if (typeUpper.includes('CABLE') || typeUpper.includes('PATCH')) {
+        typeSpecSummary = `Environment: ${editEnvironmentSpec} | Category: ${editCableCategory}`;
+      } else if (typeUpper.includes('SERVER')) {
+        typeSpecSummary = `Form Factor: ${editServerFormFactor}`;
+      } else if (typeUpper.includes('SWITCH') || typeUpper.includes('ROUTER') || typeUpper.includes('FIREWALL')) {
+        typeSpecSummary = `Ports & PoE: ${editSwitchPorts} | Environment: ${editEnvironmentSpec}`;
+      } else if (isEditCompute) {
+        typeSpecSummary = `Hardware: ${editComputerSpecs}`;
+      } else if (typeUpper.includes('SCANNER')) {
+        typeSpecSummary = `Scanner Type: ${editScannerType}`;
+      } else if (typeUpper.includes('MOUSE')) {
+        typeSpecSummary = `Connectivity: ${editMouseConnectivity}`;
+      } else if (typeUpper.includes('KEYBOARD')) {
+        typeSpecSummary = `Connectivity: ${editKeyboardConnectivity}`;
+      } else if (typeUpper.includes('WI-FI') || typeUpper.includes('WIFI')) {
+        typeSpecSummary = `Interface: ${editWifiAdapterType}`;
+      } else if (typeUpper.includes('BLUETOOTH')) {
+        typeSpecSummary = `Interface: ${editBluetoothAdapterType}`;
+      }
+
+      const fullSpecs = `${editAssetName.trim() ? `${editAssetName.trim()} • ` : ''}${editManufacturer.trim()} ${editModel.trim()}${
+        typeSpecSummary ? ` [${typeSpecSummary}]` : ''
+      }`;
+
       const updated = await assetService.updateAsset(
         editingAsset.id,
         {
+          name: editAssetName.trim() || undefined,
           assetTag: editAssetTag.trim(),
           assetType: editAssetType,
           manufacturer: editManufacturer.trim(),
           model: editModel.trim(),
-          serialNumber: editSerialNumber.trim(),
+          serialNumber: editSerialNumber.trim() || undefined,
           department: editDepartment.trim(),
           location: editLocation.trim(),
           assignedUser: editAssignedUser.trim() || undefined,
           condition: editCondition,
           status: editStatus,
-          operatingSystem: editOperatingSystem.trim() || undefined,
-          ipAddress: editIpAddress.trim() || undefined,
-          macAddress: editMacAddress.trim() || undefined,
+          operatingSystem: isEditCompute ? (editOperatingSystem.trim() || undefined) : undefined,
+          ipAddress: !isEditUps ? (editIpAddress.trim() || undefined) : undefined,
+          macAddress: !isEditUps ? (editMacAddress.trim() || undefined) : undefined,
           purchaseDate: editPurchaseDate || undefined,
           purchasePrice: Number(editPurchasePrice) || 0,
           supplier: editSupplier.trim() || undefined,
           notes: editNotes.trim() || undefined,
-          specifications: `${editManufacturer.trim()} ${editModel.trim()}${
-            editOperatingSystem ? ` - ${editOperatingSystem}` : ''
-          }`,
+          upsCapacity: typeUpper.includes('UPS') ? editUpsCapacity : undefined,
+          printerOutputType: typeUpper.includes('PRINTER') ? editPrinterOutputType : undefined,
+          accessPointEnvironment: (typeUpper.includes('ACCESS POINT') || typeUpper.includes('AP')) ? editEnvironmentSpec : undefined,
+          cableEnvironment: (typeUpper.includes('CABLE') || typeUpper.includes('PATCH')) ? editEnvironmentSpec : undefined,
+          mouseConnectivity: typeUpper.includes('MOUSE') ? editMouseConnectivity : undefined,
+          keyboardConnectivity: typeUpper.includes('KEYBOARD') ? editKeyboardConnectivity : undefined,
+          wifiAdapterType: (typeUpper.includes('WI-FI') || typeUpper.includes('WIFI')) ? editWifiAdapterType : undefined,
+          bluetoothAdapterType: typeUpper.includes('BLUETOOTH') ? editBluetoothAdapterType : undefined,
+          specifications: fullSpecs,
         },
         currentUser,
         editReason || 'Hardware record modified by authorized IT Unit / Super Admin'
@@ -379,12 +548,48 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     if (!manufacturer.trim() || !model.trim() || !currentUser) return;
 
     try {
+      const typeUpper = newAssetType.toUpperCase();
+      const isUps = typeUpper.includes('UPS');
+      const isCompute = ['DESKTOP', 'LAPTOP', 'SERVER', 'WORKSTATION', 'TABLET'].some((k) => typeUpper.includes(k));
+
+      let typeSpecSummary = '';
+      if (typeUpper.includes('UPS')) {
+        typeSpecSummary = `Capacity: ${upsCapacity}`;
+      } else if (typeUpper.includes('PRINTER')) {
+        typeSpecSummary = `Print Mode: ${printerOutputType} | Tech: ${printerTech}`;
+      } else if (typeUpper.includes('ACCESS POINT') || typeUpper.includes('AP')) {
+        typeSpecSummary = `Environment: ${environmentSpec} | Dual-Band Wi-Fi`;
+      } else if (typeUpper.includes('CABLE') || typeUpper.includes('PATCH')) {
+        typeSpecSummary = `Environment: ${environmentSpec} | Category: ${cableCategory}`;
+      } else if (typeUpper.includes('SERVER')) {
+        typeSpecSummary = `Form Factor: ${serverFormFactor}`;
+      } else if (typeUpper.includes('SWITCH') || typeUpper.includes('ROUTER') || typeUpper.includes('FIREWALL')) {
+        typeSpecSummary = `Ports & PoE: ${switchPorts} | Environment: ${environmentSpec}`;
+      } else if (isCompute) {
+        typeSpecSummary = `Hardware: ${computerSpecs}`;
+      } else if (typeUpper.includes('SCANNER')) {
+        typeSpecSummary = `Scanner Type: ${scannerType}`;
+      } else if (typeUpper.includes('MOUSE')) {
+        typeSpecSummary = `Connectivity: ${mouseConnectivity}`;
+      } else if (typeUpper.includes('KEYBOARD')) {
+        typeSpecSummary = `Connectivity: ${keyboardConnectivity}`;
+      } else if (typeUpper.includes('WI-FI') || typeUpper.includes('WIFI')) {
+        typeSpecSummary = `Interface: ${wifiAdapterType}`;
+      } else if (typeUpper.includes('BLUETOOTH')) {
+        typeSpecSummary = `Interface: ${bluetoothAdapterType}`;
+      }
+
+      const fullSpecs = `${assetName.trim() ? `${assetName.trim()} • ` : ''}${manufacturer.trim()} ${model.trim()}${
+        typeSpecSummary ? ` [${typeSpecSummary}]` : ''
+      }`;
+
       await assetService.createAsset(
         {
+          name: assetName.trim() || undefined,
           assetType: newAssetType,
           manufacturer: manufacturer.trim(),
           model: model.trim(),
-          serialNumber: serialNumber.trim(),
+          serialNumber: serialNumber.trim() || undefined,
           department,
           location,
           assignedUser: assignedUser.trim() || undefined,
@@ -394,15 +599,24 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           warrantyStart: new Date().toISOString().split('T')[0],
           warrantyEnd: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 3).toISOString().split('T')[0],
           condition,
-          status: assignedUser.trim() ? 'Assigned' : 'Available',
-          operatingSystem: os,
-          ipAddress: ipAddress.trim() || undefined,
-          specifications: `${manufacturer.trim()} ${model.trim()} - Standard Clinical Build`,
+          status: (assetStatus as AssetStatus) || (assignedUser.trim() ? 'Assigned' : 'Active'),
+          operatingSystem: isCompute ? os : undefined,
+          ipAddress: !isUps ? (ipAddress.trim() || undefined) : undefined,
+          upsCapacity: typeUpper.includes('UPS') ? upsCapacity : undefined,
+          printerOutputType: typeUpper.includes('PRINTER') ? printerOutputType : undefined,
+          accessPointEnvironment: (typeUpper.includes('ACCESS POINT') || typeUpper.includes('AP')) ? environmentSpec : undefined,
+          cableEnvironment: (typeUpper.includes('CABLE') || typeUpper.includes('PATCH')) ? environmentSpec : undefined,
+          mouseConnectivity: typeUpper.includes('MOUSE') ? mouseConnectivity : undefined,
+          keyboardConnectivity: typeUpper.includes('KEYBOARD') ? keyboardConnectivity : undefined,
+          wifiAdapterType: (typeUpper.includes('WI-FI') || typeUpper.includes('WIFI')) ? wifiAdapterType : undefined,
+          bluetoothAdapterType: typeUpper.includes('BLUETOOTH') ? bluetoothAdapterType : undefined,
+          specifications: fullSpecs,
         },
         currentUser
       );
 
       setCreateModalOpen(false);
+      setAssetName('');
       setManufacturer('');
       setModel('');
       setSerialNumber('');
@@ -474,6 +688,305 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   };
 
   const departments = Array.from(new Set(assets.map((a) => a.department)));
+
+  const renderTypeSpecificFields = (currentType: string, isEditMode: boolean = false) => {
+    const typeUpper = currentType.toUpperCase();
+
+    return (
+      <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-sky-200/80 dark:border-slate-700/80 space-y-3">
+        <div className="flex items-center gap-1.5 text-sky-700 dark:text-sky-400 font-bold text-xs">
+          <SlidersHorizontal className="w-4 h-4 text-sky-600" />
+          <span>Type-Specific Specifications ({currentType})</span>
+        </div>
+
+        {/* 1. UPS CAPACITY */}
+        {typeUpper.includes('UPS') && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">UPS Capacity / VA Rating *</label>
+              <select
+                value={isEditMode ? editUpsCapacity : upsCapacity}
+                onChange={(e) => (isEditMode ? setEditUpsCapacity(e.target.value) : setUpsCapacity(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                <option value="500VA">500 VA</option>
+                <option value="650VA">650 VA</option>
+                <option value="1000VA (1 kVA)">1000 VA (1 kVA)</option>
+                <option value="1.5 kVA">1.5 kVA</option>
+                <option value="2.0 kVA">2.0 kVA</option>
+                <option value="3.0 kVA">3.0 kVA</option>
+                <option value="5.0 kVA">5.0 kVA</option>
+                <option value="6.0 kVA">6.0 kVA</option>
+                <option value="10.0 kVA Online">10.0 kVA Online Double-Conversion</option>
+                <option value="15.0 kVA+ Industrial">15.0 kVA+ Industrial / Theater UPS</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Backup Topology / Type</label>
+              <select
+                defaultValue="Line-Interactive"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="Line-Interactive">Line-Interactive</option>
+                <option value="Online Double-Conversion">Online Double-Conversion</option>
+                <option value="Offline / Standby">Offline / Standby</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 2. PRINTER */}
+        {typeUpper.includes('PRINTER') && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Color / Output Mode *</label>
+              <select
+                value={isEditMode ? editPrinterOutputType : printerOutputType}
+                onChange={(e) => (isEditMode ? setEditPrinterOutputType(e.target.value) : setPrinterOutputType(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                <option value="Monochrome (Black & White)">Monochrome (Black & White)</option>
+                <option value="Color">Color</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Printer Technology</label>
+              <select
+                value={isEditMode ? editPrinterTech : printerTech}
+                onChange={(e) => (isEditMode ? setEditPrinterTech(e.target.value) : setPrinterTech(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="LaserJet">LaserJet</option>
+                <option value="InkJet">InkJet</option>
+                <option value="Thermal Barcode / Receipt">Thermal / Barcode Receipt</option>
+                <option value="Multi-Function Copier / All-in-One">Multi-Function Copier / All-in-One</option>
+                <option value="Dot Matrix">Dot Matrix</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 3. ACCESS POINT */}
+        {(typeUpper.includes('ACCESS POINT') || typeUpper.includes('AP') || typeUpper.includes('WIRELESS')) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Deployment Environment *</label>
+              <select
+                value={isEditMode ? editEnvironmentSpec : environmentSpec}
+                onChange={(e) => (isEditMode ? setEditEnvironmentSpec(e.target.value) : setEnvironmentSpec(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                <option value="Indoor">Indoor</option>
+                <option value="Outdoor">Outdoor</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Wi-Fi Standard / Frequency</label>
+              <select
+                defaultValue="Dual-Band (2.4GHz & 5GHz)"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="Dual-Band (2.4GHz & 5GHz)">Dual-Band (2.4GHz & 5GHz)</option>
+                <option value="Wi-Fi 6 (802.11ax)">Wi-Fi 6 (802.11ax)</option>
+                <option value="Wi-Fi 6E (6GHz)">Wi-Fi 6E (6GHz Tri-Band)</option>
+                <option value="Outdoor Long-Range Mesh">Outdoor Long-Range Mesh</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 4. NETWORK CABLE */}
+        {(typeUpper.includes('CABLE') || typeUpper.includes('PATCH') || typeUpper.includes('NETWORK CABLE')) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Cable Environment *</label>
+              <select
+                value={isEditMode ? editEnvironmentSpec : environmentSpec}
+                onChange={(e) => (isEditMode ? setEditEnvironmentSpec(e.target.value) : setEnvironmentSpec(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                <option value="Indoor">Indoor</option>
+                <option value="Outdoor">Outdoor / Outdoor Armored</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Cable Category / Specification</label>
+              <select
+                value={isEditMode ? editCableCategory : cableCategory}
+                onChange={(e) => (isEditMode ? setEditCableCategory(e.target.value) : setCableCategory(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="Cat 6">Cat 6 (UTP / STP)</option>
+                <option value="Cat 6A">Cat 6A (10G Shielded)</option>
+                <option value="Cat 7">Cat 7 (S/FTP)</option>
+                <option value="Fiber Optic Single-Mode">Fiber Optic Single-Mode (OS2)</option>
+                <option value="Fiber Optic Multi-Mode">Fiber Optic Multi-Mode (OM3/OM4)</option>
+                <option value="Cat 5e">Cat 5e</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 5. SERVER */}
+        {typeUpper.includes('SERVER') && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Server Form Factor *</label>
+              <select
+                value={isEditMode ? editServerFormFactor : serverFormFactor}
+                onChange={(e) => (isEditMode ? setEditServerFormFactor(e.target.value) : setServerFormFactor(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="Rackmount 1U">Rackmount 1U</option>
+                <option value="Rackmount 2U">Rackmount 2U</option>
+                <option value="Rackmount 4U">Rackmount 4U</option>
+                <option value="Tower Server">Tower Server</option>
+                <option value="Blade Chassis">Blade Chassis</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Storage / RAID Array</label>
+              <select
+                defaultValue="RAID 5 (Parity)"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="RAID 1 (Mirrored)">RAID 1 (Mirrored)</option>
+                <option value="RAID 5 (Parity)">RAID 5 (Parity)</option>
+                <option value="RAID 10 (Striped + Mirrored)">RAID 10</option>
+                <option value="No RAID">No RAID</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 6. SWITCH / ROUTER / FIREWALL */}
+        {(typeUpper.includes('SWITCH') || typeUpper.includes('ROUTER') || typeUpper.includes('FIREWALL')) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Port Count & Power *</label>
+              <select
+                value={isEditMode ? editSwitchPorts : switchPorts}
+                onChange={(e) => (isEditMode ? setEditSwitchPorts(e.target.value) : setSwitchPorts(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="8-Port Non-PoE">8-Port Non-PoE</option>
+                <option value="16-Port Managed PoE+">16-Port Managed PoE+</option>
+                <option value="24-Port Managed PoE+">24-Port Managed PoE+</option>
+                <option value="48-Port Managed PoE+">48-Port Managed PoE+</option>
+                <option value="Enterprise Core Modular">Enterprise Core Modular</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-500 font-semibold mb-1">Deployment Environment</label>
+              <select
+                value={isEditMode ? editEnvironmentSpec : environmentSpec}
+                onChange={(e) => (isEditMode ? setEditEnvironmentSpec(e.target.value) : setEnvironmentSpec(e.target.value))}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="Indoor">Indoor Server Room / Rack</option>
+                <option value="Outdoor">Outdoor / Weatherproof Cabinet</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* 7. DESKTOP / LAPTOP / WORKSTATION / TABLET */}
+        {['DESKTOP', 'LAPTOP', 'WORKSTATION', 'TABLET'].some((k) => typeUpper.includes(k)) && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Hardware Processor & Memory Configuration</label>
+            <select
+              value={isEditMode ? editComputerSpecs : computerSpecs}
+              onChange={(e) => (isEditMode ? setEditComputerSpecs(e.target.value) : setComputerSpecs(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="Intel Core i5 / 16GB RAM / 512GB SSD">Intel Core i5 / 16GB RAM / 512GB SSD</option>
+              <option value="Intel Core i7 / 32GB RAM / 1TB SSD">Intel Core i7 / 32GB RAM / 1TB SSD</option>
+              <option value="AMD Ryzen 5 / 16GB RAM / 512GB SSD">AMD Ryzen 5 / 16GB RAM / 512GB SSD</option>
+              <option value="Apple M2/M3 Pro / 16GB RAM / 512GB SSD">Apple M2/M3 Pro / 16GB RAM / 512GB SSD</option>
+              <option value="Intel Core i3 / 8GB RAM / 256GB SSD">Intel Core i3 / 8GB RAM / 256GB SSD</option>
+            </select>
+          </div>
+        )}
+
+        {/* 8. SCANNER / BARCODE */}
+        {typeUpper.includes('SCANNER') && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Scanner Mechanism / Type</label>
+            <select
+              value={isEditMode ? editScannerType : scannerType}
+              onChange={(e) => (isEditMode ? setEditScannerType(e.target.value) : setScannerType(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+            >
+              <option value="Handheld USB Barcode Scanner">Handheld USB Barcode Scanner</option>
+              <option value="Wireless Bluetooth Barcode Scanner">Wireless Bluetooth Barcode Scanner</option>
+              <option value="Flatbed Document Scanner">Flatbed Document Scanner</option>
+              <option value="High-Speed Sheetfed Scanner">High-Speed Sheetfed Scanner</option>
+            </select>
+          </div>
+        )}
+
+        {/* 9. MOUSE */}
+        {typeUpper.includes('MOUSE') && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Mouse Connectivity *</label>
+            <select
+              value={isEditMode ? editMouseConnectivity : mouseConnectivity}
+              onChange={(e) => (isEditMode ? setEditMouseConnectivity(e.target.value) : setMouseConnectivity(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+            >
+              <option value="Wired">Wired</option>
+              <option value="Wireless">Wireless</option>
+            </select>
+          </div>
+        )}
+
+        {/* 10. KEYBOARD */}
+        {typeUpper.includes('KEYBOARD') && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Keyboard Connectivity *</label>
+            <select
+              value={isEditMode ? editKeyboardConnectivity : keyboardConnectivity}
+              onChange={(e) => (isEditMode ? setEditKeyboardConnectivity(e.target.value) : setKeyboardConnectivity(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+            >
+              <option value="Wired">Wired</option>
+              <option value="Wireless">Wireless</option>
+            </select>
+          </div>
+        )}
+
+        {/* 11. WI-FI ADAPTER */}
+        {(typeUpper.includes('WI-FI') || typeUpper.includes('WIFI')) && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Wi-Fi Adapter Interface / Form Factor *</label>
+            <select
+              value={isEditMode ? editWifiAdapterType : wifiAdapterType}
+              onChange={(e) => (isEditMode ? setEditWifiAdapterType(e.target.value) : setWifiAdapterType(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+            >
+              <option value="Dongle (USB)">Dongle (USB)</option>
+              <option value="PCI / PCIe Card">PCI / PCIe Card</option>
+            </select>
+          </div>
+        )}
+
+        {/* 12. BLUETOOTH ADAPTER */}
+        {typeUpper.includes('BLUETOOTH') && (
+          <div>
+            <label className="block text-slate-500 font-semibold mb-1">Bluetooth Adapter Interface / Form Factor *</label>
+            <select
+              value={isEditMode ? editBluetoothAdapterType : bluetoothAdapterType}
+              onChange={(e) => (isEditMode ? setEditBluetoothAdapterType(e.target.value) : setBluetoothAdapterType(e.target.value))}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer font-medium"
+            >
+              <option value="Dongle (USB)">Dongle (USB)</option>
+              <option value="PCI / PCIe Card">PCI / PCIe Card</option>
+            </select>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -576,6 +1089,18 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 >
                   <Upload className="w-4 h-4 text-emerald-200" />
                   <span>Bulk Upload (CSV)</span>
+                </button>
+              )}
+
+              {isSuperAdminOrIT && (
+                <button
+                  id="asset-register-report-btn"
+                  onClick={() => setAssetRegisterModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+                  title="Generate official hospital asset register in PDF and Excel formats"
+                >
+                  <FileText className="w-4 h-4 text-purple-200" />
+                  <span>Asset Register (PDF/Excel)</span>
                 </button>
               )}
 
@@ -1294,7 +1819,18 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateAsset} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Asset Name / Clinical Equipment Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Pharmacy Dispensing Terminal 1, Maternity Ward Starlink Router, Theatre Central UPS"
+                  value={assetName}
+                  onChange={(e) => setAssetName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">Asset Type *</label>
                   <select
@@ -1302,14 +1838,11 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     onChange={(e) => setNewAssetType(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="Desktop">Desktop Workstation</option>
-                    <option value="Laptop">Clinical Laptop</option>
-                    <option value="Server">Local Server</option>
-                    <option value="Switch">Network Switch</option>
-                    <option value="Router">Core Router</option>
-                    <option value="Access Point">Wi-Fi Access Point</option>
-                    <option value="Printer">Printer / Scanner</option>
-                    <option value="UPS">Power Backup UPS</option>
+                    {assetTypesList.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1320,13 +1853,32 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     onChange={(e) => setCondition(e.target.value as AssetCondition)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="New">Brand New</option>
-                    <option value="Excellent">Excellent</option>
-                    <option value="Good">Good (Operational)</option>
-                    <option value="Fair">Fair (Needs attention)</option>
+                    {assetConditionsList.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">Status *</label>
+                  <select
+                    value={assetStatus}
+                    onChange={(e) => setAssetStatus(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    {assetStatusesList.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
+
+              {/* Dynamic Type-Specific Specifications */}
+              {renderTypeSpecificFields(newAssetType, false)}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1334,7 +1886,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Dell, HP, Cisco, Lenovo"
+                    placeholder="e.g. Dell, HP, Cisco, Lenovo, APC"
                     value={manufacturer}
                     onChange={(e) => setManufacturer(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
@@ -1346,7 +1898,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. OptiPlex 7090, ProBook 450"
+                    placeholder="e.g. OptiPlex 7090, Smart-UPS 1500"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
@@ -1356,26 +1908,40 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Serial Number *</label>
+                  <label className="block text-slate-500 font-semibold mb-1">Serial Number (Optional)</label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. CN-0K9821-7281"
+                    placeholder="e.g. CN-0K9821-7281 (Optional)"
                     value={serialNumber}
                     onChange={(e) => setSerialNumber(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
-                  <input
-                    type="text"
-                    value={os}
-                    onChange={(e) => setOs(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  />
-                </div>
+                {/* Operating System for compute devices */}
+                {['Desktop', 'Laptop', 'Server', 'Workstation', 'Tablet'].includes(newAssetType) ? (
+                  <div>
+                    <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Windows 11 Pro, Ubuntu 24.04"
+                      value={os}
+                      onChange={(e) => setOs(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-slate-500 font-semibold mb-1">Assigned Custodian / Staff</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Dr. Mensah, Sister Rose"
+                      value={assignedUser}
+                      onChange={(e) => setAssignedUser(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1436,44 +2002,46 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Supplier / Vendor</label>
-                  <input
-                    type="text"
-                    value={supplier}
-                    onChange={(e) => setSupplier(e.target.value)}
-                    placeholder="e.g. Hospital Procurement Agency"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Static IP (if applicable)</label>
-                  <input
-                    type="text"
-                    placeholder="192.168.10.X"
-                    value={ipAddress}
-                    onChange={(e) => setIpAddress(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Supplier / Vendor</label>
+                <input
+                  type="text"
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                  placeholder="e.g. Hospital Procurement Agency"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
-                >
-                  Save to Local Register
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div>
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setTypesConditionsModalOpen(true)}
+                      className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 cursor-pointer text-xs"
+                      title="Manage Asset Types, Conditions, and Statuses"
+                    >
+                      ⚙️ Config
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreateModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+                  >
+                    Save to Local Register
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1498,6 +2066,17 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveEditAsset} className="space-y-4">
+              <div>
+                <label className="block text-slate-500 font-semibold mb-1">Asset Name / Clinical Equipment Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Pharmacy Dispensing Terminal 1, Maternity Ward Starlink Router, Theatre Central UPS"
+                  value={editAssetName}
+                  onChange={(e) => setEditAssetName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">Asset Tag *</label>
@@ -1517,28 +2096,28 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     onChange={(e) => setEditAssetType(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="Desktop">Desktop Workstation</option>
-                    <option value="Laptop">Clinical Laptop</option>
-                    <option value="Server">Local Server</option>
-                    <option value="Switch">Network Switch</option>
-                    <option value="Router">Core Router</option>
-                    <option value="Access Point">Wi-Fi Access Point</option>
-                    <option value="Printer">Printer / Scanner</option>
-                    <option value="UPS">Power Backup UPS</option>
+                    {assetTypesList.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Serial Number (S/N) *</label>
+                  <label className="block text-slate-500 font-semibold mb-1">Serial Number (S/N) (Optional)</label>
                   <input
                     type="text"
-                    required
+                    placeholder="e.g. CN-0K9821-7281 (Optional)"
                     value={editSerialNumber}
                     onChange={(e) => setEditSerialNumber(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
                   />
                 </div>
               </div>
+
+              {/* Dynamic Type-Specific Specifications */}
+              {renderTypeSpecificFields(editAssetType, true)}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1621,11 +2200,11 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     onChange={(e) => setEditCondition(e.target.value as AssetCondition)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="New">Brand New</option>
-                    <option value="Excellent">Excellent</option>
-                    <option value="Good">Good (Operational)</option>
-                    <option value="Fair">Fair (Needs attention)</option>
-                    <option value="Poor">Poor (Requires Service)</option>
+                    {assetConditionsList.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1636,50 +2215,43 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                     onChange={(e) => setEditStatus(e.target.value as AssetStatus)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="Active">Active</option>
-                    <option value="Assigned">Assigned</option>
-                    <option value="Available">Available / In Storage</option>
-                    <option value="Under Repair">Under Repair</option>
-                    <option value="Maintenance">Maintenance</option>
-                    <option value="Decommissioned">Decommissioned</option>
+                    {assetStatusesList.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
-                  <input
-                    type="text"
-                    value={editOperatingSystem}
-                    onChange={(e) => setEditOperatingSystem(e.target.value)}
-                    placeholder="Windows 11 Pro"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  />
-                </div>
+              {/* Dynamic OS and MAC fields: Hidden for UPS */}
+              {!editAssetType.toUpperCase().includes('UPS') && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {['Desktop', 'Laptop', 'Server', 'Workstation', 'Tablet'].includes(editAssetType) && (
+                    <div>
+                      <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
+                      <input
+                        type="text"
+                        value={editOperatingSystem}
+                        onChange={(e) => setEditOperatingSystem(e.target.value)}
+                        placeholder="Windows 11 Pro"
+                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  )}
 
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Static IP Address</label>
-                  <input
-                    type="text"
-                    value={editIpAddress}
-                    onChange={(e) => setEditIpAddress(e.target.value)}
-                    placeholder="192.168.10.X"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
-                  />
+                  <div>
+                    <label className="block text-slate-500 font-semibold mb-1">MAC Address</label>
+                    <input
+                      type="text"
+                      value={editMacAddress}
+                      onChange={(e) => setEditMacAddress(e.target.value)}
+                      placeholder="00:1A:2B:3C:4D:5E"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1">MAC Address</label>
-                  <input
-                    type="text"
-                    value={editMacAddress}
-                    onChange={(e) => setEditMacAddress(e.target.value)}
-                    placeholder="00:1A:2B:3C:4D:5E"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
-                  />
-                </div>
-              </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -1737,22 +2309,37 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setEditModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEdit}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer shadow-sm transition disabled:opacity-50"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div>
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setTypesConditionsModalOpen(true)}
+                      className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 cursor-pointer text-xs"
+                      title="Manage Asset Types, Conditions, and Statuses"
+                    >
+                      ⚙️ Config
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer shadow-sm transition disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1901,6 +2488,502 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           setBatchQRModalOpen(true);
         }}
       />
+
+      {/* MANAGE ASSET TYPES AND CONDITIONS MODAL */}
+      {typesConditionsModalOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950/70 text-sky-600 dark:text-sky-400">
+                  <HardDrive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Manage Asset Types & Equipment Conditions
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Super Admin & IT Unit configuration for hospital hardware registry
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTypesConditionsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Tabs Navigation */}
+            <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2">
+              <button
+                type="button"
+                onClick={() => setConfigModalTab('TYPES')}
+                className={`px-4 py-2 font-bold text-xs border-b-2 transition cursor-pointer ${
+                  configModalTab === 'TYPES'
+                    ? 'border-sky-600 text-sky-600 dark:text-sky-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Asset Types ({assetTypesList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigModalTab('CONDITIONS')}
+                className={`px-4 py-2 font-bold text-xs border-b-2 transition cursor-pointer ${
+                  configModalTab === 'CONDITIONS'
+                    ? 'border-sky-600 text-sky-600 dark:text-sky-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Asset Conditions ({assetConditionsList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigModalTab('STATUSES')}
+                className={`px-4 py-2 font-bold text-xs border-b-2 transition cursor-pointer ${
+                  configModalTab === 'STATUSES'
+                    ? 'border-sky-600 text-sky-600 dark:text-sky-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Asset Statuses ({assetStatusesList.length})
+              </button>
+            </div>
+
+            {/* TAB 1: ASSET TYPES */}
+            {configModalTab === 'TYPES' && (
+              <div className="space-y-4 bg-slate-50/70 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white uppercase tracking-wider">
+                    Asset Hardware Types ({assetTypesList.length})
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaults = [
+                        'Desktop',
+                        'Laptop',
+                        'Server',
+                        'Workstation',
+                        'Tablet',
+                        'UPS',
+                        'Switch',
+                        'Router',
+                        'Printer',
+                        'Scanner',
+                        'Barcode Scanner',
+                        'Projector',
+                        'Monitor',
+                        'Biometric Terminal',
+                        'IP Phone',
+                        'Other Equipment',
+                      ];
+                      handleSaveAssetTypes(defaults);
+                    }}
+                    className="text-[10px] text-sky-600 dark:text-sky-400 font-bold hover:underline cursor-pointer"
+                  >
+                    Reset Default Types
+                  </button>
+                </div>
+
+                {/* Add New Type input */}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="e.g. ECG Machine, Starlink Terminal, Infusion Pump..."
+                    value={newTypeInput}
+                    onChange={(e) => setNewTypeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const trimmed = newTypeInput.trim();
+                        if (trimmed && !assetTypesList.includes(trimmed)) {
+                          handleSaveAssetTypes([...assetTypesList, trimmed]);
+                          setNewTypeInput('');
+                        }
+                      }
+                    }}
+                    className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs focus:outline-none text-slate-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = newTypeInput.trim();
+                      if (trimmed && !assetTypesList.includes(trimmed)) {
+                        handleSaveAssetTypes([...assetTypesList, trimmed]);
+                        setNewTypeInput('');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Type</span>
+                  </button>
+                </div>
+
+                {/* Types List */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {assetTypesList.map((t) => (
+                    <div
+                      key={t}
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                    >
+                      {editingTypeOriginal === t ? (
+                        <div className="flex items-center gap-1 flex-1 mr-2">
+                          <input
+                            type="text"
+                            value={editingTypeValue}
+                            onChange={(e) => setEditingTypeValue(e.target.value)}
+                            className="flex-1 px-2 py-0.5 text-xs bg-slate-50 dark:bg-slate-800 border border-sky-500 rounded text-slate-900 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = editingTypeValue.trim();
+                              if (trimmed && trimmed !== t) {
+                                handleSaveAssetTypes(assetTypesList.map((item) => (item === t ? trimmed : item)));
+                              }
+                              setEditingTypeOriginal(null);
+                            }}
+                            className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTypeOriginal(null)}
+                            className="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{t}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTypeOriginal(t);
+                                setEditingTypeValue(t);
+                              }}
+                              className="p-1 text-slate-400 hover:text-sky-600 transition cursor-pointer"
+                              title="Rename type"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            {assetTypesList.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSaveAssetTypes(assetTypesList.filter((item) => item !== t));
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                title="Delete type"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: ASSET CONDITIONS */}
+            {configModalTab === 'CONDITIONS' && (
+              <div className="space-y-4 bg-slate-50/70 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white uppercase tracking-wider">
+                    Equipment Conditions ({assetConditionsList.length})
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaults = ['New', 'Excellent', 'Good', 'Fair', 'Poor', 'Defective'];
+                      handleSaveAssetConditions(defaults);
+                    }}
+                    className="text-[10px] text-sky-600 dark:text-sky-400 font-bold hover:underline cursor-pointer"
+                  >
+                    Reset Default Conditions
+                  </button>
+                </div>
+
+                {/* Add New Condition input */}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="e.g. Scrapped, Faulty, Refurbished, Defective..."
+                    value={newConditionInput}
+                    onChange={(e) => setNewConditionInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const trimmed = newConditionInput.trim();
+                        if (trimmed && !assetConditionsList.includes(trimmed)) {
+                          handleSaveAssetConditions([...assetConditionsList, trimmed]);
+                          setNewConditionInput('');
+                        }
+                      }
+                    }}
+                    className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs focus:outline-none text-slate-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = newConditionInput.trim();
+                      if (trimmed && !assetConditionsList.includes(trimmed)) {
+                        handleSaveAssetConditions([...assetConditionsList, trimmed]);
+                        setNewConditionInput('');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Condition</span>
+                  </button>
+                </div>
+
+                {/* Conditions List */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {assetConditionsList.map((c) => (
+                    <div
+                      key={c}
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                    >
+                      {editingCondOriginal === c ? (
+                        <div className="flex items-center gap-1 flex-1 mr-2">
+                          <input
+                            type="text"
+                            value={editingCondValue}
+                            onChange={(e) => setEditingCondValue(e.target.value)}
+                            className="flex-1 px-2 py-0.5 text-xs bg-slate-50 dark:bg-slate-800 border border-sky-500 rounded text-slate-900 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = editingCondValue.trim();
+                              if (trimmed && trimmed !== c) {
+                                handleSaveAssetConditions(assetConditionsList.map((item) => (item === c ? trimmed : item)));
+                              }
+                              setEditingCondOriginal(null);
+                            }}
+                            className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCondOriginal(null)}
+                            className="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{c}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCondOriginal(c);
+                                setEditingCondValue(c);
+                              }}
+                              className="p-1 text-slate-400 hover:text-sky-600 transition cursor-pointer"
+                              title="Rename condition"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            {assetConditionsList.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSaveAssetConditions(assetConditionsList.filter((item) => item !== c));
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                title="Delete condition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: ASSET STATUSES */}
+            {configModalTab === 'STATUSES' && (
+              <div className="space-y-4 bg-slate-50/70 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white uppercase tracking-wider">
+                    Operational Statuses ({assetStatusesList.length})
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaults = [
+                        'Active',
+                        'In Use',
+                        'In Storage',
+                        'Assigned',
+                        'Available',
+                        'Under Repair',
+                        'Maintenance',
+                        'Decommissioned',
+                        'Disposed',
+                        'Reserved',
+                      ];
+                      handleSaveAssetStatuses(defaults);
+                    }}
+                    className="text-[10px] text-sky-600 dark:text-sky-400 font-bold hover:underline cursor-pointer"
+                  >
+                    Reset Default Statuses
+                  </button>
+                </div>
+
+                {/* Add New Status input */}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="e.g. On Loan, Stolen, Calibration, Quarantine..."
+                    value={newStatusInput}
+                    onChange={(e) => setNewStatusInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const trimmed = newStatusInput.trim();
+                        if (trimmed && !assetStatusesList.includes(trimmed)) {
+                          handleSaveAssetStatuses([...assetStatusesList, trimmed]);
+                          setNewStatusInput('');
+                        }
+                      }
+                    }}
+                    className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs focus:outline-none text-slate-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = newStatusInput.trim();
+                      if (trimmed && !assetStatusesList.includes(trimmed)) {
+                        handleSaveAssetStatuses([...assetStatusesList, trimmed]);
+                        setNewStatusInput('');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Status</span>
+                  </button>
+                </div>
+
+                {/* Statuses List */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {assetStatusesList.map((s) => (
+                    <div
+                      key={s}
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                    >
+                      {editingStatusOriginal === s ? (
+                        <div className="flex items-center gap-1 flex-1 mr-2">
+                          <input
+                            type="text"
+                            value={editingStatusValue}
+                            onChange={(e) => setEditingStatusValue(e.target.value)}
+                            className="flex-1 px-2 py-0.5 text-xs bg-slate-50 dark:bg-slate-800 border border-sky-500 rounded text-slate-900 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = editingStatusValue.trim();
+                              if (trimmed && trimmed !== s) {
+                                handleSaveAssetStatuses(assetStatusesList.map((item) => (item === s ? trimmed : item)));
+                              }
+                              setEditingStatusOriginal(null);
+                            }}
+                            className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingStatusOriginal(null)}
+                            className="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[10px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{s}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingStatusOriginal(s);
+                                setEditingStatusValue(s);
+                              }}
+                              className="p-1 text-slate-400 hover:text-sky-600 transition cursor-pointer"
+                              title="Rename status"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            {assetStatusesList.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSaveAssetStatuses(assetStatusesList.filter((item) => item !== s));
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                title="Delete status"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTypesConditionsModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                Done & Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Asset Register Report Generator Modal */}
+      {assetRegisterModalOpen && (
+        <AssetRegisterReportModal
+          isOpen={assetRegisterModalOpen}
+          onClose={() => setAssetRegisterModalOpen(false)}
+          assets={assets}
+          departments={departmentsList}
+          allUsers={allUsers}
+          currentUser={currentUser}
+          systemSettings={systemSettings}
+        />
+      )}
         </>
       )}
     </div>

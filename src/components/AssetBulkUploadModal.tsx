@@ -20,6 +20,48 @@ import {
 import { type Asset, type AssetCondition, type AssetStatus, type User } from '../types';
 import { assetService } from '../services/assetService';
 import { downloadTextFile } from '../utils/fileDownloader';
+import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
+
+const VALID_ASSET_TYPES = [
+  'Desktop',
+  'Laptop',
+  'Server',
+  'Switch',
+  'Router',
+  'Access Point',
+  'Printer',
+  'UPS',
+  'Barcode Scanner',
+  'Tablet',
+  'Network Cable',
+  'Mouse',
+  'Keyboard',
+  'Wi-Fi Adapter',
+  'Bluetooth Adapter',
+];
+
+const VALID_CONDITIONS: AssetCondition[] = [
+  'New',
+  'Excellent',
+  'Good',
+  'Fair',
+  'Poor',
+  'Defective',
+];
+
+const VALID_STATUSES: AssetStatus[] = [
+  'Active',
+  'In Use',
+  'In Storage',
+  'Assigned',
+  'Available',
+  'Under Repair',
+  'Maintenance',
+  'Retired',
+  'Decommissioned',
+  'Disposed',
+  'Reserved',
+];
 
 interface AssetBulkUploadModalProps {
   isOpen: boolean;
@@ -52,6 +94,7 @@ interface ParsedAssetRow {
   notes?: string;
   isValid: boolean;
   errors: string[];
+  flaggedIssues: string[];
 }
 
 export function generateAssetCsvTemplate(existingAssets: Asset[] = []): string {
@@ -126,6 +169,24 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       h.trim().replace(/^"|"$/g, '').toLowerCase()
     );
 
+    const validDepartments = Array.from(
+      new Set([
+        'Pharmacy',
+        'OPD (Outpatient)',
+        'Emergency & Triage',
+        'Maternity Ward',
+        'Surgical Theatre',
+        'Laboratory',
+        'Radiology',
+        'IT & Health Informatics',
+        'Administration',
+        'Procurement & Stores',
+        'Pediatrics Ward',
+        'Internal Medicine',
+        ...existingAssets.map((a) => a.department).filter(Boolean),
+      ])
+    );
+
     const existingSerials = new Set(
       existingAssets.map((a) => (a.serialNumber || '').toLowerCase().trim()).filter(Boolean)
     );
@@ -145,43 +206,49 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         rowObj[h] = values[index] !== undefined ? values[index] : '';
       });
 
-      // Flexible column mappings
-      const assetType =
+      // Flexible column mappings & pre-populated value fuzzy validation
+      const rawAssetType =
         rowObj['assettype'] ||
         rowObj['type'] ||
         rowObj['equipmenttype'] ||
         rowObj['category'] ||
         'Desktop';
+      const typeMatch = matchOptionWithFallback(rawAssetType, VALID_ASSET_TYPES, 'Desktop', 'Asset Type');
 
-      const manufacturer =
+      const manufacturer = (
         rowObj['manufacturer'] ||
         rowObj['make'] ||
         rowObj['brand'] ||
         rowObj['vendor'] ||
-        '';
+        'Unspecified Manufacturer'
+      ).trim();
 
-      const model = rowObj['model'] || rowObj['modelnumber'] || rowObj['specs'] || '';
+      const model = (rowObj['model'] || rowObj['modelnumber'] || rowObj['specs'] || 'Standard Equipment').trim();
 
-      const serialNumber =
+      const serialNumber = (
         rowObj['serialnumber'] ||
         rowObj['serial'] ||
         rowObj['sn'] ||
         rowObj['service_tag'] ||
-        '';
+        ''
+      ).trim();
 
-      const department =
+      const rawDepartment = (
         rowObj['department'] ||
         rowObj['dept'] ||
         rowObj['ward'] ||
         rowObj['unit'] ||
-        'General';
+        'OPD (Outpatient)'
+      ).trim();
+      const deptMatch = matchOptionWithFallback(rawDepartment, validDepartments, validDepartments[0] || 'OPD (Outpatient)', 'Department');
 
-      const location =
+      const location = (
         rowObj['location'] ||
         rowObj['room'] ||
         rowObj['roomnumber'] ||
         rowObj['desk'] ||
-        'Office';
+        'Main Facility'
+      ).trim();
 
       const assignedUser =
         rowObj['assigneduser'] ||
@@ -190,24 +257,11 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         rowObj['staff'] ||
         '';
 
-      const conditionRaw = (
-        rowObj['condition'] || 'Good'
-      ).toLowerCase();
-      let condition: AssetCondition = 'Good';
-      if (conditionRaw.includes('excel')) condition = 'Excellent';
-      else if (conditionRaw.includes('fair')) condition = 'Fair';
-      else if (conditionRaw.includes('poor')) condition = 'Poor';
+      const rawCondition = rowObj['condition'] || 'Good';
+      const condMatch = matchOptionWithFallback(rawCondition, VALID_CONDITIONS, 'Good', 'Condition');
 
-      const statusRaw = (rowObj['status'] || '').toLowerCase();
-      let status: AssetStatus = assignedUser.trim() ? 'Assigned' : 'Available';
-      if (statusRaw.includes('repair')) status = 'In Repair';
-      else if (statusRaw.includes('maint')) status = 'Under Maintenance';
-      else if (statusRaw.includes('retir') || statusRaw.includes('decom')) status = 'Retired';
-      else if (statusRaw.includes('lost')) status = 'Lost';
-      else if (statusRaw.includes('damag')) status = 'Damaged';
-      else if (statusRaw.includes('dispos')) status = 'Disposed';
-      else if (statusRaw.includes('assign')) status = 'Assigned';
-      else if (statusRaw.includes('avail') || statusRaw.includes('active')) status = assignedUser.trim() ? 'Assigned' : 'Available';
+      const rawStatus = rowObj['status'] || (assignedUser.trim() ? 'Assigned' : 'Available');
+      const statusMatch = matchOptionWithFallback(rawStatus, VALID_STATUSES, (assignedUser.trim() ? 'Assigned' : 'Available') as AssetStatus, 'Status');
 
       const operatingSystem = rowObj['operatingsystem'] || rowObj['os'] || '';
       const ipAddress = rowObj['ipaddress'] || rowObj['ip'] || '';
@@ -219,11 +273,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       const purchaseDate = rowObj['purchasedate'] || rowObj['date'] || '';
       const assetTag = rowObj['assettag'] || rowObj['tag'] || '';
 
+      const flaggedIssues: string[] = [];
+      if (!typeMatch.isExactMatch) flaggedIssues.push(typeMatch.issueDescription!);
+      if (!deptMatch.isExactMatch) flaggedIssues.push(deptMatch.issueDescription!);
+      if (!condMatch.isExactMatch) flaggedIssues.push(condMatch.issueDescription!);
+      if (!statusMatch.isExactMatch) flaggedIssues.push(statusMatch.issueDescription!);
+
       // Validation
       const errors: string[] = [];
-      if (!manufacturer.trim()) errors.push('Manufacturer is required');
-      if (!model.trim()) errors.push('Model is required');
-      if (!department.trim()) errors.push('Department is required');
       if (serialNumber && existingSerials.has(serialNumber.toLowerCase().trim())) {
         errors.push(`Serial "${serialNumber}" already exists in registry`);
       }
@@ -231,15 +288,15 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       results.push({
         id: `row-${i}-${Date.now()}`,
         assetTag,
-        assetType,
+        assetType: typeMatch.matchedValue,
         manufacturer,
         model,
         serialNumber,
-        department,
+        department: deptMatch.matchedValue,
         location,
         assignedUser,
-        condition,
-        status,
+        condition: condMatch.matchedValue as AssetCondition,
+        status: statusMatch.matchedValue as AssetStatus,
         operatingSystem,
         ipAddress,
         macAddress,
@@ -250,6 +307,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         purchaseDate,
         isValid: errors.length === 0,
         errors,
+        flaggedIssues,
       });
     }
 
@@ -293,35 +351,65 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
             try {
               const parsed = JSON.parse(content);
               const array = Array.isArray(parsed) ? parsed : [parsed];
-              const rows: ParsedAssetRow[] = array.map((item, idx) => ({
-                id: `json-${idx}-${Date.now()}`,
-                assetTag: item.assetTag || '',
-                assetType: item.assetType || 'Desktop',
-                manufacturer: item.manufacturer || '',
-                model: item.model || '',
-                serialNumber: item.serialNumber || '',
-                department: item.department || 'General',
-                location: item.location || 'Office',
-                assignedUser: item.assignedUser || '',
-                condition: (item.condition as AssetCondition) || 'Good',
-                status: (['Available', 'Assigned', 'In Repair', 'Under Maintenance', 'Retired', 'Lost', 'Damaged', 'Disposed'].includes(item.status)
-                  ? item.status
-                  : item.assignedUser ? 'Assigned' : 'Available') as AssetStatus,
-                operatingSystem: item.operatingSystem || '',
-                ipAddress: item.ipAddress || '',
-                macAddress: item.macAddress || '',
-                specifications: item.specifications || '',
-                notes: item.notes || '',
-                purchasePrice: Number(item.purchasePrice) || 0,
-                supplier: item.supplier || '',
-                purchaseDate: item.purchaseDate || '',
-                isValid: Boolean(item.manufacturer && item.model && item.department),
-                errors: [
-                  !item.manufacturer ? 'Missing manufacturer' : '',
-                  !item.model ? 'Missing model' : '',
-                  !item.department ? 'Missing department' : '',
-                ].filter(Boolean),
-              }));
+              const validDepartments = Array.from(
+                new Set([
+                  'Pharmacy',
+                  'OPD (Outpatient)',
+                  'Emergency & Triage',
+                  'Maternity Ward',
+                  'Surgical Theatre',
+                  'Laboratory',
+                  'Radiology',
+                  'IT & Health Informatics',
+                  'Administration',
+                  'Procurement & Stores',
+                  'Pediatrics Ward',
+                  'Internal Medicine',
+                  ...existingAssets.map((a) => a.department).filter(Boolean),
+                ])
+              );
+
+              const rows: ParsedAssetRow[] = array.map((item, idx) => {
+                const typeMatch = matchOptionWithFallback(item.assetType, VALID_ASSET_TYPES, 'Desktop', 'Asset Type');
+                const deptMatch = matchOptionWithFallback(item.department, validDepartments, 'OPD (Outpatient)', 'Department');
+                const condMatch = matchOptionWithFallback(item.condition, VALID_CONDITIONS, 'Good', 'Condition');
+                const statusMatch = matchOptionWithFallback(item.status, VALID_STATUSES, (item.assignedUser ? 'Assigned' : 'Available') as AssetStatus, 'Status');
+
+                const flaggedIssues: string[] = [];
+                if (!typeMatch.isExactMatch) flaggedIssues.push(typeMatch.issueDescription!);
+                if (!deptMatch.isExactMatch) flaggedIssues.push(deptMatch.issueDescription!);
+                if (!condMatch.isExactMatch) flaggedIssues.push(condMatch.issueDescription!);
+                if (!statusMatch.isExactMatch) flaggedIssues.push(statusMatch.issueDescription!);
+
+                return {
+                  id: `json-${idx}-${Date.now()}`,
+                  assetTag: item.assetTag || '',
+                  assetType: typeMatch.matchedValue,
+                  manufacturer: item.manufacturer || '',
+                  model: item.model || '',
+                  serialNumber: item.serialNumber || '',
+                  department: deptMatch.matchedValue,
+                  location: item.location || 'Office',
+                  assignedUser: item.assignedUser || '',
+                  condition: condMatch.matchedValue as AssetCondition,
+                  status: statusMatch.matchedValue as AssetStatus,
+                  operatingSystem: item.operatingSystem || '',
+                  ipAddress: item.ipAddress || '',
+                  macAddress: item.macAddress || '',
+                  specifications: item.specifications || '',
+                  notes: item.notes || '',
+                  purchasePrice: Number(item.purchasePrice) || 0,
+                  supplier: item.supplier || '',
+                  purchaseDate: item.purchaseDate || '',
+                  isValid: Boolean(item.manufacturer && item.model && item.department),
+                  errors: [
+                    !item.manufacturer ? 'Missing manufacturer' : '',
+                    !item.model ? 'Missing model' : '',
+                    !item.department ? 'Missing department' : '',
+                  ].filter(Boolean),
+                  flaggedIssues,
+                };
+              });
               setParsedRows(rows);
             } catch (err) {
               console.error('JSON parsing failed', err);
@@ -691,14 +779,26 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                             </td>
                             <td className="px-3 py-2">
                               {row.isValid ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Valid</span>
-                                </span>
+                                row.flaggedIssues && row.flaggedIssues.length > 0 ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span
+                                      title={row.flaggedIssues.join('\n')}
+                                      className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
+                                    >
+                                      <AlertCircle className="w-3 h-3 text-amber-600" />
+                                      <span>Flagged</span>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>Valid</span>
+                                  </span>
+                                )
                               ) : (
                                 <span
                                   title={row.errors.join(', ')}
-                                  className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-bold cursor-help"
+                                  className="inline-flex items-center gap-1 text-[10px] text-rose-600 dark:text-rose-400 font-bold cursor-help"
                                 >
                                   <AlertCircle className="w-3.5 h-3.5" />
                                   <span>Error</span>
@@ -809,6 +909,18 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                       </tbody>
                     </table>
                   </div>
+
+                  {parsedRows.some((r) => r.flaggedIssues && r.flaggedIssues.length > 0) && (
+                    <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-[11px] space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-xs text-sky-900 dark:text-sky-200">
+                        <AlertCircle className="w-4 h-4 text-sky-600" />
+                        <span>Pre-populated Value Safety Check Active</span>
+                      </div>
+                      <p>
+                        Non-matching values in uploaded rows were flagged and auto-selected to the closest system option (e.g. Department, Asset Type, Condition, or Status) instead of creating duplicate or invalid entries. You can review or adjust any auto-mapped value directly in the table above before importing.
+                      </p>
+                    </div>
+                  )}
 
                   {invalidCount > 0 && (
                     <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-[11px]">

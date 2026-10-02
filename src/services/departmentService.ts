@@ -180,6 +180,31 @@ class DepartmentService {
     },
     currentUser?: User | null
   ): Promise<Department> {
+    const cleanName = (data.name || '').trim();
+    const cleanCode = (data.code || '').trim().toUpperCase();
+
+    if (!cleanName) {
+      throw new Error('Department name is required.');
+    }
+    if (!cleanCode) {
+      throw new Error('Department code is required.');
+    }
+
+    const existingDepts = await this.getDepartments();
+    const nameDuplicate = existingDepts.find(
+      (d) => (d.name || '').trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (nameDuplicate) {
+      throw new Error(`A department with name "${cleanName}" already exists.`);
+    }
+
+    const codeDuplicate = existingDepts.find(
+      (d) => (d.code || '').trim().toUpperCase() === cleanCode
+    );
+    if (codeDuplicate) {
+      throw new Error(`A department with code "${cleanCode}" already exists (${codeDuplicate.name}).`);
+    }
+
     const now = new Date().toISOString();
     const locDesc = (data.locationDescription || '').trim();
     const bldg = (data.building || (locDesc ? locDesc : 'Main Hospital Complex')).trim();
@@ -187,8 +212,8 @@ class DepartmentService {
 
     const newDept: Department = {
       id: `dept-${generateUUID().substring(0, 8)}`,
-      code: (data.code || '').trim().toUpperCase(),
-      name: (data.name || '').trim(),
+      code: cleanCode,
+      name: cleanName,
       building: bldg,
       floor: flr,
       locationDescription: locDesc || (flr ? `${bldg}, ${flr}` : bldg),

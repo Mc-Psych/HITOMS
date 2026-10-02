@@ -716,15 +716,32 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">
-                    IT Support Email
+                    Facility Telephone (Tel:) *
+                  </label>
+                  <input
+                    type="text"
+                    disabled={!isSuperAdmin}
+                    value={settings.contactPhone || ''}
+                    onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })}
+                    placeholder="e.g. 055 272 2289"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 font-mono font-bold"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">Default Tel: printed on all official memorandums & letterheads</p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">
+                    Facility Email (E-mail:) *
                   </label>
                   <input
                     type="email"
                     disabled={!isSuperAdmin}
                     value={settings.contactEmail || ''}
                     onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500"
+                    placeholder="e.g. send2smthit@gmail.com"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 font-mono font-bold text-sky-600 dark:text-sky-400"
                   />
+                  <p className="mt-1 text-[10px] text-slate-400">Default E-mail: printed on all official memorandums & letterheads</p>
                 </div>
 
                 <div>
@@ -739,6 +756,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     placeholder="e.g. Ext. 9911"
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 font-mono"
                   />
+                  <p className="mt-1 text-[10px] text-slate-400">Emergency 24/7 hotline extension</p>
                 </div>
               </div>
 

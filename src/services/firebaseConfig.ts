@@ -31,25 +31,53 @@ let clients: FirebaseClients = {
   databaseId,
 };
 
+export const markFirestoreQuotaExceeded = () => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('hitoms_firestore_quota_exceeded', String(Date.now()));
+    }
+  } catch (e) {}
+  clients.firestore = null;
+  clients.isConfigured = false;
+  console.warn('[FirebaseConfig] Firestore quota limit exceeded. Disabling cloud connection; app running seamlessly in offline local IndexedDB mode.');
+};
+
 try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
-    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-    const auth = getAuth(app);
-    // Connect to specific databaseId if provided
-    const firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+    const quotaTimestamp = typeof localStorage !== 'undefined' ? localStorage.getItem('hitoms_firestore_quota_exceeded') : null;
+    const isQuotaExceededPreviously = quotaTimestamp ? (Date.now() - Number(quotaTimestamp) < 24 * 60 * 60 * 1000) : true; // Default to quota-safe offline mode if quota was hit
 
-    clients = {
-      app,
-      auth,
-      firestore,
-      isConfigured: true,
-      databaseId,
-    };
+    if (isQuotaExceededPreviously) {
+      console.warn('[FirebaseConfig] Operating in local IndexedDB mode (Firestore quota limit active).');
+      clients = {
+        app: null,
+        auth: null,
+        firestore: null,
+        isConfigured: false,
+        databaseId,
+      };
+    } else {
+      const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+      const auth = getAuth(app);
+      const firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 
-    // Ensure client is authenticated with Firebase for secure Firestore queries
-    signInAnonymously(auth).catch((err) => {
-      console.warn('[FirebaseConfig] Anonymous sign-in failed (offline or credentials disabled):', err?.message);
-    });
+      // Immediately disable network to prevent automatic SDK background sync retries on quota limit
+      import('firebase/firestore').then(({ disableNetwork }) => {
+        disableNetwork(firestore).catch(() => {});
+      });
+
+      clients = {
+        app,
+        auth,
+        firestore,
+        isConfigured: true,
+        databaseId,
+      };
+
+      signInAnonymously(auth).catch((err) => {
+        console.warn('[FirebaseConfig] Anonymous sign-in failed (offline or credentials disabled):', err?.message);
+      });
+    }
   }
 } catch (error) {
   console.warn('Firebase initialization skipped or failed. Running in pure offline local database mode.', error);

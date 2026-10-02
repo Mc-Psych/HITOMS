@@ -26,7 +26,7 @@ import {
 } from './localDatabaseService';
 import { memoService } from './memoService';
 import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc } from 'firebase/firestore';
 import defaultSeedJson from '../data/defaultSeedData.json';
 
 // Helper to prevent any Firestore / Network call from hanging indefinitely
@@ -62,6 +62,12 @@ export async function purgeAllPastUsersAndDepartments(): Promise<void> {
       }
     }
 
+    // Permanently remove all assets from local store and Firestore
+    const existingAssets = await getAllFromStore<Asset>('assets');
+    for (const a of existingAssets) {
+      await deleteFromStore('assets', a.id);
+    }
+
     const existingDepts = await getAllFromStore<Department>('departments');
     for (const d of existingDepts) {
       await deleteFromStore('departments', d.id);
@@ -76,9 +82,102 @@ export async function purgeAllPastUsersAndDepartments(): Promise<void> {
       window.dispatchEvent(
         new CustomEvent('hitoms_departments_updated', { detail: { deletedAll: true } })
       );
+      window.dispatchEvent(
+        new CustomEvent('hitoms_assets_updated', { detail: { count: 0 } })
+      );
     }
   } catch (err) {
     console.warn('[SeedData] Error purging past users & departments:', err);
+  }
+}
+
+/**
+ * Performs a comprehensive system clean purge of legacy mock assets, demo users,
+ * and deprecated departments ("IT Operations", "General Clinical") from both
+ * local storage and Firestore.
+ */
+export async function performSystemCleanPurge(): Promise<void> {
+  try {
+    const CLEANUP_KEY = 'hitoms_clean_purge_v3';
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(CLEANUP_KEY)) {
+      return;
+    }
+
+    console.log('[SeedData] Performing system clean purge of legacy mock assets, demo users, and departments...');
+
+    // 1. Permanently delete all assets in local store & Firestore
+    const assets = await getAllFromStore<Asset>('assets');
+    for (const a of assets) {
+      await deleteFromStore('assets', a.id);
+    }
+
+    // 2. Permanently delete all users except Super Administrator
+    const users = await getAllFromStore<User>('users');
+    for (const u of users) {
+      const isSuperAdmin = u.id === 'usr-admin-001' || u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
+      if (!isSuperAdmin) {
+        await deleteFromStore('users', u.id);
+      }
+    }
+
+    // 3. Permanently remove "IT Operations" and "General Clinical" departments
+    const depts = await getAllFromStore<Department>('departments');
+    for (const d of depts) {
+      const name = (d.name || '').toLowerCase().trim();
+      if (name === 'it operations' || name === 'general clinical') {
+        await deleteFromStore('departments', d.id);
+      }
+    }
+
+    // 4. Ensure Super Admin is saved and pristine
+    await ensureDefaultSuperAdmin();
+
+    // 5. If Firebase is active, delete them directly from Firestore collections too
+    if (isFirebaseConfigured() && firebaseClients.firestore) {
+      try {
+        const db = firebaseClients.firestore;
+
+        // Delete remote assets
+        const assetsSnap = await withTimeout(getDocs(collection(db, 'assets')), 4000).catch(() => null);
+        if (assetsSnap && !assetsSnap.empty) {
+          for (const docSnap of assetsSnap.docs) {
+            await deleteDoc(doc(db, 'assets', docSnap.id)).catch(() => {});
+          }
+        }
+
+        // Delete remote demo users
+        const usersSnap = await withTimeout(getDocs(collection(db, 'users')), 4000).catch(() => null);
+        if (usersSnap && !usersSnap.empty) {
+          for (const docSnap of usersSnap.docs) {
+            const data = docSnap.data();
+            const isSuperAdmin = docSnap.id === 'usr-admin-001' || data.role === 'SUPER_ADMIN' || (data.username || '').toLowerCase() === 'admin';
+            if (!isSuperAdmin) {
+              await deleteDoc(doc(db, 'users', docSnap.id)).catch(() => {});
+            }
+          }
+        }
+
+        // Delete remote unwanted departments
+        const deptsSnap = await withTimeout(getDocs(collection(db, 'departments')), 4000).catch(() => null);
+        if (deptsSnap && !deptsSnap.empty) {
+          for (const docSnap of deptsSnap.docs) {
+            const name = (docSnap.data()?.name || '').toLowerCase().trim();
+            if (name === 'it operations' || name === 'general clinical') {
+              await deleteDoc(doc(db, 'departments', docSnap.id)).catch(() => {});
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[SeedData] Firestore clean purge warning:', e);
+      }
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CLEANUP_KEY, 'true');
+    }
+    console.log('[SeedData] System clean purge completed successfully.');
+  } catch (err) {
+    console.warn('[SeedData] Error in performSystemCleanPurge:', err);
   }
 }
 
@@ -92,15 +191,6 @@ export async function syncLatestStaffAccounts(): Promise<User[]> {
       const snap = await withTimeout(getDocs(usersRef), 4000).catch(() => null);
 
       if (snap && !snap.empty) {
-        // Clear local non-super-admin users first to ensure we sync clean cloud state
-        const existingUsers = await getAllFromStore<User>('users');
-        for (const u of existingUsers) {
-          const isSuperAdmin = u.role === 'SUPER_ADMIN' || u.username?.toLowerCase() === 'admin';
-          if (!isSuperAdmin) {
-            await deleteFromStore('users', u.id);
-          }
-        }
-
         const items: User[] = [];
         snap.forEach((doc) => {
           items.push({
@@ -134,41 +224,50 @@ export async function syncLatestStaffAccounts(): Promise<User[]> {
 export async function ensureDefaultSuperAdmin(): Promise<void> {
   try {
     const users = await getAllFromStore<User>('users');
-    const superAdmin = users.find(
+    // Purge any lingering "Test Admin" account
+    for (const u of users) {
+      if (u.fullName === 'Test Admin' || u.id === 'usr-26fdae81') {
+        await deleteFromStore('users', u.id);
+      }
+    }
+
+    const currentUsers = await getAllFromStore<User>('users');
+    const superAdmin = currentUsers.find(
       (u) =>
         u.role === 'SUPER_ADMIN' ||
-        (u.username && u.username.toLowerCase() === 'admin')
+        (u.fullName && u.fullName.toLowerCase().includes('courage')) ||
+        (u.username && (u.username.toLowerCase() === 'admin' || u.username.toLowerCase() === 'kay'))
     );
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
     if (!superAdmin) {
-      const admin001 = users.find((u) => u.id === 'usr-admin-001');
+      const admin001 = currentUsers.find((u) => u.id === 'usr-admin-001');
       if (admin001) {
-        admin001.fullName = 'Super Administrator';
+        admin001.fullName = 'Courage Kekesi';
         admin001.username = 'admin';
-        admin001.email = 'admin@hospital.local';
+        admin001.email = 'courage.kay@hospital.local';
         admin001.role = 'SUPER_ADMIN';
-        admin001.jobTitle = 'Chief Information Officer & Super Administrator';
+        admin001.jobTitle = 'Senior IT Manager & Super Administrator';
         admin001.department = 'IT & Systems Administration';
         admin001.status = 'Active';
         await putToStore('users', admin001);
       } else {
         const newUser: User = {
           id: 'usr-admin-001',
-          fullName: 'Super Administrator',
+          fullName: 'Courage Kekesi',
           username: 'admin',
-          email: 'admin@hospital.local',
-          phone: '+233 24 100 0001',
+          email: 'courage.kay@hospital.local',
+          phone: '+233 24 174 4004',
           department: 'IT & Systems Administration',
-          jobTitle: 'Chief Information Officer & Super Administrator',
+          jobTitle: 'Senior IT Manager & Super Administrator',
           role: 'SUPER_ADMIN',
           status: 'Active',
           createdAt: now,
           updatedAt: now,
           lastLoginAt: now,
           offlineAccessAllowed: true,
-          signature: 'Super Administrator',
+          signature: 'Courage Kekesi',
           _syncStatus: 'SYNCED',
           _syncVersion: 1,
           _lastSyncedAt: now,
@@ -204,6 +303,9 @@ export async function ensureDefaultSuperAdmin(): Promise<void> {
 }
 
 export async function initializeSeedDataIfNeeded(): Promise<void> {
+  // Execute clean purge of legacy mock data & deprecated departments
+  await performSystemCleanPurge();
+
   const userCount = await countStore('users');
   if (userCount > 0) {
     // Sync any updated/missing staff accounts on mobile/desktop across sessions
@@ -217,9 +319,9 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
     try {
       const db = firebaseClients.firestore;
       const usersRef = collection(db, 'users');
-      const usersSnap = await getDocs(usersRef);
+      const usersSnap = await withTimeout(getDocs(usersRef), 4000).catch(() => null);
 
-      if (!usersSnap.empty) {
+      if (usersSnap && !usersSnap.empty) {
         console.log('[SeedData] Found existing data on Firestore. Hydrating IndexedDB from cloud seed...');
         setSkipSyncEnqueue(true);
 
@@ -236,18 +338,20 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
 
         for (const { col, store } of collectionsToSync) {
           const colRef = collection(db, col);
-          const snap = await getDocs(colRef);
-          const items: any[] = [];
-          snap.forEach((doc) => {
-            items.push({
-              ...doc.data(),
-              id: doc.id,
-              _syncStatus: 'SYNCED',
-              _lastSyncedAt: new Date().toISOString()
+          const snap = await withTimeout(getDocs(colRef), 4000).catch(() => null);
+          if (snap && !snap.empty) {
+            const items: any[] = [];
+            snap.forEach((doc) => {
+              items.push({
+                ...doc.data(),
+                id: doc.id,
+                _syncStatus: 'SYNCED',
+                _lastSyncedAt: new Date().toISOString()
+              });
             });
-          });
-          if (items.length > 0) {
-            await putBatchToStore(store, items);
+            if (items.length > 0) {
+              await putBatchToStore(store, items);
+            }
           }
         }
 
@@ -293,7 +397,7 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   const deviceId = getDeviceId();
   const now = new Date().toISOString();
 
-  // 1. Initial Users (All 8 Roles + Senior IT Officers)
+  // 1. Initial Users (Only Super Administrator)
   const users: User[] = [
     {
       id: 'usr-admin-001',
@@ -309,126 +413,7 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
       updatedAt: now,
       lastLoginAt: now,
       offlineAccessAllowed: true,
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-45b5ac61',
-      fullName: 'Edmond Gadzekpo',
-      username: 'gadzekpo',
-      email: 'gadzekpo@hospital.local',
-      phone: '+233 24 100 0004',
-      department: 'IT & Systems Administration',
-      jobTitle: 'Hospital Staff / IT Admin',
-      role: 'IT_ADMIN',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'ekpo',
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-6e1cf172',
-      fullName: 'Ebenezer Appau',
-      username: 'appau',
-      email: 'appau@hospital.local',
-      phone: '+233 24 100 0005',
-      department: 'IT & Systems Administration',
-      jobTitle: 'Senior IT Manager',
-      role: 'IT_ADMIN',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'ppau',
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-eb7b073a',
-      fullName: 'Fabris Eklu',
-      username: 'eklu',
-      email: 'eklu@hospital.local',
-      phone: '+233 24 100 0006',
-      department: 'IT & Systems Administration',
-      jobTitle: 'Hospital Staff / IT Officer',
-      role: 'IT_OFFICER',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'eklu',
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-30ccc99d',
-      fullName: 'Shadrach Ochon',
-      username: 'ochon',
-      email: 'ochon@hospital.local',
-      phone: '+233 24 100 0007',
-      department: 'Accident & Emergency (A&E)',
-      jobTitle: 'Hospital Staff',
-      role: 'STAFF_USER',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'chon',
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-956015da',
-      fullName: 'Lebuny Joan Okrofun',
-      username: 'okrofun',
-      email: 'okrofun@hospital.local',
-      phone: '+233 24 100 0008',
-      department: 'OPD (Outpatient Department)',
-      jobTitle: 'Nurse',
-      role: 'STAFF_USER',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'ofun',
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'usr-83e40ed6',
-      fullName: 'Test Staff',
-      username: 'staff',
-      email: 'staff@hospital.local',
-      phone: '+233 24 100 0009',
-      department: 'OPD (Outpatient Department)',
-      jobTitle: 'Hospital Staff',
-      role: 'STAFF_USER',
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
-      lastLoginAt: now,
-      offlineAccessAllowed: true,
-      password: 'taff',
+      signature: 'Super Administrator',
       _syncStatus: 'SYNCED',
       _syncVersion: 1,
       _lastSyncedAt: now,
@@ -1203,125 +1188,8 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
     },
   ];
 
-  // 6. IT Assets
-  const assets: Asset[] = [
-    {
-      id: 'ast-001',
-      assetTag: 'AST-HOSP-00101',
-      assetType: 'Desktop Computer',
-      manufacturer: 'Dell',
-      model: 'OptiPlex 7090 Micro',
-      serialNumber: 'DL-9821-X3',
-      department: 'Maternity',
-      location: 'Maternity Ward Nursing Station (Room A-102)',
-      assignedUser: 'Nurse Joyce Agyeman',
-      purchaseDate: '2024-04-12',
-      purchasePrice: 950,
-      supplier: 'Compuland Ghana Ltd',
-      warrantyStart: '2024-04-12',
-      warrantyEnd: '2027-04-12',
-      condition: 'Good',
-      status: 'Assigned',
-      operatingSystem: 'Windows 11 Pro 64-bit',
-      ipAddress: '192.168.1.145',
-      macAddress: 'B4:2E:99:A1:42:01',
-      specifications: 'Intel Core i5-11500, 16GB RAM, 512GB NVMe SSD',
-      qrCodeData: 'HITOMS-ASSET:AST-HOSP-00101',
-      notes: 'Dedicated workstation for LHIMS patient admission and vitals logging.',
-      createdAt: now,
-      updatedAt: now,
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'ast-002',
-      assetTag: 'AST-HOSP-00102',
-      assetType: 'Heavy-Duty Laser Printer',
-      manufacturer: 'HP',
-      model: 'LaserJet Pro M404n',
-      serialNumber: 'VNB3B09121',
-      department: 'Maternity',
-      location: 'Maternity Ward Nursing Station',
-      assignedUser: 'Sister Grace Cudjoe',
-      purchaseDate: '2024-04-15',
-      purchasePrice: 420,
-      supplier: 'K-Office Solutions',
-      warrantyStart: '2024-04-15',
-      warrantyEnd: '2026-04-15',
-      condition: 'Good',
-      status: 'Assigned',
-      ipAddress: '192.168.1.180',
-      macAddress: '18:66:DA:22:90:31',
-      specifications: 'Monochrome, 40 ppm, Network Gigabit Ethernet',
-      qrCodeData: 'HITOMS-ASSET:AST-HOSP-00102',
-      notes: 'Prints delivery certificates, admission sheets, lab test request slips.',
-      createdAt: now,
-      updatedAt: now,
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'ast-003',
-      assetTag: 'AST-HOSP-00103',
-      assetType: 'Desktop Computer',
-      manufacturer: 'HP',
-      model: 'ProDesk 400 G7 SFF',
-      serialNumber: 'CZC112998Z',
-      department: 'Central Pharmacy',
-      location: 'Dispensing Counter B-004',
-      assignedUser: 'Pharm. K. Osei',
-      purchaseDate: '2024-05-10',
-      purchasePrice: 880,
-      supplier: 'K-Office Solutions',
-      warrantyStart: '2024-05-10',
-      warrantyEnd: '2027-05-10',
-      condition: 'Excellent',
-      status: 'Assigned',
-      operatingSystem: 'Windows 11 Pro',
-      ipAddress: '192.168.1.150',
-      macAddress: '3C:52:82:11:45:90',
-      specifications: 'Intel Core i5-10500, 16GB DDR4, 512GB SSD',
-      qrCodeData: 'HITOMS-ASSET:AST-HOSP-00103',
-      notes: 'Connected to Quixmo drug dispensing database and barcode reader.',
-      createdAt: now,
-      updatedAt: now,
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-    {
-      id: 'ast-004',
-      assetTag: 'AST-HOSP-00104',
-      assetType: 'Uninterruptible Power Supply (UPS)',
-      manufacturer: 'APC by Schneider Electric',
-      model: 'Smart-UPS 3000VA LCD RM 2U',
-      serialNumber: 'AS1944110928',
-      department: 'IT Operations',
-      location: 'Server Room Rack 1',
-      assignedUser: 'Emmanuel Boateng',
-      purchaseDate: '2024-02-15',
-      purchasePrice: 1850,
-      supplier: 'PowerTech Solutions',
-      warrantyStart: '2024-02-15',
-      warrantyEnd: '2027-02-15',
-      condition: 'Excellent',
-      status: 'Assigned',
-      specifications: '3000VA / 2700W, Pure Sine Wave, Extended Battery Port',
-      qrCodeData: 'HITOMS-ASSET:AST-HOSP-00104',
-      notes: 'Provides emergency power backup for Core Switch, LHIMS server during generator transitions.',
-      createdAt: now,
-      updatedAt: now,
-      _syncStatus: 'SYNCED',
-      _syncVersion: 1,
-      _lastSyncedAt: now,
-      _deviceId: deviceId,
-    },
-  ];
+  // 6. IT Assets (Permanently Empty Default)
+  const assets: Asset[] = [];
 
   // 7. Initial Tickets (including the explicit example from Section 5 of prompt)
   const tickets: Ticket[] = [

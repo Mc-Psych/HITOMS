@@ -193,17 +193,25 @@ export interface Ticket extends SyncMetadata {
   reopenedAt?: string | null;
 }
 
-export type AssetCondition = 'Excellent' | 'Good' | 'Fair' | 'Poor';
+export type AssetCondition = 'Excellent' | 'Good' | 'Fair' | 'Poor' | 'New' | 'Defective' | (string & {});
 
 export type AssetStatus =
+  | 'Active'
+  | 'In Use'
+  | 'In Storage'
   | 'Available'
   | 'Assigned'
   | 'In Repair'
+  | 'Under Repair'
   | 'Under Maintenance'
+  | 'Maintenance'
   | 'Retired'
+  | 'Decommissioned'
+  | 'Disposed'
   | 'Lost'
   | 'Damaged'
-  | 'Disposed';
+  | 'Reserved'
+  | (string & {});
 
 export interface AssetHistoryEntry {
   id: string;
@@ -216,11 +224,12 @@ export interface AssetHistoryEntry {
 
 export interface Asset extends SyncMetadata {
   id: string;
+  name?: string; // Optional Asset Name / Clinical Label
   assetTag: string; // e.g. AST-HOSP-00104
   assetType: string; // Desktop, Laptop, Printer, Server, Switch, Router, AP, UPS, Scanner
   manufacturer: string;
   model: string;
-  serialNumber: string;
+  serialNumber?: string; // Serial number is optional
   department: string;
   location: string;
   assignedUser?: string;
@@ -229,11 +238,19 @@ export interface Asset extends SyncMetadata {
   supplier: string;
   warrantyStart: string;
   warrantyEnd: string;
-  condition: AssetCondition;
+  condition: string;
   status: AssetStatus;
   operatingSystem?: string;
   ipAddress?: string;
   macAddress?: string;
+  upsCapacity?: string;
+  printerOutputType?: string;
+  accessPointEnvironment?: string;
+  cableEnvironment?: string;
+  mouseConnectivity?: string;
+  keyboardConnectivity?: string;
+  wifiAdapterType?: string;
+  bluetoothAdapterType?: string;
   specifications: string;
   qrCodeData: string;
   notes?: string;
@@ -369,6 +386,7 @@ export interface HospitalSystem extends SyncMetadata {
   systemName: string; // LHIMS, QuickBooks, Claim IT, Quixmo, Starlink, Local Email, File Server, Backup
   description: string;
   owner: string;
+  department?: string; // Responsible hospital department (editable by Super Admin / IT)
   vendor: string;
   status: SystemOperationalStatus;
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
@@ -809,6 +827,8 @@ export interface SystemSettings {
   emergencyBroadcastSpeedSeconds?: number; // Speed of text motion on emergency broadcast badge in seconds (e.g. 10 to 60; default: 22)
   officerMonthlySpecialties?: OfficerMonthlySpecialty[]; // Auto-assignment specialty roster per month
   customTexts?: Record<string, string>;
+  customAssetTypes?: string[]; // Configurable asset types managed by Super Admin and IT
+  customAssetConditions?: string[]; // Configurable conditions managed by Super Admin and IT
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
 }

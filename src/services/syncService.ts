@@ -17,7 +17,7 @@ import {
   isTombstone,
   type StoreName,
 } from './localDatabaseService';
-import { isFirebaseConfigured, firebaseClients, ensureFirebaseAuth } from './firebaseConfig';
+import { isFirebaseConfigured, firebaseClients, ensureFirebaseAuth, markFirestoreQuotaExceeded } from './firebaseConfig';
 
 export type ConnectivityState = 'ONLINE' | 'OFFLINE' | 'SYNCING' | 'SYNC_ERROR';
 
@@ -79,6 +79,37 @@ class SyncService {
   private listeners: Set<SyncListener> = new Set();
   private simulatedOffline: boolean = false;
   private isSyncRunning: boolean = false;
+  private quotaExceeded: boolean = false;
+  private lastQuotaExceededTime: number = 0;
+
+  private isQuotaError(err: any): boolean {
+    if (!err) return false;
+    const msg = String(err.message || err.code || err).toLowerCase();
+    return (
+      err.code === 'resource-exhausted' ||
+      msg.includes('resource-exhausted') ||
+      msg.includes('quota limit exceeded') ||
+      msg.includes('quota exceeded') ||
+      msg.includes('free daily write units')
+    );
+  }
+
+  private async handleQuotaExceeded(err: any) {
+    if (!this.quotaExceeded) {
+      console.warn('[SyncService] Firestore daily quota limit reached. Disabling Firestore network to operate seamlessly in offline-first IndexedDB mode.');
+    }
+    this.quotaExceeded = true;
+    this.lastQuotaExceededTime = Date.now();
+    markFirestoreQuotaExceeded();
+    if (firebaseClients.firestore) {
+      try {
+        const { disableNetwork } = await import('firebase/firestore');
+        await disableNetwork(firebaseClients.firestore);
+      } catch (e) {
+        // Ignore network disable error
+      }
+    }
+  }
   private syncTimer: any = null;
   private watchdogTimer: any = null;
   private stats: SyncStats = {
@@ -234,7 +265,7 @@ class SyncService {
 
   // Pull remote documents from Firestore and sync them into IndexedDB, or seed Firestore if remote is empty
   private async pullCollectionFromFirestore(collectionName: string, storeName: StoreName): Promise<void> {
-    if (!isFirebaseConfigured() || !firebaseClients.firestore) return;
+    if (!isFirebaseConfigured() || !firebaseClients.firestore || this.quotaExceeded) return;
     try {
       const { collection, getDocs, doc, writeBatch, deleteDoc } = await import('firebase/firestore');
       const collectionRef = collection(firebaseClients.firestore, collectionName);
@@ -261,15 +292,28 @@ class SyncService {
 
         if (hasPendingDelete || tombstoned) {
           // It was deleted locally, so proactively prune from Firestore remotely to maintain cloud parity
-          deleteDoc(doc(firebaseClients.firestore, collectionName, id)).catch((e) =>
-            console.warn(`[SyncService] Failed to prune tombstoned remote doc ${id}:`, e?.message)
-          );
+          deleteDoc(doc(firebaseClients.firestore, collectionName, id)).catch((e) => {
+            if (this.isQuotaError(e)) this.handleQuotaExceeded(e);
+          });
           continue;
         }
 
         // Check if there is a pending local change in queue for this item
         const hasPendingEdit = queue.some((q) => q.entityType === storeName && (q.entityId === id || (storeName === 'settings' && q.entityType === 'settings')));
         if (hasPendingEdit) continue;
+
+        // Check if local item is newer than remote doc
+        const localItem = await getFromStore<any>(storeName, id);
+        if (localItem && localItem._syncStatus === 'PENDING_SYNC') {
+          continue;
+        }
+        if (localItem && localItem.updatedAt && remoteData.updatedAt) {
+          const localTime = new Date(localItem.updatedAt).getTime();
+          const remoteTime = new Date(remoteData.updatedAt).getTime();
+          if (localTime > remoteTime) {
+            continue;
+          }
+        }
 
         itemsToSave.push({
           ...remoteData,
@@ -335,7 +379,7 @@ class SyncService {
 
       // If Firestore has 0 documents for this collection, but local store has items,
       // upload local items to Firestore using high-speed writeBatch (chunked) with timeout
-      if (querySnapshot.empty) {
+      if (querySnapshot.empty && !this.quotaExceeded) {
         const localItems = await getAllFromStore<any>(storeName);
         if (localItems.length > 0) {
           for (let i = 0; i < localItems.length; i += 300) {
@@ -357,7 +401,11 @@ class SyncService {
         }
       }
     } catch (e: any) {
-      console.warn(`[SyncService] Note on syncing collection ${collectionName}: (${e?.message || 'timeout'})`);
+      if (this.isQuotaError(e)) {
+        this.handleQuotaExceeded(e);
+      } else {
+        console.warn(`[SyncService] Note on syncing collection ${collectionName}: (${e?.message || 'timeout'})`);
+      }
     }
   }
 
@@ -394,6 +442,11 @@ class SyncService {
         await ensureFirebaseAuth().catch(() => {});
       }
 
+      // Check if quota cooldown period of 10 minutes has passed
+      if (this.quotaExceeded && Date.now() - this.lastQuotaExceededTime > 10 * 60 * 1000) {
+        this.quotaExceeded = false;
+      }
+
       const queue = await getAllFromStore<SyncQueueItem>('syncQueue');
       // Process pending and retrying items
       const itemsToProcess = queue.filter((q) => q.status === 'PENDING' || q.status === 'RETRYING');
@@ -419,6 +472,11 @@ class SyncService {
             }
           }
         } catch (err: any) {
+          if (this.isQuotaError(err)) {
+            this.handleQuotaExceeded(err);
+            // Break loop if quota exceeded so we don't spam quota errors
+            break;
+          }
           console.warn(`[SyncService] Sync push notice for item ${item.entityId}:`, err?.message);
           item.retryCount += 1;
           item.lastError = err?.message || 'Network error';
@@ -488,19 +546,27 @@ class SyncService {
 
   // Sync a single queued mutation
   private async syncSingleItem(item: SyncQueueItem): Promise<void> {
-    if (isFirebaseConfigured() && firebaseClients.firestore) {
-      const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
-      const docRef = doc(firebaseClients.firestore, item.entityType, item.entityId);
+    if (isFirebaseConfigured() && firebaseClients.firestore && !this.quotaExceeded) {
+      try {
+        const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
+        const docRef = doc(firebaseClients.firestore, item.entityType, item.entityId);
 
-      if (item.operation === 'DELETE') {
-        await deleteDoc(docRef);
-      } else {
-        const payloadToUpload = cleanFirestoreData({
-          ...item.payload,
-          _lastSyncedAt: new Date().toISOString(),
-          _syncStatus: 'SYNCED',
-        });
-        await setDoc(docRef, payloadToUpload, { merge: true });
+        if (item.operation === 'DELETE') {
+          await deleteDoc(docRef);
+        } else {
+          const payloadToUpload = cleanFirestoreData({
+            ...item.payload,
+            _lastSyncedAt: new Date().toISOString(),
+            _syncStatus: 'SYNCED',
+          });
+          await setDoc(docRef, payloadToUpload, { merge: true });
+        }
+      } catch (err) {
+        if (this.isQuotaError(err)) {
+          this.handleQuotaExceeded(err);
+          throw err;
+        }
+        throw err;
       }
     } else {
       // In local-only mode, simulate swift local confirmation

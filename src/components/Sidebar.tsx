@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'systems',
-      label: 'Hospital Systems (LHIMS)',
+      label: 'Hospital Systems',
       icon: Activity,
     },
     {

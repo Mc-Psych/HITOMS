@@ -19,10 +19,12 @@ import {
   type SystemOperationalStatus,
   type User,
   type SystemSettings,
+  type Department,
 } from '../types';
-import { putToStore, deleteFromStore, generateUUID, getDeviceId } from '../services/localDatabaseService';
+import { putToStore, deleteFromStore, getAllFromStore, generateUUID, getDeviceId } from '../services/localDatabaseService';
 import { auditService } from '../services/auditService';
 import { syncService } from '../services/syncService';
+import { emergencyService } from '../services/emergencyService';
 
 interface SystemEditModalProps {
   isOpen: boolean;
@@ -95,7 +97,19 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
 
   const [systemName, setSystemName] = useState('');
   const [description, setDescription] = useState('');
+  const [department, setDepartment] = useState('IT Infrastructure');
   const [owner, setOwner] = useState('IT Operations');
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>([
+    'IT Infrastructure',
+    'Clinical Systems',
+    'Health Information & Records',
+    'Pharmacy',
+    'Finance & Accounts',
+    'Laboratory',
+    'Accident & Emergency',
+    'Administration',
+    'Radiology & PACS',
+  ]);
   const [vendor, setVendor] = useState('');
   const [status, setStatus] = useState<SystemOperationalStatus>('Operational');
   const [criticality, setCriticality] = useState<HospitalSystem['criticality']>('High');
@@ -115,9 +129,20 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Load dynamic hospital departments from IndexedDB
+    getAllFromStore<Department>('departments').then((depts) => {
+      if (depts && depts.length > 0) {
+        const names = Array.from(new Set(depts.map((d) => d.name).filter(Boolean)));
+        setAvailableDepartments(names);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (systemToEdit) {
       setSystemName(systemToEdit.systemName || '');
       setDescription(systemToEdit.description || '');
+      setDepartment(systemToEdit.department || systemToEdit.owner || 'IT Infrastructure');
       setOwner(systemToEdit.owner || 'IT Operations');
       setVendor(systemToEdit.vendor || '');
       setStatus(systemToEdit.status || 'Operational');
@@ -137,6 +162,7 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
     } else {
       setSystemName('');
       setDescription('');
+      setDepartment('IT Infrastructure');
       setOwner('IT Operations');
       setVendor('');
       setStatus('Operational');
@@ -174,11 +200,23 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
       const deviceId = getDeviceId();
       const systemId = systemToEdit?.id || `sys-${generateUUID().slice(0, 8)}`;
 
+      // 1. If changing or saving as Operational, resolve any active emergency broadcasts first
+      if (currentUser && status === 'Operational') {
+        const activeBroadcasts = await emergencyService.getActiveBroadcasts();
+        const tiedAlerts = activeBroadcasts.filter(
+          (b) => b.targetSystemId === systemId || b.title.includes(systemName.toUpperCase())
+        );
+        for (const alert of tiedAlerts) {
+          await emergencyService.resolveBroadcast(alert.id, currentUser);
+        }
+      }
+
       const updatedSystem: HospitalSystem = {
         id: systemId,
         systemName: systemName.trim(),
         description: description.trim(),
-        owner: owner.trim() || 'IT Operations',
+        department: department.trim() || 'IT Infrastructure',
+        owner: department.trim() || owner.trim() || 'IT & Systems Administration',
         vendor: vendor.trim() || 'Internal / Hospital Hosted',
         status,
         criticality,
@@ -191,7 +229,7 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
         uptimePercentage: Number(uptimePercentage) || 99.5,
         uptimePercent: Number(uptimePercentage) || 99.5,
         maintenanceWindow: maintenanceWindow.trim() || undefined,
-        statusMessage: statusMessage.trim() || undefined,
+        statusMessage: status === 'Operational' ? undefined : (statusMessage.trim() || undefined),
         leadAdmin: leadAdmin.trim() || undefined,
         vendorSupportHotline: vendorSupportHotline.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -205,6 +243,7 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
       };
 
       await putToStore('hospitalSystems', updatedSystem);
+      await syncService.enqueueOperation('hospitalSystems', updatedSystem.id, isNew ? 'CREATE' : 'UPDATE', updatedSystem);
 
       // Audit log entry
       await auditService.logAction(
@@ -212,8 +251,39 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
         'Hospital Systems',
         systemId,
         systemToEdit ? `${systemToEdit.systemName} (${systemToEdit.status})` : null,
-        `${updatedSystem.systemName} set to status [${status}]. ${statusMessage ? `Notice: ${statusMessage}` : ''}`
+        `${updatedSystem.systemName} set to status [${status}]. Dept: ${updatedSystem.department}. ${statusMessage ? `Notice: ${statusMessage}` : ''}`
       );
+
+      // Automatic Emergency Trigger Integration if setting to Down or Maintenance
+      if (currentUser && (status === 'Down' || status === 'Maintenance')) {
+        let codeType: 'CODE_BLUE_IT' | 'CODE_RED_NETWORK' | 'EHR_DOWNTIME' | 'CYBER_LOCKDOWN' | 'GENERAL_EMERGENCY' = 'GENERAL_EMERGENCY';
+        const lowerName = updatedSystem.systemName.toLowerCase();
+        if (lowerName.includes('lhims') || lowerName.includes('health') || lowerName.includes('ehr')) {
+          codeType = 'EHR_DOWNTIME';
+        } else if (lowerName.includes('starlink') || lowerName.includes('network') || lowerName.includes('gateway')) {
+          codeType = 'CODE_RED_NETWORK';
+        } else if (lowerName.includes('quickbooks') || lowerName.includes('finance') || lowerName.includes('security')) {
+          codeType = 'CYBER_LOCKDOWN';
+        } else if (lowerName.includes('quixmo') || lowerName.includes('telemetry') || lowerName.includes('pharmacy')) {
+          codeType = 'CODE_BLUE_IT';
+        }
+
+        const statusHeadline = `🚨 ${updatedSystem.systemName.toUpperCase()} STATUS: ${status.toUpperCase()}`;
+        const msg = `${updatedSystem.systemName} is currently ${status.toUpperCase()}. Clinical and administrative operations please observe hospital contingency protocols.`;
+
+        await emergencyService.createBroadcast(
+          {
+            codeType,
+            title: statusHeadline,
+            message: msg,
+            severity: status === 'Down' ? 'CRITICAL' : 'HIGH',
+            targetSystemId: updatedSystem.id,
+            targetSystemName: updatedSystem.systemName,
+            autoSetSystemStatus: status,
+          },
+          currentUser
+        );
+      }
 
       onSaved();
       onClose();
@@ -364,6 +434,29 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
                 required
                 className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none font-medium"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                <span>Responsible Department</span>
+                <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">Super Admin / IT</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer"
+                >
+                  {availableDepartments.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                  {!availableDepartments.includes(department) && (
+                    <option value={department}>{department}</option>
+                  )}
+                </select>
+              </div>
             </div>
 
             <div>

@@ -90,6 +90,11 @@ export type Permission =
   | 'assets.create'
   | 'assets.update'
   | 'assets.delete'
+  | 'assets.bulk_upload'
+  | 'assets.register_export'
+  | 'assets.config_manage'
+  | 'users.bulk_upload'
+  | 'departments.bulk_upload'
   | 'maintenance.view'
   | 'maintenance.create'
   | 'maintenance.update'
@@ -147,6 +152,9 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'assets.create', label: 'Register Assets', category: 'Assets & Maintenance', description: 'Enroll new PCs, biometric terminals, and medical equipment' },
   { key: 'assets.update', label: 'Update Asset Records', category: 'Assets & Maintenance', description: 'Edit asset location, custodian, and maintenance status' },
   { key: 'assets.delete', label: 'Decommission / Delete Assets', category: 'Assets & Maintenance', description: 'Retire obsolete or written-off hardware assets' },
+  { key: 'assets.bulk_upload', label: 'Bulk Import Assets (CSV/Excel)', category: 'Assets & Maintenance', description: 'Bulk upload hardware assets via CSV/Excel template' },
+  { key: 'assets.register_export', label: 'Generate Asset Register (PDF/Excel)', category: 'Assets & Maintenance', description: 'Generate official hospital asset registers in PDF and Excel formats' },
+  { key: 'assets.config_manage', label: 'Manage Asset Config (Types/Conditions/Statuses)', category: 'Assets & Maintenance', description: 'Configure custom asset types, conditions, and operational statuses' },
   { key: 'maintenance.view', label: 'View Maintenance Schedules', category: 'Assets & Maintenance', description: 'Inspect preventive maintenance checklists and calibration calendars' },
   { key: 'maintenance.create', label: 'Schedule Maintenance', category: 'Assets & Maintenance', description: 'Plan recurring switch cleaning, UPS battery tests, and server checks' },
   { key: 'maintenance.update', label: 'Edit Maintenance Plans', category: 'Assets & Maintenance', description: 'Reschedule or modify planned maintenance tasks' },
@@ -176,11 +184,13 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'users.create', label: 'Provision Staff Accounts', category: 'Facility & Admin', description: 'Create new user profiles and set roles' },
   { key: 'users.update', label: 'Edit Staff Accounts', category: 'Facility & Admin', description: 'Modify staff permissions, status, and department assignments' },
   { key: 'users.delete', label: 'Deactivate / Remove Users', category: 'Facility & Admin', description: 'Suspend or disable staff login credentials' },
+  { key: 'users.bulk_upload', label: 'Bulk Provision Staff Accounts (CSV/Excel)', category: 'Facility & Admin', description: 'Bulk upload multiple user accounts via CSV or Excel template' },
   { key: 'departments.view', label: 'View Department Directory', category: 'Facility & Admin', description: 'Browse clinical units, wards, emergency classifications, extensions, and unit leadership' },
   { key: 'departments.create', label: 'Create Hospital Department', category: 'Facility & Admin', description: 'Register new wards and clinical departments' },
   { key: 'departments.update', label: 'Edit Department Details', category: 'Facility & Admin', description: 'Modify department leadership, extension numbers, building locations, and emergency flags' },
   { key: 'departments.delete', label: 'Delete Department', category: 'Facility & Admin', description: 'Permanently remove individual hospital departments' },
   { key: 'departments.delete_all', label: 'Delete All Departments (Super Admin Only)', category: 'Facility & Admin', description: 'Purge all registered hospital departments at once (restricted to Super Administrator)' },
+  { key: 'departments.bulk_upload', label: 'Bulk Import Departments (CSV/Excel)', category: 'Facility & Admin', description: 'Bulk upload hospital departments and wards via CSV or Excel template' },
   { key: 'facility.manage', label: 'Edit Facility Details & Logo', category: 'Facility & Admin', description: 'Upload hospital emblem, configure LAN URLs, address, and contacts' },
   { key: 'settings.manage', label: 'Manage System Settings & Offline Policy', category: 'Facility & Admin', description: 'Configure sync intervals, offline thresholds, and global security rules' },
 ];
@@ -231,10 +241,10 @@ export const ROLE_DESCRIPTIONS: Record<Role, { title: string; description: strin
 // Role-to-Permissions Mapping
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   SUPER_ADMIN: [
-    'users.view', 'users.create', 'users.update', 'users.delete',
-    'departments.view', 'departments.create', 'departments.update', 'departments.delete', 'departments.delete_all',
+    'users.view', 'users.create', 'users.update', 'users.delete', 'users.bulk_upload',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete', 'departments.delete_all', 'departments.bulk_upload',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close', 'tickets.delete',
-    'assets.view', 'assets.create', 'assets.update', 'assets.delete',
+    'assets.view', 'assets.create', 'assets.update', 'assets.delete', 'assets.bulk_upload', 'assets.register_export', 'assets.config_manage',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
     'incidents.view', 'incidents.create', 'incidents.update', 'incidents.close',
     'inventory.view', 'inventory.create', 'inventory.update', 'inventory.adjust',
@@ -246,10 +256,10 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'facility.manage', 'settings.manage',
   ],
   IT_ADMIN: [
-    'users.view', 'users.create', 'users.update',
-    'departments.view', 'departments.create', 'departments.update', 'departments.delete',
+    'users.view', 'users.create', 'users.update', 'users.bulk_upload',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete', 'departments.bulk_upload',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close',
-    'assets.view', 'assets.create', 'assets.update',
+    'assets.view', 'assets.create', 'assets.update', 'assets.bulk_upload', 'assets.register_export',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
     'incidents.view', 'incidents.create', 'incidents.update', 'incidents.close',
     'inventory.view', 'inventory.create', 'inventory.update', 'inventory.adjust',
@@ -261,9 +271,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'facility.manage',
   ],
   IT_OFFICER: [
-    'departments.view', 'departments.create', 'departments.update',
+    'departments.view', 'departments.create', 'departments.update', 'departments.bulk_upload',
     'tickets.view', 'tickets.create', 'tickets.comment', 'tickets.status_change', 'tickets.assign', 'tickets.resolve', 'tickets.close',
-    'assets.view', 'assets.create', 'assets.update',
+    'assets.view', 'assets.create', 'assets.update', 'assets.bulk_upload', 'assets.register_export',
     'maintenance.view', 'maintenance.create', 'maintenance.update', 'maintenance.complete',
     'incidents.view', 'incidents.create', 'incidents.update', 'incidents.close',
     'inventory.view', 'inventory.create', 'inventory.update', 'inventory.adjust',
@@ -684,7 +694,9 @@ class AuthService {
     }
 
     const existingUsers = await getAllFromStore<User>('users');
-    const existingEmails = new Set(existingUsers.map((u) => (u.email || '').toLowerCase()));
+    const existingEmails = new Set(existingUsers.map((u) => (u.email || '').toLowerCase().trim()));
+    const existingUsernames = new Set(existingUsers.map((u) => (u.username || '').toLowerCase().trim()));
+    const existingFullNames = new Set(existingUsers.map((u) => (u.fullName || '').toLowerCase().trim()));
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
@@ -707,18 +719,31 @@ class AuthService {
       }
 
       const fullName = String(item.fullName).trim();
-      const surname = extractSurname(fullName);
-      const username = surname.toLowerCase();
-      const defaultPassword = getDefaultPasswordForSurname(surname);
-      const email = (item.email ? String(item.email).trim() : '') || `${username}@hospital.local`;
+      const normalizedFullName = fullName.toLowerCase();
 
-      // If exact email already exists, skip or generate unique handle
-      if (existingEmails.has(email.toLowerCase())) {
+      // Check for exact full name duplicate
+      if (existingFullNames.has(normalizedFullName)) {
         skippedCount++;
         continue;
       }
 
-      const dept = (item.department ? String(item.department).trim() : '') || 'General Clinical';
+      const surname = extractSurname(fullName);
+      let baseUsername = ((item as any).username || surname || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!baseUsername) baseUsername = 'user';
+      let username = baseUsername;
+      let counter = 1;
+      while (existingUsernames.has(username)) {
+        username = `${baseUsername}${counter}`;
+        counter++;
+      }
+
+      const defaultPassword = getDefaultPasswordForSurname(surname);
+      let email = (item.email ? String(item.email).trim() : '') || `${username}@hospital.local`;
+      if (existingEmails.has(email.toLowerCase())) {
+        email = `${username}@hospital.local`;
+      }
+
+      const dept = (item.department ? String(item.department).trim() : '') || 'OPD (Outpatient Department)';
 
       const newUser: User = {
         id: 'usr-' + generateUUID().substring(0, 8),
@@ -752,6 +777,8 @@ class AuthService {
         console.warn('[authService] Error enqueuing bulk created user to syncService:', e);
       }
 
+      existingFullNames.add(normalizedFullName);
+      existingUsernames.add(username);
       existingEmails.add(email.toLowerCase());
       createdCount++;
 
@@ -853,9 +880,9 @@ class AuthService {
     // Process departments (tied by checkboxes)
     const rawDepts = userData.departments && userData.departments.length > 0
       ? userData.departments
-      : (userData.department ? [userData.department] : ['General Clinical']);
+      : (userData.department ? [userData.department] : ['OPD (Outpatient Department)']);
     const cleanDepts = Array.from(new Set(rawDepts.map((d) => (d || '').trim()).filter(Boolean)));
-    const primaryDept = (userData.department || '').trim() || cleanDepts[0] || 'General Clinical';
+    const primaryDept = (userData.department || '').trim() || cleanDepts[0] || 'OPD (Outpatient Department)';
 
     // Ensure all tied departments exist as STANDARD_DEPARTMENTS
     try {

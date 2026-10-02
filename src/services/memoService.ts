@@ -71,6 +71,7 @@ class MemoService {
    */
   async saveMemo(memo: HospitalMemo, currentUser?: User | null): Promise<HospitalMemo> {
     const now = new Date().toISOString();
+    const isNew = !memo.createdAt || memo.createdAt === now;
     const toSave: HospitalMemo = {
       ...memo,
       updatedAt: now,
@@ -79,9 +80,16 @@ class MemoService {
 
     await putToStore('memos', toSave);
 
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('memos', toSave.id, isNew ? 'CREATE' : 'UPDATE', toSave);
+    } catch (e) {
+      console.warn('[MemoService] Failed to enqueue memo sync operation:', e);
+    }
+
     if (currentUser) {
       await auditService.logAction(
-        memo.createdAt === now ? 'CREATE_MEMO' : 'UPDATE_MEMO',
+        isNew ? 'CREATE_MEMO' : 'UPDATE_MEMO',
         'Hospital Memo',
         toSave.id,
         null,
@@ -98,6 +106,13 @@ class MemoService {
   async deleteMemo(id: string, currentUser?: User | null): Promise<void> {
     const existing = await this.getMemoById(id);
     await deleteFromStore('memos', id);
+
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('memos', id, 'DELETE', existing || { id });
+    } catch (e) {
+      console.warn('[MemoService] Failed to enqueue memo delete sync:', e);
+    }
 
     if (currentUser && existing) {
       await auditService.logAction(
@@ -184,6 +199,13 @@ class MemoService {
 
     await putToStore('memos', memo);
 
+    try {
+      const { syncService } = await import('./syncService');
+      await syncService.enqueueOperation('memos', memo.id, 'UPDATE', memo);
+    } catch (e) {
+      console.warn('[MemoService] Failed to enqueue updateMemoStatus sync:', e);
+    }
+
     await auditService.logAction(
       'MEMO_STATUS_CHANGE',
       'Hospital Memo',
@@ -193,6 +215,67 @@ class MemoService {
     );
 
     return memo;
+  }
+
+  /**
+   * Dedicated AI Draft Body Endpoint based on Subject
+   */
+  async draftMemoBodyWithAi(
+    subject: string,
+    options?: {
+      recipient?: string;
+      department?: string;
+      hospitalName?: string;
+      senderName?: string;
+    }
+  ): Promise<string> {
+    try {
+      const response = await fetch('/api/ai/memo-draft-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, ...options }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data && data.body) {
+        return data.body;
+      }
+      throw new Error('Invalid response structure from AI draft body endpoint');
+    } catch (err: any) {
+      console.warn('[MemoService] AI draft body failed, using offline fallback:', err);
+      const hospitalName = options?.hospitalName || 'St. Mary Theresa Catholic Hospital';
+      return `This memorandum serves as official operational guidance regarding **${subject}** across all departments of ${hospitalName}.\n\n### 1. Purpose & Directives\nIn line with hospital quality assurance and clinical operations standards, all departmental heads, clinical supervisors, and administrative officers are instructed to implement the operational guidelines specified below with immediate effect.\n\n### 2. Mandatory Departmental Action Items\n- Review clinical workflows and verify all frontline ward terminals are operating normally.\n- Coordinate with unit shift leaders to ensure uninterrupted shift handovers and patient record integrity.\n- Promptly report any system, hardware, or logistical constraints to the IT & Operations Management helpdesk.\n\n### 3. Compliance & Inquiries\nCompliance with this directive is mandatory across all shifts. For technical support, clarification, or immediate escalation, please contact the IT Operations Center via Extension 2101 or the on-call supervisor.`;
+    }
+  }
+
+  /**
+   * Dedicated AI Refine Body Endpoint (corrects grammar, formal tone, strictly preserves concept)
+   */
+  async refineMemoBodyWithAi(subject: string, body: string): Promise<string> {
+    try {
+      const response = await fetch('/api/ai/memo-refine-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, body }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data && data.refinedBody) {
+        return data.refinedBody;
+      }
+      throw new Error('Invalid response structure from AI refine body endpoint');
+    } catch (err: any) {
+      console.warn('[MemoService] AI refine body failed, returning original text:', err);
+      return body;
+    }
   }
 
   /**

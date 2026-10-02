@@ -32,6 +32,7 @@ import {
   RotateCcw,
   Eye,
   Edit3,
+  Loader2,
 } from 'lucide-react';
 import {
   type HospitalMemo,
@@ -182,7 +183,8 @@ const hasMarkdownTable = (text: string): boolean => {
 
 const renderMemoContentWithTables = (
   text: string,
-  onEditTable?: (headers: string[], alignments: ('left' | 'center' | 'right')[], rows: string[][]) => void
+  onEditTable?: (headers: string[], alignments: ('left' | 'center' | 'right')[], rows: string[][]) => void,
+  onRemoveTable?: (tableMarkdown: string) => void
 ) => {
   if (!text) return null;
 
@@ -191,6 +193,7 @@ const renderMemoContentWithTables = (
   let currentParagraphLines: string[] = [];
   let inTable = false;
   let tableRows: string[][] = [];
+  let rawTableLines: string[] = [];
   let tableKey = 0;
 
   const renderCurrentParagraph = () => {
@@ -206,6 +209,7 @@ const renderMemoContentWithTables = (
 
   const renderCurrentTable = () => {
     if (tableRows.length > 0) {
+      const fullTableMarkdown = rawTableLines.join('\n');
       const hasSeparator =
         tableRows.length > 1 &&
         tableRows[1].every((cell) => cell.trim().match(/^:?-+:?$/) || cell.trim() === '');
@@ -225,8 +229,8 @@ const renderMemoContentWithTables = (
 
       elements.push(
         <div key={`table-container-${tableKey++}`} className="group relative my-4">
-          {onEditTable && headers.length > 0 && (
-            <div className="absolute right-2 -top-3 z-10 opacity-0 group-hover:opacity-100 transition">
+          <div className="absolute right-2 -top-3 z-10 opacity-0 group-hover:opacity-100 transition flex items-center gap-1.5">
+            {onEditTable && headers.length > 0 && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -237,10 +241,24 @@ const renderMemoContentWithTables = (
                 title="Edit this table in Hospital Document Table Builder"
               >
                 <Edit3 className="w-3 h-3" />
-                <span>Edit Table in Builder</span>
+                <span>Edit Table</span>
               </button>
-            </div>
-          )}
+            )}
+            {onRemoveTable && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveTable(fullTableMarkdown);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-sans font-bold text-[10px] shadow-md transition cursor-pointer"
+                title="Remove this table from memorandum"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Remove Table</span>
+              </button>
+            )}
+          </div>
           <div
             className="p-4 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-inner"
             style={{ fontFamily: "'Times New Roman', Times, serif" }}
@@ -302,6 +320,7 @@ const renderMemoContentWithTables = (
         </div>
       );
       tableRows = [];
+      rawTableLines = [];
     }
   };
 
@@ -312,6 +331,7 @@ const renderMemoContentWithTables = (
     if (isTableLine) {
       renderCurrentParagraph();
       inTable = true;
+      rawTableLines.push(line);
       const cells = line.split('|').slice(1, -1);
       tableRows.push(cells);
     } else {
@@ -370,9 +390,9 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
   const [status, setStatus] = useState<MemoStatus>('PUBLISHED');
 
   // Editable Document Layout Studio fields
-  const [headerUnitName, setHeaderUnitName] = useState('');
-  const [headerEmail, setHeaderEmail] = useState('');
-  const [headerPhone, setHeaderPhone] = useState('');
+  const [headerUnitName, setHeaderUnitName] = useState(systemSettings?.letterheadSubTitle || 'I.T Support Unit');
+  const [headerEmail, setHeaderEmail] = useState(systemSettings?.contactEmail || 'send2smthit@gmail.com');
+  const [headerPhone, setHeaderPhone] = useState(systemSettings?.contactPhone || '055 272 2289');
   const [documentTypeText, setDocumentTypeText] = useState('MEMO');
   const [officerSignature, setOfficerSignature] = useState('');
   const [officerName, setOfficerName] = useState('');
@@ -641,6 +661,69 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
   const [generationSuccess, setGenerationSuccess] = useState(false);
   const [refinePrompt, setRefinePrompt] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isAiDrafting, setIsAiDrafting] = useState(false);
+  const [isAiRefining, setIsAiRefining] = useState(false);
+
+  const handleRemoveTable = (tableMarkdown: string) => {
+    setExecutiveSummary(prev => {
+      if (!prev) return '';
+      // Remove the specific table markdown block and collapse extraneous newlines
+      const trimmedMarkdown = tableMarkdown.trim();
+      let updated = prev;
+      if (updated.includes(tableMarkdown)) {
+        updated = updated.replace(tableMarkdown, '');
+      } else if (trimmedMarkdown && updated.includes(trimmedMarkdown)) {
+        updated = updated.replace(trimmedMarkdown, '');
+      }
+      return updated.replace(/\n{3,}/g, '\n\n').trim();
+    });
+  };
+
+  const handleAiDraftBody = async () => {
+    const querySubject = (title.trim() || topic.trim());
+    if (!querySubject) {
+      setErrorMessage('Please enter a Memorandum Subject Title first to generate an AI draft.');
+      return;
+    }
+    setErrorMessage('');
+    setIsAiDrafting(true);
+    try {
+      const drafted = await memoService.draftMemoBodyWithAi(querySubject, {
+        recipient: targetAudience || 'All Clinical & Administrative Staff',
+        department: department || 'Hospital Administration & IT',
+        hospitalName: systemSettings?.facilityName || systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital',
+        senderName: officerName || currentUser?.fullName || 'Super Administrator',
+      });
+      setExecutiveSummary(drafted);
+      setBodyViewMode('FORMATTED');
+    } catch (err: any) {
+      console.error('AI Draft failed:', err);
+      setErrorMessage('Failed to generate AI draft. Please try again.');
+    } finally {
+      setIsAiDrafting(false);
+    }
+  };
+
+  const handleAiRefineBody = async () => {
+    if (!executiveSummary.trim()) {
+      setErrorMessage('Please enter or draft memo body content first to refine.');
+      return;
+    }
+    setErrorMessage('');
+    setIsAiRefining(true);
+    try {
+      const refined = await memoService.refineMemoBodyWithAi(
+        title.trim() || topic.trim() || 'Hospital Memorandum',
+        executiveSummary
+      );
+      setExecutiveSummary(refined);
+    } catch (err: any) {
+      console.error('AI Refine failed:', err);
+      setErrorMessage('Failed to refine memo body. Please try again.');
+    } finally {
+      setIsAiRefining(false);
+    }
+  };
 
   const hospitalName = systemSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
 
@@ -1270,7 +1353,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                           }}
                         >
                           {executiveSummary.trim() ? (
-                            renderMemoContentWithTables(executiveSummary, handleOpenEditTable)
+                            renderMemoContentWithTables(executiveSummary, handleOpenEditTable, handleRemoveTable)
                           ) : (
                             <p className="text-slate-400 italic text-xs font-serif">
                               Document body is currently empty. Click "Insert Table Builder" above or click here to write memo directives...
@@ -1299,7 +1382,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                                   <span>&rarr;</span>
                                 </button>
                               </div>
-                              {renderMemoContentWithTables(executiveSummary, handleOpenEditTable)}
+                              {renderMemoContentWithTables(executiveSummary, handleOpenEditTable, handleRemoveTable)}
                             </div>
                           )}
                         </div>
@@ -1432,7 +1515,7 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
                           <span>Live Memo Table Preview:</span>
                           <span className="text-sky-600 font-semibold">100% Matching Layout & Design</span>
                         </div>
-                        {renderMemoContentWithTables(executiveSummary, handleOpenEditTable)}
+                        {renderMemoContentWithTables(executiveSummary, handleOpenEditTable, handleRemoveTable)}
                       </div>
                     )}
                   </div>
@@ -1550,7 +1633,47 @@ export const MemoEditorModal: React.FC<MemoEditorModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            <button
+              type="button"
+              onClick={handleAiDraftBody}
+              disabled={isAiDrafting || isAiRefining}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title={title.trim() || topic.trim() ? "Auto-draft official memorandum body from subject title using AI" : "Enter a subject title first to generate AI draft"}
+            >
+              {isAiDrafting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Drafting Body...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>AI Draft</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleAiRefineBody}
+              disabled={isAiDrafting || isAiRefining || !executiveSummary.trim()}
+              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+              title="Polish grammar and formal tone of the current memo body while preserving your concept"
+            >
+              {isAiRefining ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Refining...</span>
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <span>Refine</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={onClose}

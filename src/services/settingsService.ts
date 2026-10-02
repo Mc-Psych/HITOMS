@@ -58,7 +58,7 @@ function normalizeFacilitySettings(settings: SystemSettings): SystemSettings {
       ...settings,
       hospitalName: 'St. Mary Theresa Catholic Hospital',
       contactEmail: (!settings.contactEmail || settings.contactEmail.includes('stjude'))
-        ? 'it-support@stmarytheresa-hospital.local'
+        ? 'send2smthit@gmail.com'
         : settings.contactEmail,
     };
   }
