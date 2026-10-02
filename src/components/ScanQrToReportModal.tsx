@@ -75,9 +75,19 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
       if (!navigator?.mediaDevices?.getUserMedia) {
         throw new Error('Camera access API is not available in this browser environment.');
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
-      });
+      
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1024 }, height: { ideal: 768 } },
+        });
+      } catch (e) {
+        console.warn('Environment camera failed, falling back to any standard webcam...', e);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
@@ -116,7 +126,7 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: 'dontInvert',
+        inversionAttempts: 'attemptBoth',
       });
 
       if (code && code.data) {
@@ -175,15 +185,32 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(img, 0, 0);
+        // Smart downscaling of large mobile photos (limit max width/height to 1024px to drastically improve scan accuracy)
+        const maxDim = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert',
+          inversionAttempts: 'attemptBoth',
         });
+
         if (code && code.data) {
           const found = findAssetFromQrScan(code.data, assets);
           if (found) {
