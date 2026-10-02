@@ -609,6 +609,35 @@ class NetworkService {
       }
     }
   }
+
+  public async bulkImportTopology(devices: NetworkDevice[], user: User): Promise<void> {
+    const allowedRoles = ['SUPER_ADMIN', 'IT_ADMIN', 'IT_OFFICER'];
+    if (!allowedRoles.includes(user.role) && !authService.isSuperAdminOrIT(user)) {
+      throw new Error('Unauthorized: Only Super Administrators and IT Personnel can import network topologies.');
+    }
+
+    const now = new Date().toISOString();
+    const deviceId = getDeviceId();
+
+    for (const d of devices) {
+      if (!d.id || !d.deviceName) continue;
+
+      const device: NetworkDevice = {
+        ...d,
+        updatedAt: now,
+        _syncStatus: 'PENDING_SYNC',
+        _syncVersion: (d._syncVersion || 1) + 1,
+        _deviceId: d._deviceId || deviceId,
+      };
+
+      await putToStore('networkDevices', device);
+      await syncService.enqueueOperation('networkDevices', device.id, 'UPDATE', device);
+    }
+
+    await auditService.logAction('IMPORT_NETWORK_TOPOLOGY', 'Network', 'BULK_IMPORT', null, {
+      count: devices.length,
+    });
+  }
 }
 
 export const networkService = new NetworkService();

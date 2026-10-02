@@ -34,6 +34,9 @@ import {
   Monitor,
   Laptop,
   Printer,
+  Database,
+  Download,
+  Upload,
 } from 'lucide-react';
 import {
   type NetworkDevice,
@@ -75,7 +78,68 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
   onRefresh,
 }) => {
   const [activeTab, setActiveTab] = useState<'TOPOLOGY' | 'DEVICES' | 'INCIDENTS'>('TOPOLOGY');
-  const [topologySubView, setTopologySubView] = useState<'CANVAS' | 'MAP' | 'MATRIX' | 'CONNECT_TOOL'>('CANVAS');
+  const [topologySubView, setTopologySubView] = useState<'CANVAS' | 'MAP' | 'MATRIX' | 'CONNECT_TOOL' | 'IMPORT_EXPORT'>('CANVAS');
+
+  // Import/Export States
+  const [importPreview, setImportPreview] = useState<{ name: string; devices: NetworkDevice[] } | null>(null);
+  const [importingStatus, setImportingStatus] = useState<'IDLE' | 'PENDING' | 'SUCCESS'>('IDLE');
+  const [importStatusMsg, setImportStatusMsg] = useState<string | null>(null);
+
+  const handleExportTopology = () => {
+    try {
+      const dataStr = JSON.stringify(devices, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+      const exportFileDefaultName = `HITOMS_Network_Topology_${new Date().toISOString().split('T')[0]}.json`;
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+    } catch (err) {
+      console.error('Failed to export topology:', err);
+    }
+  };
+
+  const handleImportTopology = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      const targetFile = e.target.files[0];
+      fileReader.onload = (event) => {
+        try {
+          const parsed = JSON.parse(event.target?.result as string);
+          if (Array.isArray(parsed)) {
+            setImportPreview({
+              name: targetFile.name,
+              devices: parsed as NetworkDevice[],
+            });
+            setImportStatusMsg(null);
+            setImportingStatus('IDLE');
+          } else {
+            alert('Invalid backup format: root of JSON must be a device array.');
+          }
+        } catch (err) {
+          alert('Failed to parse JSON file.');
+        }
+      };
+      fileReader.readAsText(targetFile);
+    }
+  };
+
+  const handleCommitImport = async () => {
+    if (!importPreview || !currentUser) return;
+    setImportingStatus('PENDING');
+    try {
+      await networkService.bulkImportTopology(importPreview.devices, currentUser);
+      setImportingStatus('SUCCESS');
+      setImportStatusMsg(`Success: Imported ${importPreview.devices.length} network devices and restored original interconnection wires.`);
+      setTimeout(() => {
+        setImportPreview(null);
+        onRefresh();
+      }, 3000);
+    } catch (err: any) {
+      setImportingStatus('IDLE');
+      setImportStatusMsg(`Import failed: ${err?.message || 'Database error'}`);
+    }
+  };
   const [incidents, setIncidents] = useState<NetworkIncident[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<NetworkDevice | null>(null);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
@@ -637,17 +701,31 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                 <span>Predecessor / Successor Matrix</span>
               </button>
               {canManageNetwork && (
-                <button
-                  onClick={() => setTopologySubView('CONNECT_TOOL')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    topologySubView === 'CONNECT_TOOL'
-                      ? 'bg-sky-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <Link2 className="w-3.5 h-3.5" />
-                  <span>Quick Cable Patcher</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => setTopologySubView('CONNECT_TOOL')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      topologySubView === 'CONNECT_TOOL'
+                        ? 'bg-sky-600 text-white'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    <span>Quick Cable Patcher</span>
+                  </button>
+
+                  <button
+                    onClick={() => setTopologySubView('IMPORT_EXPORT')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      topologySubView === 'IMPORT_EXPORT'
+                        ? 'bg-sky-600 text-white'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Import / Export Topology</span>
+                  </button>
+                </>
               )}
             </div>
 
@@ -1368,6 +1446,152 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {/* SUBVIEW 4: IMPORT / EXPORT TO GENERATE / PARSE TOPOLOGY JSON */}
+          {topologySubView === 'IMPORT_EXPORT' && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-2xs space-y-6">
+              <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Database className="w-5 h-5 text-sky-600" />
+                  <span>Import / Export Network Topology JSON</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Backup your active network design, Cisco node coordinates, VLAN tags, and device connection routing, or restore a previously saved topology backup file.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Export Card */}
+                <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between space-y-4">
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                      <Download className="w-5 h-5" />
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Export Network Architecture</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Download a fully self-contained JSON configuration backup containing all <strong>{devices.length} network devices</strong>, coordinate positions, and routing feeds.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleExportTopology}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Topology Config (.json)</span>
+                  </button>
+                </div>
+
+                {/* Import Card */}
+                <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between space-y-4">
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Restore Topology Configuration</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Upload a previously exported <code>.json</code> network configuration file. This will restore coordinates, device settings, and patch cables.
+                    </p>
+                  </div>
+                  
+                  {canManageNetwork ? (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportTopology}
+                        className="hidden"
+                        id="topology-import-input"
+                      />
+                      <label
+                        htmlFor="topology-import-input"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer text-center"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span>Upload Topology Config (.json)</span>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="text-center text-xs text-slate-400 p-2 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                      Restricted to Super Administrators / IT personnel
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Preview of Imported Devices */}
+              {importPreview && (
+                <div className="space-y-4 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60 animate-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-200">
+                        Parsed Backup File: {importPreview.name}
+                      </h4>
+                      <p className="text-[11px] text-indigo-700 dark:text-indigo-400">
+                        Contains {importPreview.devices.length} devices. Verify below before restoring.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setImportPreview(null)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="border border-indigo-100 dark:border-indigo-900/40 rounded-xl overflow-hidden max-h-44 overflow-y-auto bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-300">
+                    <table className="w-full text-left font-mono">
+                      <thead className="bg-indigo-50/50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/40 font-semibold text-slate-600 dark:text-slate-300">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Hardware Node</th>
+                          <th className="px-3 py-2 text-left">Type</th>
+                          <th className="px-3 py-2 text-left">IP Address</th>
+                          <th className="px-3 py-2 text-left">Location</th>
+                          <th className="px-3 py-2 text-left">Uplink Pred</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {importPreview.devices.map((d, index) => (
+                          <tr key={d.id || index}>
+                            <td className="px-3 py-2 font-semibold text-slate-900 dark:text-white">
+                              {d.deviceName}
+                            </td>
+                            <td className="px-3 py-2">{d.deviceType}</td>
+                            <td className="px-3 py-2">{d.ipAddress}</td>
+                            <td className="px-3 py-2">{d.location}</td>
+                            <td className="px-3 py-2 text-slate-500">
+                              {d.predecessorId || 'None'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {importStatusMsg && (
+                    <div className="p-2.5 rounded-lg bg-indigo-100 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 text-[11px] text-indigo-900 dark:text-indigo-300 font-medium">
+                      {importStatusMsg}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      onClick={() => setImportPreview(null)}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleCommitImport}
+                      disabled={importingStatus === 'PENDING'}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition animate-pulse"
+                    >
+                      {importingStatus === 'PENDING' ? 'Restoring Topology...' : 'Confirm Restore Topology Backup'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

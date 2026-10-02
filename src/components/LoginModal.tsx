@@ -29,24 +29,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [isRefreshingStaff, setIsRefreshingStaff] = useState(false);
   const [selectedStaffPreset, setSelectedStaffPreset] = useState<UserType | null>(null);
 
-  // Auto-sync staff accounts when login modal opens (critical for mobile devices)
+  // Auto-sync staff accounts when login modal opens disabled to prevent Firestore daily write/read quota exhaustion and warnings on login page
   useEffect(() => {
-    if (isOpen) {
-      syncLatestStaffAccounts().catch((e) =>
-        console.warn('[LoginModal] Background staff sync note:', e)
-      );
-    }
+    // Background staff sync is disabled to preserve Firestore daily free tier limit
   }, [isOpen]);
 
   const handleManualSyncStaff = async () => {
-    setIsRefreshingStaff(true);
-    try {
-      await syncLatestStaffAccounts();
-    } catch (e: any) {
-      console.warn('Failed to refresh staff:', e);
-    } finally {
-      setIsRefreshingStaff(false);
-    }
+    // Background manual sync disabled
   };
 
   // Dynamically sync facility settings so Login Page ALWAYS matches the facility details
@@ -87,8 +76,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     };
     if (isOpen) {
       window.addEventListener('keydown', handleKeyDown);
-      // Automatically sync latest hospital staff accounts in the background
-      handleManualSyncStaff();
+      // Auto-sync on startup has been removed to avoid Firestore free-quota exhaustion and console warnings
     }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, allowClose, onClose]);

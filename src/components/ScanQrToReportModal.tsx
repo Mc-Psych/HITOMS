@@ -387,82 +387,83 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
               {/* Tab 1: Live Camera View */}
               {activeTab === 'CAMERA' && (
                 <div className="space-y-3">
-                  {cameraActive ? (
-                    <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
-                      <video
-                        ref={videoRef}
-                        className="w-full h-full object-cover"
-                        muted
-                        playsInline
-                      />
-                      <canvas ref={canvasRef} className="hidden" />
+                  <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
+                    <video
+                      ref={videoRef}
+                      className={`w-full h-full object-cover ${cameraActive ? 'block' : 'hidden'}`}
+                      muted
+                      playsInline
+                    />
+                    <canvas ref={canvasRef} className="hidden" />
 
-                      {/* Scanning Frame Reticle */}
-                      <div className="absolute inset-0 border-2 border-dashed border-sky-400/70 rounded-xl m-8 pointer-events-none flex items-center justify-center">
-                        <div className="w-full h-0.5 bg-sky-400/80 animate-pulse shadow-sm shadow-sky-400" />
-                      </div>
-
-                      {/* Stop Camera Button */}
-                      <button
-                        type="button"
-                        onClick={stopCamera}
-                        className="absolute top-3 right-3 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 backdrop-blur-xs transition cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Stop Camera</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative w-full aspect-4/3 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center p-6 text-center">
-                      <video ref={videoRef} className="hidden" muted playsInline />
-                      <canvas ref={canvasRef} className="hidden" />
-
-                      <div className="w-12 h-12 rounded-2xl bg-sky-950/80 border border-sky-800/80 flex items-center justify-center mb-3">
-                        <Camera className="w-6 h-6 text-sky-400" />
-                      </div>
-                      <h4 className="text-sm font-bold text-white mb-1">
-                        Optical QR Barcode Scanner
-                      </h4>
-                      <p className="text-xs text-slate-300 max-w-xs mb-4">
-                        Camera access is strictly on-demand. Click below to activate your webcam or mobile camera to scan asset QR labels.
-                      </p>
-
-                      <button
-                        type="button"
-                        onClick={startCamera}
-                        disabled={isRequestingCamera}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-sky-950 cursor-pointer transition"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>{isRequestingCamera ? 'Requesting Camera Access...' : 'Start Camera Scanner'}</span>
-                      </button>
-
-                      {cameraPermissionError ? (
-                        <div className="mt-3 p-2.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-[11px] max-w-xs text-left">
-                          {cameraPermissionError}
+                    {!cameraActive && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950 rounded-2xl">
+                        <div className="w-12 h-12 rounded-2xl bg-sky-950/80 border border-sky-800/80 flex items-center justify-center mb-3">
+                          <Camera className="w-6 h-6 text-sky-400" />
                         </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-400 mt-3">
-                          No camera? Switch to{' '}
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('MANUAL')}
-                            className="text-sky-400 hover:underline font-semibold cursor-pointer"
-                          >
-                            Enter Tag
-                          </button>{' '}
-                          or{' '}
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('FILE')}
-                            className="text-sky-400 hover:underline font-semibold cursor-pointer"
-                          >
-                            Upload Photo
-                          </button>.
+                        <h4 className="text-sm font-bold text-white mb-1">
+                          Optical QR Barcode Scanner
+                        </h4>
+                        <p className="text-xs text-slate-300 max-w-xs mb-4">
+                          Camera access is strictly on-demand. Click below to activate your webcam or mobile camera to scan asset QR labels.
                         </p>
-                      )}
-                    </div>
-                  )}
+
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          disabled={isRequestingCamera}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-sky-950 cursor-pointer transition"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <span>{isRequestingCamera ? 'Requesting Camera Access...' : 'Start Camera Scanner'}</span>
+                        </button>
+
+                        {cameraPermissionError ? (
+                          <div className="mt-3 p-2.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-[11px] max-w-xs text-left">
+                            {cameraPermissionError}
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-slate-400 mt-3">
+                            No camera? Switch to{' '}
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('MANUAL')}
+                              className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Enter Tag
+                            </button>{' '}
+                            or{' '}
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('FILE')}
+                              className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Upload Photo
+                            </button>.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {cameraActive && (
+                      <>
+                        {/* Scanning Frame Reticle */}
+                        <div className="absolute inset-0 border-2 border-dashed border-sky-400/70 rounded-xl m-8 pointer-events-none flex items-center justify-center">
+                          <div className="w-full h-0.5 bg-sky-400/80 animate-pulse shadow-sm shadow-sky-400" />
+                        </div>
+
+                        {/* Stop Camera Button */}
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="absolute top-3 right-3 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 backdrop-blur-xs transition cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Stop Camera</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
 
                   {cameraActive && (
                     <p className="text-center text-[11px] text-slate-400">
