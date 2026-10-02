@@ -1,0 +1,141 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Hospital staff member, clinician, IT officer, or administrator account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" },
+        "department": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string" },
+        "badgeNumber": { "type": "string" },
+        "avatar": { "type": "string" },
+        "mustChangePassword": { "type": "boolean" },
+        "isDefaultPassword": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "_syncStatus": { "type": "string" },
+        "_lastSyncedAt": { "type": "string" }
+      },
+      "required": ["id", "username", "fullName", "email", "role"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Hospital IT incident or support service request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ticketNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "priority": { "type": "string" },
+        "status": { "type": "string" },
+        "department": { "type": "string" },
+        "location": { "type": "string" },
+        "reportedBy": { "type": "object" },
+        "assignedTo": { "type": "object" },
+        "assignedAt": { "type": "string" },
+        "assetId": { "type": "string" },
+        "isGeneralIssue": { "type": "boolean" },
+        "attachments": { "type": "array" },
+        "comments": { "type": "array" },
+        "resolution": { "type": "object" },
+        "confirmationRating": { "type": "number" },
+        "aiTriage": { "type": "object" },
+        "sla": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "_syncStatus": { "type": "string" },
+        "_lastSyncedAt": { "type": "string" }
+      },
+      "required": ["id", "ticketNumber", "title", "category", "priority", "status", "department", "reportedBy"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "Hospital IT hardware equipment, terminal, workstation, or medical system device",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "assetTag": { "type": "string" },
+        "name": { "type": "string" },
+        "assetType": { "type": "string" },
+        "department": { "type": "string" },
+        "location": { "type": "string" },
+        "status": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "model": { "type": "string" },
+        "ipAddress": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "_syncStatus": { "type": "string" },
+        "_lastSyncedAt": { "type": "string" }
+      },
+      "required": ["id", "assetTag", "name", "assetType", "department", "status"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Hospital clinical unit, ward, laboratory, or administrative department",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "floor": { "type": "string" },
+        "building": { "type": "string" },
+        "headOfDepartment": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System security and operational audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "entityId": { "type": "string" },
+        "actor": { "type": "object" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "object" },
+        "ipAddress": { "type": "string" }
+      },
+      "required": ["id", "action", "module", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Hospital staff user profiles"
+    },
+    "/tickets/{ticketId}": {
+      "schema": "Ticket",
+      "description": "Hospital IT incident and service request tickets"
+    },
+    "/assets/{assetId}": {
+      "schema": "Asset",
+      "description": "Hospital hardware assets and inventory"
+    },
+    "/departments/{departmentId}": {
+      "schema": "Department",
+      "description": "Hospital wards and clinical departments"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Immutable system audit trail entries"
+    }
+  }
+}

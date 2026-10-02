@@ -11,6 +11,12 @@ import {
   AlertTriangle,
   LifeBuoy,
   X,
+  Sparkles,
+  Camera,
+  CheckCircle2,
+  Lock,
+  Unlock,
+  Loader2,
 } from 'lucide-react';
 import {
   type User,
@@ -25,6 +31,7 @@ import {
   type SyncQueueItem,
   type SystemSettings,
   type EmergencyBroadcastAlert,
+  type Department,
 } from './types';
 import { initializeSeedDataIfNeeded } from './services/seedData';
 import { authService } from './services/authService';
@@ -41,7 +48,10 @@ import { emergencyService } from './services/emergencyService';
 import { ticketSoundService } from './services/ticketSoundService';
 import { settingsService } from './services/settingsService';
 import { seedSnapshotService } from './services/seedSnapshotService';
+import { departmentService } from './services/departmentService';
 import { getAllFromStore, getFromStore } from './services/localDatabaseService';
+import { aiTriageService } from './services/aiTriageService';
+import { analyzeTicketPriority } from './utils/ticketPriorityAnalyzer';
 
 function updateFavicon(logoSrc: string | null | undefined) {
   if (!logoSrc) return;
@@ -111,11 +121,27 @@ export default function App() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [networkDevices, setNetworkDevices] = useState<NetworkDevice[]>([]);
   const [hospitalSystems, setHospitalSystems] = useState<HospitalSystem[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([]);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [syncStats, setSyncStats] = useState<SyncStats>(syncService.getStats());
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
+
+  // Super Admin flag
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
+  // Deduplicated and alphabetically sorted list of hospital departments
+  const uniqueDepartments = React.useMemo(() => {
+    if (!departments || departments.length === 0) return [];
+    const map = new Map<string, Department>();
+    for (const d of departments) {
+      if (d.name && d.name.trim() && !map.has(d.name.trim())) {
+        map.set(d.name.trim(), d);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [departments]);
 
   // Quick ticket creation modal triggerable from anywhere
   const [quickTicketOpen, setQuickTicketOpen] = useState(false);
@@ -124,6 +150,33 @@ export default function App() {
   const [quickPriority, setQuickPriority] = useState<Ticket['priority']>('High');
   const [quickCategory, setQuickCategory] = useState<Ticket['category']>('Hardware');
   const [quickDept, setQuickDept] = useState('Emergency');
+  const [quickAssetTag, setQuickAssetTag] = useState('');
+  const [isAiAnalyzingPriority, setIsAiAnalyzingPriority] = useState(false);
+  const [aiPriorityAnalysis, setAiPriorityAnalysis] = useState<{
+    priority: Ticket['priority'];
+    reason: string;
+    keywords?: string[];
+  } | null>(null);
+  const [allowPriorityOverride, setAllowPriorityOverride] = useState(false);
+  const [isSubmittingQuickTicket, setIsSubmittingQuickTicket] = useState(false);
+  const [quickTicketError, setQuickTicketError] = useState<string | null>(null);
+  const [quickScanModalOpen, setQuickScanModalOpen] = useState(false);
+
+  // Sync quickDept to available departments if not already matched
+  useEffect(() => {
+    if (uniqueDepartments.length > 0) {
+      const exists = uniqueDepartments.some((d) => d.name === quickDept);
+      if (!exists) {
+        const defaultDept = uniqueDepartments.find(
+          (d) =>
+            d.name.toLowerCase().includes('emergency') ||
+            d.name.toLowerCase().includes('opd') ||
+            d.name.toLowerCase().includes('outpatient')
+        );
+        setQuickDept(defaultDept ? defaultDept.name : uniqueDepartments[0].name);
+      }
+    }
+  }, [uniqueDepartments, quickDept, quickTicketOpen]);
 
   // Emergency state
   const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyBroadcastAlert[]>([]);
@@ -141,6 +194,7 @@ export default function App() {
         loadedInventory,
         loadedDevices,
         loadedSystems,
+        loadedDepartments,
         loadedAudit,
         loadedQueue,
         loadedLogs,
@@ -155,6 +209,7 @@ export default function App() {
         inventoryService.getItems(),
         networkService.getDevices(),
         getAllFromStore<HospitalSystem>('hospitalSystems'),
+        departmentService.getDepartments(),
         auditService.getAuditLogs(),
         syncService.getPendingQueue(),
         syncService.getSyncLogs(),
@@ -170,6 +225,7 @@ export default function App() {
       setInventoryItems(loadedInventory || []);
       setNetworkDevices(loadedDevices || []);
       setHospitalSystems(loadedSystems || []);
+      setDepartments(loadedDepartments || []);
       setAuditLogs(loadedAudit || []);
       setSyncQueue(loadedQueue || []);
       setSyncLogs(loadedLogs || []);
@@ -207,6 +263,8 @@ export default function App() {
           // Snapshot current preview data to src/data/defaultSeedData.json for repository Git default
           seedSnapshotService.triggerAutoSnapshot(2500);
         }
+        // Bi-directional sync with Firestore so fresh users, assets or updates from other users are fetched
+        syncService.runAutomaticSync().catch((e) => console.warn('[App] Boot sync error:', e?.message));
       } catch (err) {
         console.error('Bootstrap error:', err);
       }
@@ -369,30 +427,211 @@ export default function App() {
     setOpenTicketCreateModal(true);
   };
 
+  // AI-Assisted Priority Assessment when user inputs Issue summary
+  useEffect(() => {
+    if (!quickTicketOpen) return;
+    const titleTrimmed = quickTitle.trim();
+    if (titleTrimmed.length < 3) {
+      setAiPriorityAnalysis(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setIsAiAnalyzingPriority(true);
+      try {
+        // Immediate heuristic assessment for instant UI feedback
+        const heuristic = analyzeTicketPriority(titleTrimmed, quickDesc, quickCategory);
+        if (!isCancelled) {
+          const heurPriority = (heuristic.priority === 'Critical' ? 'Critical' : heuristic.priority) as Ticket['priority'];
+          setQuickPriority(heurPriority);
+          setAiPriorityAnalysis({
+            priority: heurPriority,
+            reason: heuristic.reason,
+            keywords: heuristic.matchedKeywords,
+          });
+        }
+
+        // Server-side Gemini AI triage call for deep clinical urgency classification
+        const aiRes = await aiTriageService.analyzeTicket({
+          title: titleTrimmed,
+          description: quickDesc,
+          category: quickCategory,
+          department: quickDept,
+          assetTag: quickAssetTag,
+        });
+
+        if (!isCancelled && aiRes?.recommendedPriority) {
+          const aiPriority = (aiRes.recommendedPriority === 'Critical' ? 'Critical' : aiRes.recommendedPriority) as Ticket['priority'];
+          setQuickPriority(aiPriority);
+          setAiPriorityAnalysis({
+            priority: aiPriority,
+            reason: aiRes.patientCareImpact || aiRes.riskSummary || heuristic.reason,
+            keywords: heuristic.matchedKeywords,
+          });
+          if (
+            aiRes.suggestedCategory &&
+            ['LHIMS', 'Hardware', 'Network', 'Printer', 'Software', 'Power'].includes(aiRes.suggestedCategory)
+          ) {
+            setQuickCategory(aiRes.suggestedCategory as Ticket['category']);
+          }
+        }
+      } catch (err) {
+        console.warn('[QuickTicket] AI priority evaluation notice:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsAiAnalyzingPriority(false);
+        }
+      }
+    }, 400);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [quickTitle, quickCategory, quickDept, quickTicketOpen]);
+
+  // Handler for QR / Barcode Scan inside Quick Log Modal
+  const handleQuickScanAsset = async (asset: Asset, shouldLogImmediately: boolean = false) => {
+    setQuickScanModalOpen(false);
+    const summary = `Malfunction on ${asset.name} (${asset.assetTag})`;
+    const dept = asset.department || quickDept || 'Outpatient';
+    const cat = (['Hardware', 'Network', 'Printer', 'Software', 'Power', 'LHIMS'].includes(asset.assetType)
+      ? asset.assetType
+      : 'Hardware') as Ticket['category'];
+    const desc = `Auto-identified via asset QR/Barcode scanner. Asset: ${asset.name} (${asset.assetTag}). Location: ${asset.location || dept}, Model: ${asset.model || 'Standard'}, Serial: ${asset.serialNumber || 'N/A'}`;
+
+    setQuickTitle(summary);
+    setQuickDept(dept);
+    setQuickCategory(cat);
+    setQuickDesc(desc);
+    setQuickAssetTag(asset.assetTag);
+
+    // AI assessment for priority
+    const heuristic = analyzeTicketPriority(summary, desc, cat);
+    let assignedPriority: Ticket['priority'] = heuristic.priority;
+    let reason = heuristic.reason;
+
+    try {
+      const aiRes = await aiTriageService.analyzeTicket({
+        title: summary,
+        description: desc,
+        category: cat,
+        department: dept,
+        assetTag: asset.assetTag,
+      });
+      if (aiRes?.recommendedPriority) {
+        assignedPriority = (aiRes.recommendedPriority === 'Critical' ? 'Critical' : aiRes.recommendedPriority) as Ticket['priority'];
+        reason = aiRes.patientCareImpact || aiRes.riskSummary || reason;
+      }
+    } catch (e) {}
+
+    setQuickPriority(assignedPriority);
+    setAiPriorityAnalysis({
+      priority: assignedPriority,
+      reason,
+      keywords: heuristic.matchedKeywords,
+    });
+
+    if (shouldLogImmediately && currentUser) {
+      try {
+        await ticketService.createTicket(
+          {
+            title: summary,
+            description: desc,
+            priority: assignedPriority,
+            category: cat,
+            department: dept,
+            location: asset.location || `${dept} Station`,
+            assetId: asset.id,
+          },
+          currentUser
+        );
+        setQuickTicketOpen(false);
+        setQuickTitle('');
+        setQuickDesc('');
+        setQuickAssetTag('');
+        await refreshAllData();
+        setCurrentView('tickets');
+      } catch (err) {
+        console.error('Failed to log scanned ticket immediately:', err);
+      }
+    }
+  };
+
   // Quick ticket creation
   const handleQuickCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickTitle.trim() || !currentUser) return;
+    setQuickTicketError(null);
 
+    const titleTrimmed = quickTitle.trim();
+    if (!titleTrimmed) {
+      setQuickTicketError('Please enter an issue summary before submitting.');
+      return;
+    }
+
+    // Determine active submitting user with local offline fallback
+    let submitter = currentUser || authService.getCurrentUser();
+    if (!submitter) {
+      const activeFromAll = allUsers.find((u) => u.status === 'Active');
+      if (activeFromAll) {
+        submitter = activeFromAll;
+      } else {
+        submitter = {
+          id: 'offline-duty-staff',
+          fullName: 'Hospital Duty Staff',
+          email: 'duty.staff@hospital.local',
+          role: 'NURSE',
+          department: quickDept || 'Emergency',
+          status: 'Active',
+          username: 'duty.staff',
+          jobTitle: 'Station Duty Officer',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    setIsSubmittingQuickTicket(true);
     try {
+      const matchedAsset = assets.find((a) => a.assetTag === quickAssetTag);
+      const chosenDept = quickDept || (uniqueDepartments[0]?.name ?? 'Emergency');
       await ticketService.createTicket(
         {
-          title: quickTitle.trim(),
-          description: quickDesc.trim() || 'Rapid ticket logged from emergency floating action',
+          title: titleTrimmed,
+          description: quickDesc.trim() || `Rapid ticket logged for ${chosenDept}`,
           priority: quickPriority,
           category: quickCategory,
-          department: quickDept,
-          location: `${quickDept} Station`,
+          department: chosenDept,
+          location: `${chosenDept} Station`,
+          assetId: matchedAsset ? matchedAsset.id : null,
+          aiTriage: aiPriorityAnalysis
+            ? {
+                recommendedPriority: aiPriorityAnalysis.priority,
+                patientCareImpact: aiPriorityAnalysis.reason,
+                suggestedCategory: quickCategory,
+                riskSummary: aiPriorityAnalysis.reason,
+                rootCauseHypothesis: 'Auto-triaged clinical issue report',
+                immediateActionSteps: ['Dispatch to IT Technician on duty'],
+                analyzedAt: new Date().toISOString(),
+              }
+            : null,
         },
-        currentUser
+        submitter
       );
       setQuickTicketOpen(false);
       setQuickTitle('');
       setQuickDesc('');
+      setQuickAssetTag('');
+      setAiPriorityAnalysis(null);
+      setAllowPriorityOverride(false);
       await refreshAllData();
       setCurrentView('tickets');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Failed to log ticket locally:', err);
+      setQuickTicketError(err?.message || 'Failed to submit ticket locally. Please try again.');
+    } finally {
+      setIsSubmittingQuickTicket(false);
     }
   };
 
@@ -725,48 +964,156 @@ export default function App() {
           onClick={() => setQuickTicketOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4"
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 text-xs text-slate-800 dark:text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white text-base">
                 <LifeBuoy className="w-5 h-5 text-sky-600" />
                 <span>Quick Log Hospital Ticket</span>
               </div>
-              <button
-                onClick={() => setQuickTicketOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickScanModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-[11px] border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                  title="Scan hardware asset QR code to auto-fill ticket details"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <span>Scan Asset</span>
+                </button>
+                <button
+                  onClick={() => setQuickTicketOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
+
+            {quickTicketError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/60 flex items-start gap-2 text-rose-800 dark:text-rose-200 text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <div className="flex-1 font-medium">{quickTicketError}</div>
+              </div>
+            )}
 
             <form onSubmit={handleQuickCreateTicket} className="space-y-3">
               <div>
-                <label className="block text-slate-500 font-semibold mb-1">Issue Summary *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. ICU Monitor 3 Starlink connection offline"
-                  value={quickTitle}
-                  onChange={(e) => setQuickTitle(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-500 font-semibold">Issue Summary *</label>
+                  {isAiAnalyzingPriority && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1 animate-pulse">
+                      <Sparkles className="w-3 h-3 animate-spin text-amber-500" />
+                      AI evaluating priority...
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. ICU Monitor 3 Starlink connection offline"
+                    value={quickTitle}
+                    onChange={(e) => setQuickTitle(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
+                  />
+                  {quickAssetTag && (
+                    <span className="absolute right-2.5 top-2 px-2 py-0.5 rounded-lg bg-purple-100 dark:bg-purple-900/70 text-purple-800 dark:text-purple-200 text-[10px] font-mono font-bold">
+                      Tag: {quickAssetTag}
+                    </span>
+                  )}
+                </div>
+
+                {/* AI Priority Live Intelligence Badge */}
+                {aiPriorityAnalysis && (
+                  <div className="mt-1.5 p-2 rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/80 flex items-start gap-2 text-[11px] transition-all">
+                    <Sparkles className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+                    <div className="leading-tight flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-sky-900 dark:text-sky-200">
+                          System AI Priority:
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] uppercase font-black tracking-wide ${
+                            aiPriorityAnalysis.priority === 'Critical'
+                              ? 'bg-rose-600 text-white'
+                              : aiPriorityAnalysis.priority === 'High'
+                              ? 'bg-amber-600 text-white'
+                              : aiPriorityAnalysis.priority === 'Medium'
+                              ? 'bg-sky-600 text-white'
+                              : 'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          {aiPriorityAnalysis.priority}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 text-[10px] mt-1 font-medium">
+                        {aiPriorityAnalysis.reason}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-500 font-semibold mb-1">Priority</label>
-                  <select
-                    value={quickPriority}
-                    onChange={(e) => setQuickPriority(e.target.value as Ticket['priority'])}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  >
-                    <option value="Emergency">Critical / Emergency</option>
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-500 font-semibold flex items-center gap-1">
+                      <span>Priority</span>
+                      {!allowPriorityOverride && (
+                        <Lock className="w-3 h-3 text-slate-400" title="System determined - Locked" />
+                      )}
+                    </label>
+                    {isSuperAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => setAllowPriorityOverride((prev) => !prev)}
+                        className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:text-amber-500 flex items-center gap-0.5 cursor-pointer underline"
+                        title="Super Admin Override: Click to enable manual editing of priority"
+                      >
+                        {allowPriorityOverride ? (
+                          <>
+                            <Unlock className="w-2.5 h-2.5 text-amber-600" />
+                            <span>Unlock ON</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-2.5 h-2.5 text-slate-400" />
+                            <span>Override</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-sky-600 dark:text-sky-400 font-semibold flex items-center gap-0.5">
+                        <Sparkles className="w-2.5 h-2.5" /> AI Locked
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={quickPriority}
+                      disabled={!allowPriorityOverride}
+                      onChange={(e) => setQuickPriority(e.target.value as Ticket['priority'])}
+                      className={`w-full px-3 py-2 rounded-xl focus:outline-none transition ${
+                        allowPriorityOverride
+                          ? 'bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-600 text-slate-900 dark:text-white cursor-pointer'
+                          : 'bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-not-allowed opacity-90'
+                      }`}
+                      title={
+                        allowPriorityOverride
+                          ? 'Super Admin Priority Override Active'
+                          : 'Priority is determined automatically by the system and cannot be edited directly.'
+                      }
+                    >
+                      <option value="Critical">Critical / Emergency</option>
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -787,20 +1134,40 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-slate-500 font-semibold mb-1">Hospital Ward / Department</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-500 font-semibold">Hospital Ward / Department *</label>
+                  <span className="text-[10px] text-slate-400">
+                    {uniqueDepartments.length} Available
+                  </span>
+                </div>
                 <select
                   value={quickDept}
                   onChange={(e) => setQuickDept(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                  required
                 >
-                  <option value="Emergency">Emergency (A&E)</option>
-                  <option value="Intensive Care Unit">Intensive Care Unit (ICU)</option>
-                  <option value="Operating Theatre">Operating Theatre</option>
-                  <option value="Laboratory">Laboratory</option>
-                  <option value="Pharmacy">Pharmacy</option>
-                  <option value="Radiology">Radiology</option>
-                  <option value="Pediatrics">Pediatrics</option>
-                  <option value="Outpatient">Outpatient (OPD)</option>
+                  {uniqueDepartments && uniqueDepartments.length > 0 ? (
+                    uniqueDepartments.map((dept) => (
+                      <option key={dept.id || dept.name} value={dept.name}>
+                        {dept.name} {dept.code ? `(${dept.code})` : ''} {dept.floor ? `— Floor ${dept.floor}` : ''}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="Emergency / Casualty (A&E)">Emergency / Casualty (A&E)</option>
+                      <option value="Intensive Care Unit (ICU)">Intensive Care Unit (ICU)</option>
+                      <option value="Operating Theatre (OT)">Operating Theatre (OT)</option>
+                      <option value="Laboratory (Pathology)">Laboratory (Pathology)</option>
+                      <option value="Pharmacy">Pharmacy</option>
+                      <option value="Radiology / Imaging">Radiology / Imaging</option>
+                      <option value="Pediatrics Ward">Pediatrics Ward</option>
+                      <option value="Outpatient (OPD)">Outpatient (OPD)</option>
+                      <option value="Internal Medicine / Male Ward">Internal Medicine / Male Ward</option>
+                      <option value="Female Ward">Female Ward</option>
+                      <option value="Maternity / Labour Ward">Maternity / Labour Ward</option>
+                      <option value="Administration / Records">Administration / Records</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -819,21 +1186,37 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setQuickTicketOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer transition text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold cursor-pointer"
+                  disabled={isSubmittingQuickTicket}
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white font-bold cursor-pointer transition shadow-xs text-xs flex items-center gap-2"
                 >
-                  Log Ticket Locally
+                  {isSubmittingQuickTicket ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Logging Ticket...</span>
+                    </>
+                  ) : (
+                    <span>Log Ticket Locally</span>
+                  )}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Quick Ticket QR / Barcode Scanner Modal */}
+      <ScanQrToReportModal
+        isOpen={quickScanModalOpen}
+        onClose={() => setQuickScanModalOpen(false)}
+        assets={assets}
+        onReportIssueForAsset={(asset) => handleQuickScanAsset(asset, false)}
+      />
 
       {/* Hospital Staff Login Screen Modal */}
       <LoginModal

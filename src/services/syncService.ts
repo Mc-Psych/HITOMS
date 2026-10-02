@@ -445,6 +445,26 @@ class SyncService {
             // Break loop if quota exceeded so we don't spam quota errors
             break;
           }
+
+          const isUnavailable =
+            err?.code === 'unavailable' ||
+            String(err?.message || '').toLowerCase().includes('unavailable') ||
+            String(err?.message || '').toLowerCase().includes('offline');
+
+          if (isUnavailable) {
+            this.stats.connectionState = 'OFFLINE';
+            this.notify();
+            item.status = 'PENDING';
+            item.lastError = 'Offline - will sync automatically when connection restores';
+            setSkipSyncEnqueue(true);
+            try {
+              await putToStore('syncQueue', item);
+            } finally {
+              setSkipSyncEnqueue(false);
+            }
+            break;
+          }
+
           console.warn(`[SyncService] Sync push notice for item ${item.entityId}:`, err?.message);
           item.retryCount += 1;
           item.lastError = err?.message || 'Network error';

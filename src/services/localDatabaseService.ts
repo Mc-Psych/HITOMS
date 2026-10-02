@@ -474,48 +474,139 @@ export async function countStore(storeName: StoreName): Promise<number> {
 // Next Sequential Ticket Number Generator (e.g. HIT-2026-000001)
 export async function getNextTicketNumber(): Promise<string> {
   const tickets = await getAllFromStore<Ticket>('tickets');
+  const existingNumbers = new Set(tickets.map((t) => t.ticketNumber).filter(Boolean));
   const year = new Date().getFullYear();
-  const count = tickets.length + 1;
-  const padded = count.toString().padStart(6, '0');
-  return `HIT-${year}-${padded}`;
+  const prefix = `HIT-${year}-`;
+
+  let maxSeq = 0;
+  for (const t of tickets) {
+    if (t.ticketNumber && t.ticketNumber.startsWith(prefix)) {
+      const seqStr = t.ticketNumber.replace(prefix, '');
+      const num = parseInt(seqStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+
+  let nextSeq = Math.max(maxSeq + 1, tickets.length + 1);
+  let candidate = `${prefix}${nextSeq.toString().padStart(6, '0')}`;
+  while (existingNumbers.has(candidate)) {
+    nextSeq++;
+    candidate = `${prefix}${nextSeq.toString().padStart(6, '0')}`;
+  }
+
+  return candidate;
 }
 
 // Next Maintenance Number (e.g. MN-2026-001)
 export async function getNextMaintenanceNumber(): Promise<string> {
   const list = await getAllFromStore<MaintenanceRecord>('maintenance');
+  const existingNumbers = new Set(list.map((m) => m.maintenanceNumber).filter(Boolean));
   const year = new Date().getFullYear();
-  const count = list.length + 1;
-  return `MN-${year}-${count.toString().padStart(3, '0')}`;
+  const prefix = `MN-${year}-`;
+
+  let maxSeq = 0;
+  for (const m of list) {
+    if (m.maintenanceNumber && m.maintenanceNumber.startsWith(prefix)) {
+      const seqStr = m.maintenanceNumber.replace(prefix, '');
+      const num = parseInt(seqStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+
+  let nextSeq = Math.max(maxSeq + 1, list.length + 1);
+  let candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  while (existingNumbers.has(candidate)) {
+    nextSeq++;
+    candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  }
+
+  return candidate;
 }
 
 // Next Incident Number (e.g. INC-2026-001)
 export async function getNextIncidentNumber(): Promise<string> {
   const list = await getAllFromStore<Incident>('incidents');
+  const existingNumbers = new Set(list.map((i) => i.incidentNumber).filter(Boolean));
   const year = new Date().getFullYear();
-  const count = list.length + 1;
-  return `INC-${year}-${count.toString().padStart(3, '0')}`;
+  const prefix = `INC-${year}-`;
+
+  let maxSeq = 0;
+  for (const i of list) {
+    if (i.incidentNumber && i.incidentNumber.startsWith(prefix)) {
+      const seqStr = i.incidentNumber.replace(prefix, '');
+      const num = parseInt(seqStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+
+  let nextSeq = Math.max(maxSeq + 1, list.length + 1);
+  let candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  while (existingNumbers.has(candidate)) {
+    nextSeq++;
+    candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  }
+
+  return candidate;
 }
 
 // Next Procurement Request Number (e.g. PR-2026-001)
 export async function getNextProcurementNumber(): Promise<string> {
   const list = await getAllFromStore<ProcurementRequest>('procurementRequests');
+  const existingNumbers = new Set(list.map((p) => p.requestNumber).filter(Boolean));
   const year = new Date().getFullYear();
-  const count = list.length + 1;
-  return `PR-${year}-${count.toString().padStart(3, '0')}`;
+  const prefix = `PR-${year}-`;
+
+  let maxSeq = 0;
+  for (const p of list) {
+    if (p.requestNumber && p.requestNumber.startsWith(prefix)) {
+      const seqStr = p.requestNumber.replace(prefix, '');
+      const num = parseInt(seqStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+
+  let nextSeq = Math.max(maxSeq + 1, list.length + 1);
+  let candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  while (existingNumbers.has(candidate)) {
+    nextSeq++;
+    candidate = `${prefix}${nextSeq.toString().padStart(3, '0')}`;
+  }
+
+  return candidate;
 }
 
 // Next Asset Tag (e.g. AST-HOSP-00105)
 export async function getNextAssetTag(): Promise<string> {
   const assets = await getAllFromStore<Asset>('assets');
-  const count = 100 + assets.length + 1;
-  return `AST-HOSP-00${count}`;
+  const existingTags = new Set(assets.map((a) => a.assetTag).filter(Boolean));
+  let count = 100 + assets.length + 1;
+  let candidate = `AST-HOSP-00${count}`;
+  while (existingTags.has(candidate)) {
+    count++;
+    candidate = `AST-HOSP-00${count}`;
+  }
+  return candidate;
 }
 
 // Next Inventory Code (e.g. INV-025)
 export async function getNextInventoryCode(): Promise<string> {
   const items = await getAllFromStore<InventoryItem>('inventory');
-  const count = items.length + 1;
-  return `INV-${count.toString().padStart(3, '0')}`;
+  const existingCodes = new Set(items.map((i) => i.itemCode).filter(Boolean));
+  let count = items.length + 1;
+  let candidate = `INV-${count.toString().padStart(3, '0')}`;
+  while (existingCodes.has(candidate)) {
+    count++;
+    candidate = `INV-${count.toString().padStart(3, '0')}`;
+  }
+  return candidate;
 }
 
 // Next KB Article ID (e.g. KB-010)

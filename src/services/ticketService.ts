@@ -152,7 +152,7 @@ class TicketService {
     user: User
   ): Promise<Ticket> {
     const id = generateUUID();
-    const ticketNumber = await getNextTicketNumber();
+    let ticketNumber = await getNextTicketNumber();
     const now = new Date().toISOString();
 
     // SLA calculation based on priority
@@ -220,7 +220,23 @@ class TicketService {
       _deviceId: getDeviceId(),
     };
 
-    await putToStore('tickets', newTicket);
+    try {
+      await putToStore('tickets', newTicket);
+    } catch (putErr: any) {
+      if (
+        putErr?.name === 'ConstraintError' ||
+        (typeof putErr?.message === 'string' && putErr.message.includes('uniqueness'))
+      ) {
+        // Regenerate guaranteed unique ticket number with timestamp entropy
+        const fallbackSeq = `${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+        const fallbackNum = `HIT-${new Date().getFullYear()}-${fallbackSeq}`;
+        newTicket.ticketNumber = fallbackNum;
+        ticketNumber = fallbackNum;
+        await putToStore('tickets', newTicket);
+      } else {
+        throw putErr;
+      }
+    }
 
     // Audit and Notification
     await auditService.logAction('CREATE_TICKET', 'Tickets', id, null, {

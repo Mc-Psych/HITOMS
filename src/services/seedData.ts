@@ -285,17 +285,25 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
         const existingAssetIds = new Set(existingAssets.map((item) => item.id));
         const missingAssets = d.assets
           .filter((item: any) => !existingAssetIds.has(item.id))
-          .map((item: any) => ({
-            ...item,
-            name: item.name || `${item.manufacturer || ''} ${item.model || ''}`.trim() || item.assetType || 'Hospital IT Asset',
-            type: item.type || item.assetType || 'Desktop',
-            assetType: item.assetType || item.type || 'Desktop',
-            manufacturer: item.manufacturer || 'Standard Equipment',
-            model: item.model || 'Standard',
-            department: item.department || 'IT & Systems Administration',
-            condition: item.condition || 'Good',
-            status: item.status || 'Active',
-          }));
+          .map((item: any) => {
+            const mfg = item.manufacturer && item.manufacturer !== 'Unspecified Manufacturer' ? item.manufacturer : '';
+            const mdl = item.model && item.model !== 'Standard Equipment' ? item.model : '';
+            const combined = [mfg, mdl].filter(Boolean).join(' ').trim();
+            const fallbackName = `${item.assetType || 'Hospital IT Asset'}${item.assetTag ? ` (${item.assetTag})` : ''}`;
+            const finalName = item.name || combined || fallbackName;
+
+            return {
+              ...item,
+              name: finalName,
+              type: item.type || item.assetType || 'Desktop',
+              assetType: item.assetType || item.type || 'Desktop',
+              manufacturer: item.manufacturer || 'Standard Equipment',
+              model: item.model || 'Standard',
+              department: item.department || 'IT & Systems Administration',
+              condition: item.condition || 'Good',
+              status: item.status || 'Active',
+            };
+          });
         if (missingAssets.length > 0) {
           console.log(`[SeedData] Hydrating ${missingAssets.length} missing assets...`);
           await putBatchToStore('assets', missingAssets);

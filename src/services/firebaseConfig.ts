@@ -45,10 +45,17 @@ export const markFirestoreQuotaExceeded = () => {
 try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
     const quotaTimestamp = typeof localStorage !== 'undefined' ? localStorage.getItem('hitoms_firestore_quota_exceeded') : null;
-    const isQuotaExceededPreviously = quotaTimestamp ? (Date.now() - Number(quotaTimestamp) < 24 * 60 * 60 * 1000) : true; // Default to quota-safe offline mode if quota was hit
+    const isQuotaExceededPreviously = quotaTimestamp
+      ? Date.now() - Number(quotaTimestamp) < 15 * 60 * 1000
+      : false;
+
+    if (!isQuotaExceededPreviously && typeof localStorage !== 'undefined' && quotaTimestamp) {
+      // Clear expired quota flag
+      localStorage.removeItem('hitoms_firestore_quota_exceeded');
+    }
 
     if (isQuotaExceededPreviously) {
-      console.warn('[FirebaseConfig] Operating in local IndexedDB mode (Firestore quota limit active).');
+      console.warn('[FirebaseConfig] Operating temporarily in offline IndexedDB mode (Firestore quota cooldown active).');
       clients = {
         app: null,
         auth: null,
@@ -61,11 +68,6 @@ try {
       const auth = getAuth(app);
       const firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 
-      // Immediately disable network to prevent automatic SDK background sync retries on quota limit
-      import('firebase/firestore').then(({ disableNetwork }) => {
-        disableNetwork(firestore).catch(() => {});
-      });
-
       clients = {
         app,
         auth,
@@ -75,7 +77,7 @@ try {
       };
 
       signInAnonymously(auth).catch((err) => {
-        console.warn('[FirebaseConfig] Anonymous sign-in failed (offline or credentials disabled):', err?.message);
+        console.warn('[FirebaseConfig] Anonymous sign-in notice (will retry on operations):', err?.message);
       });
     }
   }
