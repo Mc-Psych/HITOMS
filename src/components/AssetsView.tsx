@@ -296,18 +296,30 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [detailQrCodeDataUrl, setDetailQrCodeDataUrl] = useState<string>('');
 
   const filteredAssets = assets.filter((a) => {
-    const matchesSearch =
-      a.assetTag.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (a.name && a.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      a.manufacturer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ((a.serialNumber || '').toLowerCase().includes(searchQuery.toLowerCase())) ||
-      a.department.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (a.assignedUser && a.assignedUser.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (!a) return false;
+    const tag = (a.assetTag || '').toLowerCase();
+    const name = (a.name || '').toLowerCase();
+    const mfg = (a.manufacturer || '').toLowerCase();
+    const model = (a.model || '').toLowerCase();
+    const serial = (a.serialNumber || '').toLowerCase();
+    const dept = (a.department || '').toLowerCase();
+    const user = (a.assignedUser || '').toLowerCase();
+    const q = (searchQuery || '').trim().toLowerCase();
 
-    const matchesType = typeFilter === 'ALL' || a.assetType === typeFilter;
-    const matchesStatus = statusFilter === 'ALL' || a.status === statusFilter;
-    const matchesDept = deptFilter === 'ALL' || a.department === deptFilter;
+    const matchesSearch =
+      !q ||
+      tag.includes(q) ||
+      name.includes(q) ||
+      mfg.includes(q) ||
+      model.includes(q) ||
+      serial.includes(q) ||
+      dept.includes(q) ||
+      user.includes(q);
+
+    const aType = a.assetType || (a as any).type || '';
+    const matchesType = typeFilter === 'ALL' || aType.toLowerCase() === typeFilter.toLowerCase();
+    const matchesStatus = statusFilter === 'ALL' || (a.status || '').toLowerCase() === statusFilter.toLowerCase();
+    const matchesDept = deptFilter === 'ALL' || (a.department || '').toLowerCase() === deptFilter.toLowerCase();
 
     return matchesSearch && matchesType && matchesStatus && matchesDept;
   });
@@ -1277,9 +1289,11 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-900 dark:text-white">
-                          {asset.manufacturer} {asset.model}
+                          {asset.name || `${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.assetTag}
                         </div>
-                        <div className="text-[10px] text-slate-400">{asset.assetType} - {asset.operatingSystem || 'Hardware'}</div>
+                        <div className="text-[10px] text-slate-400">
+                          {asset.assetType || (asset as any).type || 'Hardware'} • {asset.operatingSystem || 'Clinical/Office Standard'}
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-slate-500">
                         {asset.serialNumber}

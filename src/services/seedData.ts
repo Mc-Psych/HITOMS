@@ -257,22 +257,63 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
   setSkipSyncEnqueue(true);
   try {
     if (d) {
-      if (deptCount === 0 && d.departments?.length) {
-        console.log(`[SeedData] Hydrating ${d.departments.length} departments...`);
-        await putBatchToStore('departments', d.departments);
+      // 1. Departments: Ensure all departments exist
+      if (d.departments?.length) {
+        const existingDepts = await getAllFromStore<Department>('departments');
+        const existingDeptIds = new Set(existingDepts.map((item) => item.id));
+        const missingDepts = d.departments.filter((item: any) => !existingDeptIds.has(item.id));
+        if (missingDepts.length > 0) {
+          console.log(`[SeedData] Hydrating ${missingDepts.length} missing departments...`);
+          await putBatchToStore('departments', missingDepts);
+        }
       }
-      if (assetCount === 0 && d.assets?.length) {
-        console.log(`[SeedData] Hydrating ${d.assets.length} assets...`);
-        await putBatchToStore('assets', d.assets);
+
+      // 2. Users: Ensure all staff accounts exist
+      if (d.users?.length) {
+        const existingUsers = await getAllFromStore<User>('users');
+        const existingUserIds = new Set(existingUsers.map((item) => item.id));
+        const missingUsers = d.users.filter((item: any) => !existingUserIds.has(item.id));
+        if (missingUsers.length > 0) {
+          console.log(`[SeedData] Hydrating ${missingUsers.length} missing staff accounts...`);
+          await putBatchToStore('users', missingUsers);
+        }
       }
-      if (userCount <= 1 && d.users?.length) {
-        console.log(`[SeedData] Hydrating ${d.users.length} staff users...`);
-        await putBatchToStore('users', d.users);
+
+      // 3. Assets: Ensure all assets exist and normalize fields
+      if (d.assets?.length) {
+        const existingAssets = await getAllFromStore<Asset>('assets');
+        const existingAssetIds = new Set(existingAssets.map((item) => item.id));
+        const missingAssets = d.assets
+          .filter((item: any) => !existingAssetIds.has(item.id))
+          .map((item: any) => ({
+            ...item,
+            name: item.name || `${item.manufacturer || ''} ${item.model || ''}`.trim() || item.assetType || 'Hospital IT Asset',
+            type: item.type || item.assetType || 'Desktop',
+            assetType: item.assetType || item.type || 'Desktop',
+            manufacturer: item.manufacturer || 'Standard Equipment',
+            model: item.model || 'Standard',
+            department: item.department || 'IT & Systems Administration',
+            condition: item.condition || 'Good',
+            status: item.status || 'Active',
+          }));
+        if (missingAssets.length > 0) {
+          console.log(`[SeedData] Hydrating ${missingAssets.length} missing assets...`);
+          await putBatchToStore('assets', missingAssets);
+        }
       }
-      if (networkCount === 0 && d.networkDevices?.length) {
-        console.log(`[SeedData] Hydrating ${d.networkDevices.length} network devices...`);
-        await putBatchToStore('networkDevices', d.networkDevices);
+
+      // 4. Network Devices
+      if (d.networkDevices?.length) {
+        const existingDevices = await getAllFromStore<NetworkDevice>('networkDevices');
+        const existingDeviceIds = new Set(existingDevices.map((item) => item.id));
+        const missingDevices = d.networkDevices.filter((item: any) => !existingDeviceIds.has(item.id));
+        if (missingDevices.length > 0) {
+          console.log(`[SeedData] Hydrating ${missingDevices.length} missing network devices...`);
+          await putBatchToStore('networkDevices', missingDevices);
+        }
       }
+
+      // 5. Systems & other collections
       if (systemsCount === 0 && d.hospitalSystems?.length) {
         await putBatchToStore('hospitalSystems', d.hospitalSystems);
       }

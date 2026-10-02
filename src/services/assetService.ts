@@ -36,7 +36,7 @@ export const generateRichAssetQrPayload = generateAssetQrMetadataPayload;
 class AssetService {
   public async getAssets(): Promise<Asset[]> {
     const assets = await getAllFromStore<Asset>('assets');
-    return assets.sort((a, b) => a.assetTag.localeCompare(b.assetTag));
+    return (assets || []).sort((a, b) => (a?.assetTag || '').localeCompare(b?.assetTag || ''));
   }
 
   public async getAssetById(id: string): Promise<Asset | null> {

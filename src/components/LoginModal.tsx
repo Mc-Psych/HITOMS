@@ -261,11 +261,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       >
                         <div className="flex items-center justify-between gap-1">
                           <div className="font-bold text-slate-900 dark:text-white truncate">{u.fullName}</div>
-                          {isSuper && (
-                            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-rose-500 text-white shrink-0">
-                              Full Access
-                            </span>
-                          )}
                           {isIT && !isSuper && (
                             <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-sky-500 text-white shrink-0">
                               IT Unit
@@ -273,7 +268,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                           )}
                         </div>
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                          {isSuper ? 'Can Add Depts, Users & Assets' : u.role.replace('_', ' ')}
+                          {u.role.replace('_', ' ')}
                         </div>
                         <div className="text-[9px] font-mono text-sky-600 dark:text-sky-400 mt-1 flex items-center justify-between">
                           <span>User: {u.username || surname.toLowerCase()}</span>
