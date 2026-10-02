@@ -2224,18 +2224,41 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                 </div>
               </div>
 
-              {/* Dynamic OS and MAC fields: Hidden for UPS */}
+              {/* Dynamic OS, IP, and MAC fields: Hidden for UPS */}
               {!editAssetType.toUpperCase().includes('UPS') && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {['Desktop', 'Laptop', 'Server', 'Workstation', 'Tablet'].includes(editAssetType) && (
-                    <div>
-                      <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {['Desktop', 'Laptop', 'Server', 'Workstation', 'Tablet'].includes(editAssetType) ? (
+                    <>
+                      <div>
+                        <label className="block text-slate-500 font-semibold mb-1">Operating System</label>
+                        <input
+                          type="text"
+                          value={editOperatingSystem}
+                          onChange={(e) => setEditOperatingSystem(e.target.value)}
+                          placeholder="Windows 11 Pro"
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 font-semibold mb-1">IP Address</label>
+                        <input
+                          type="text"
+                          value={editIpAddress}
+                          onChange={(e) => setEditIpAddress(e.target.value)}
+                          placeholder="e.g. 192.168.1.50"
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="sm:col-span-2">
+                      <label className="block text-slate-500 font-semibold mb-1">IP Address</label>
                       <input
                         type="text"
-                        value={editOperatingSystem}
-                        onChange={(e) => setEditOperatingSystem(e.target.value)}
-                        placeholder="Windows 11 Pro"
-                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
+                        value={editIpAddress}
+                        onChange={(e) => setEditIpAddress(e.target.value)}
+                        placeholder="e.g. 192.168.1.50"
+                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white font-mono"
                       />
                     </div>
                   )}

@@ -106,7 +106,6 @@ class AssetService {
       totalSeats: newSub.totalSeats,
     });
 
-    await syncService.enqueueOperation('subscriptions', id, 'CREATE', newSub);
     return newSub;
   }
 
@@ -132,7 +131,6 @@ class AssetService {
     await putToStore('subscriptions', updatedSub);
 
     await auditService.logAction('UPDATE_SUBSCRIPTION', 'Assets', id, oldSub, updatedSub);
-    await syncService.enqueueOperation('subscriptions', id, 'UPDATE', updatedSub);
 
     return updatedSub;
   }
@@ -148,8 +146,6 @@ class AssetService {
       softwareName: sub.softwareName,
       deletedBy: user.fullName,
     });
-
-    await syncService.enqueueOperation('subscriptions', id, 'DELETE', { id });
   }
 
   public async createAsset(
@@ -201,7 +197,6 @@ class AssetService {
       department: newAsset.department,
     });
 
-    await syncService.enqueueOperation('assets', id, 'CREATE', newAsset);
     return newAsset;
   }
 
@@ -264,7 +259,6 @@ class AssetService {
       };
       await putToStore('assetHistory', historyEntry);
 
-      await syncService.enqueueOperation('assets', id, 'CREATE', newAsset);
       created.push(newAsset);
     }
 
@@ -333,7 +327,6 @@ class AssetService {
     }
 
     await auditService.logAction('UPDATE_ASSET', 'Assets', id, oldAsset, updatedAsset);
-    await syncService.enqueueOperation('assets', id, 'UPDATE', updatedAsset);
 
     return updatedAsset;
   }
@@ -351,8 +344,6 @@ class AssetService {
       deletedBy: user.fullName,
       reason: deleteReason || 'Manual deletion from IT asset register',
     });
-
-    await syncService.enqueueOperation('assets', id, 'DELETE', { id });
   }
 }
 

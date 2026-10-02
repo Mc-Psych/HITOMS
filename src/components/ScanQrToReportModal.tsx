@@ -110,7 +110,7 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
   };
 
   const requestScanFrame = () => {
-    if (!videoRef.current || !canvasRef.current || videoRef.current.readyState !== videoRef.current.HAVE_ENOUGH_DATA) {
+    if (!videoRef.current || !canvasRef.current || videoRef.current.readyState < 2) {
       animFrameIdRef.current = requestAnimationFrame(requestScanFrame);
       return;
     }
@@ -207,9 +207,47 @@ export const ScanQrToReportModal: React.FC<ScanQrToReportModalProps> = ({
         ctx.drawImage(img, 0, 0, width, height);
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        let code = jsQR(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: 'attemptBoth',
         });
+
+        // Advanced Fallback 1: High-Contrast Grayscale
+        if (!code) {
+          const data = new Uint8ClampedArray(imageData.data);
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            const factor = 1.6;
+            let newVal = factor * (gray - 128) + 127;
+            newVal = Math.max(0, Math.min(255, newVal));
+            data[i] = newVal;
+            data[i + 1] = newVal;
+            data[i + 2] = newVal;
+          }
+          code = jsQR(data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth',
+          });
+        }
+
+        // Advanced Fallback 2: Adaptive Binarization (Hard threshold)
+        if (!code) {
+          const data = new Uint8ClampedArray(imageData.data);
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            const binarized = gray > 120 ? 255 : 0;
+            data[i] = binarized;
+            data[i + 1] = binarized;
+            data[i + 2] = binarized;
+          }
+          code = jsQR(data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth',
+          });
+        }
 
         if (code && code.data) {
           const found = findAssetFromQrScan(code.data, assets);
