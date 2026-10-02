@@ -342,55 +342,23 @@ class SyncService {
         }
       }
 
-      // Reconcile Deletions: Remove local IndexedDB items no longer present in Firestore
-      if (!querySnapshot.empty) {
+      // If local store has items that Firestore doesn't have, upload them to Firestore so both are in sync!
+      if (!this.quotaExceeded && firebaseClients.firestore) {
         const localItems = await getAllFromStore<any>(storeName);
-        const localItemsToDelete: string[] = [];
+        const missingOnRemote = localItems.filter(
+          (item) => item && item.id && !remoteDocIds.has(item.id) && !isTombstone(storeName, item.id)
+        );
 
-        for (const localItem of localItems) {
-          if (!localItem || !localItem.id) continue;
-          if (storeName === 'settings') continue; // Never delete settings from local store via sync pull reconciliation!
-          if (!remoteDocIds.has(localItem.id)) {
-            // Never delete local-only/un-synced items that only exist in local database
-            const isLocalOnly = localItem._syncStatus === 'LOCAL_ONLY' || localItem._syncStatus === 'PENDING_SYNC' || !localItem._lastSyncedAt;
-            if (isLocalOnly) continue;
-
-            // Do not delete if the item has a pending local CREATE mutation
-            const hasPendingCreate = queue.some(
-              (q) => q.entityType === storeName && q.entityId === localItem.id && q.operation === 'CREATE'
-            );
-            if (!hasPendingCreate) {
-              localItemsToDelete.push(localItem.id);
-            }
-          }
-        }
-
-        if (localItemsToDelete.length > 0) {
-          setSkipSyncEnqueue(true);
-          try {
-            for (const idToDelete of localItemsToDelete) {
-              await deleteFromStore(storeName, idToDelete);
-            }
-          } finally {
-            setSkipSyncEnqueue(false);
-          }
-        }
-      }
-
-      // If Firestore has 0 documents for this collection, but local store has items,
-      // upload local items to Firestore using high-speed writeBatch (chunked) with timeout
-      if (querySnapshot.empty && !this.quotaExceeded) {
-        const localItems = await getAllFromStore<any>(storeName);
-        if (localItems.length > 0) {
-          for (let i = 0; i < localItems.length; i += 300) {
+        if (missingOnRemote.length > 0) {
+          for (let i = 0; i < missingOnRemote.length; i += 200) {
             const batch = writeBatch(firebaseClients.firestore);
-            const chunk = localItems.slice(i, i + 300);
+            const chunk = missingOnRemote.slice(i, i + 200);
             for (const item of chunk) {
               if (item && item.id) {
                 const cleanItem = cleanFirestoreData({
                   ...item,
                   _syncStatus: 'SYNCED',
-                  _lastSyncedAt: new Date().toISOString()
+                  _lastSyncedAt: new Date().toISOString(),
                 });
                 const docRef = doc(firebaseClients.firestore, collectionName, item.id);
                 batch.set(docRef, cleanItem, { merge: true });

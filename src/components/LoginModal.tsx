@@ -222,36 +222,62 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">
-                  Quick Terminal Profiles (Click to prefill)
+                  Quick Terminal Profiles (Click to prefill & sign in)
                 </span>
+                {selectedStaffPreset && (
+                  <span className="text-[10px] text-sky-600 dark:text-sky-400 font-semibold animate-pulse">
+                    Selected: Click "Sign In" below
+                  </span>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
                 {[...allUsers]
                   .sort((a, b) => {
                     if (a.role === 'SUPER_ADMIN') return -1;
                     if (b.role === 'SUPER_ADMIN') return 1;
+                    if (a.role === 'IT_ADMIN') return -1;
+                    if (b.role === 'IT_ADMIN') return 1;
                     return 0;
                   })
                   .slice(0, 9)
                   .map((u) => {
                     const surname = extractSurname(u.fullName);
                     const defaultPass = getDefaultPasswordForSurname(surname);
+                    const isSuper = u.role === 'SUPER_ADMIN';
+                    const isIT = u.role === 'IT_ADMIN' || u.role === 'IT_OFFICER';
                     return (
                       <button
                         key={u.id}
                         type="button"
                         onClick={() => handleSelectPreset(u)}
-                        className={`p-2 text-left rounded-xl border transition cursor-pointer ${
+                        className={`p-2.5 text-left rounded-xl border transition cursor-pointer relative ${
                           selectedStaffPreset?.id === u.id
-                            ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500'
+                            ? 'bg-sky-50 dark:bg-sky-950/50 border-sky-500 ring-2 ring-sky-500/20 shadow-xs'
+                            : isSuper
+                            ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-950/30 hover:border-indigo-400'
                             : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'
                         }`}
                       >
-                        <div className="font-bold text-slate-900 dark:text-white truncate">{u.fullName}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{u.role}</div>
-                        <div className="text-[9px] font-mono text-sky-600 dark:text-sky-400 mt-0.5">
-                          Pass: {defaultPass}
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="font-bold text-slate-900 dark:text-white truncate">{u.fullName}</div>
+                          {isSuper && (
+                            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-rose-500 text-white shrink-0">
+                              Full Access
+                            </span>
+                          )}
+                          {isIT && !isSuper && (
+                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-sky-500 text-white shrink-0">
+                              IT Unit
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {isSuper ? 'Can Add Depts, Users & Assets' : u.role.replace('_', ' ')}
+                        </div>
+                        <div className="text-[9px] font-mono text-sky-600 dark:text-sky-400 mt-1 flex items-center justify-between">
+                          <span>User: {u.username || surname.toLowerCase()}</span>
+                          <span>Pass: {defaultPass}</span>
                         </div>
                       </button>
                     );
