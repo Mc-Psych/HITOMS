@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { type Department, type User } from '../types';
 import { departmentService, generateDepartmentCode } from '../services/departmentService';
+import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
 
 interface DepartmentBulkUploadModalProps {
   isOpen: boolean;
@@ -144,7 +145,10 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
     }
 
     const existingCodes = new Set(existingDepartments.map((d) => d.code.toUpperCase()));
+    const existingNames = new Set(existingDepartments.map((d) => d.name.toLowerCase().trim()));
+    const existingDeptNamesList = existingDepartments.map((d) => d.name);
     const seenBatchCodes = new Set<string>();
+    const seenBatchNames = new Set<string>();
     const results: ParsedDeptRow[] = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -186,10 +190,25 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
       } else if (seenBatchCodes.has(code)) {
         isValid = false;
         error = `Duplicate code "${code}" in this upload batch`;
+      } else if (existingNames.has(name.toLowerCase())) {
+        isValid = false;
+        error = `Department "${name}" is already registered`;
+      } else if (seenBatchNames.has(name.toLowerCase())) {
+        isValid = false;
+        error = `Duplicate department "${name}" in this upload batch`;
+      } else if (existingDeptNamesList.length > 0) {
+        // Check if name is a non-matching duplicate variation (e.g. Pharmaci -> Pharmacy)
+        const matchResult = matchOptionWithFallback(name, existingDeptNamesList, existingDeptNamesList[0], 'Department');
+        if (!matchResult.isExactMatch && matchResult.issueType === 'NON_MATCHING_DEPARTMENT' && matchResult.matchedValue) {
+          // Check if string similarity or alias points directly to existing department
+          isValid = false;
+          error = `Non-matching variation of existing department "${matchResult.matchedValue}"`;
+        }
       }
 
       if (isValid) {
         seenBatchCodes.add(code);
+        seenBatchNames.add(name.toLowerCase());
       }
 
       results.push({
@@ -439,17 +458,17 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
               </div>
 
               <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xs">
-                <div className="overflow-x-auto max-h-64">
-                  <table className="w-full text-xs text-left">
+                <div className="overflow-x-auto overflow-y-auto max-h-64 custom-scrollbar">
+                  <table className="w-full min-w-[880px] text-xs text-left whitespace-nowrap">
                     <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-500">
                       <tr>
-                        <th className="p-2.5">Status</th>
-                        <th className="p-2.5">Code</th>
-                        <th className="p-2.5">Department Name</th>
-                        <th className="p-2.5">Location Description</th>
-                        <th className="p-2.5">HOD</th>
-                        <th className="p-2.5">Ext</th>
-                        <th className="p-2.5">Emergency</th>
+                        <th className="p-2.5 w-24">Status</th>
+                        <th className="p-2.5 w-20">Code</th>
+                        <th className="p-2.5 min-w-[200px]">Department Name</th>
+                        <th className="p-2.5 min-w-[220px]">Location Description</th>
+                        <th className="p-2.5 min-w-[140px]">HOD</th>
+                        <th className="p-2.5 min-w-[100px]">Ext</th>
+                        <th className="p-2.5 w-24">Emergency</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

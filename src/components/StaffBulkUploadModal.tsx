@@ -23,6 +23,7 @@ import {
   extractSurname,
   getDefaultPasswordForSurname,
 } from '../services/authService';
+import { departmentService } from '../services/departmentService';
 import { downloadTextFile } from '../utils/fileDownloader';
 import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
 
@@ -158,10 +159,13 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showRoleGuide, setShowRoleGuide] = useState(false);
   const [fetchedUsers, setFetchedUsers] = useState<UserType[]>([]);
+  const [systemDepartments, setSystemDepartments] = useState<string[]>([]);
+  const [hasAcceptedFlaggedMappings, setHasAcceptedFlaggedMappings] = useState(false);
 
-  // Load existing users if not provided via props
+  // Load existing users and system departments
   useEffect(() => {
     if (isOpen) {
+      setHasAcceptedFlaggedMappings(false);
       if (existingUsers && existingUsers.length > 0) {
         setFetchedUsers(existingUsers);
       } else {
@@ -169,10 +173,36 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
           setFetchedUsers(users);
         });
       }
+
+      departmentService.getStandardDepartmentNames().then((depts) => {
+        if (depts && depts.length > 0) {
+          setSystemDepartments(depts);
+        }
+      });
     }
   }, [isOpen, existingUsers]);
 
   const activeUserList = existingUsers && existingUsers.length > 0 ? existingUsers : fetchedUsers;
+
+  const validDepartments = React.useMemo(() => {
+    const list = new Set<string>();
+    if (systemDepartments && systemDepartments.length > 0) {
+      systemDepartments.forEach((d) => list.add(d.trim()));
+    }
+    activeUserList.forEach((u) => {
+      if (u.department && u.department.trim()) list.add(u.department.trim());
+    });
+    if (list.size === 0) {
+      list.add('OPD (Outpatient Department)');
+      list.add('Pharmacy');
+      list.add('Accident & Emergency (A&E)');
+      list.add('Main Surgical Theatre');
+      list.add('Diagnostic Laboratory');
+      list.add('Radiology & Imaging');
+      list.add('IT & Systems Administration');
+    }
+    return Array.from(list).sort((a, b) => a.localeCompare(b));
+  }, [systemDepartments, activeUserList]);
 
   // Outcome state
   const [bulkResult, setBulkResult] = useState<{
@@ -232,6 +262,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
   // Parse raw text into structured staff records
   const parseRawText = (rawText: string, autoSubmit: boolean = false) => {
     setErrorMessage(null);
+    setHasAcceptedFlaggedMappings(false);
     const lines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
 
     if (lines.length === 0) {
@@ -279,31 +310,13 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     );
     const seenBatchNames = new Set<string>();
 
-    const validDepartments = Array.from(
-      new Set([
-        'OPD (Outpatient Department)',
-        'Pharmacy',
-        'Emergency & Triage',
-        'Maternity Ward',
-        'Surgical Theatre',
-        'Laboratory',
-        'Radiology',
-        'IT & Health Informatics',
-        'Administration',
-        'Procurement & Stores',
-        'Pediatrics Ward',
-        'Internal Medicine',
-        ...activeUserList.map((u) => u.department).filter(Boolean),
-      ])
-    );
-
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i];
       const cols = parseCsvLine(line);
       if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue;
 
       let fullName = '';
-      let department = 'OPD (Outpatient Department)';
+      let department = validDepartments[0] || 'OPD (Outpatient Department)';
       let roleRaw = '';
       let jobTitle = 'Hospital Staff';
       let phone = '+233 24 000 0000';
@@ -329,7 +342,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       } else {
         // Positional fallback
         fullName = cols[0] || '';
-        department = cols[1] || 'OPD (Outpatient Department)';
+        department = cols[1] || validDepartments[0] || 'OPD (Outpatient Department)';
         roleRaw = cols[2] || '';
 
         // If col 3 looks like a phone number, treat as phone
@@ -348,16 +361,16 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       let isValid = true;
 
       const cleanFullName = (fullName || '').trim();
-      const rawDept = (department || 'OPD (Outpatient Department)').trim();
+      const rawDept = (department || validDepartments[0] || 'OPD (Outpatient Department)').trim();
       const cleanJobTitle = (jobTitle || '').trim();
       const cleanPhone = (phone || '').trim();
       let cleanEmail = (email || '').trim();
 
       // Pre-populated Fuzzy Value Matching for Department and Role
-      const deptMatch = matchOptionWithFallback(rawDept, validDepartments, 'OPD (Outpatient Department)', 'Department');
+      const deptMatch = matchOptionWithFallback(rawDept, validDepartments, validDepartments[0] || 'OPD (Outpatient Department)', 'Department');
       const roleMatch = matchOptionWithFallback(roleRaw, VALID_ROLES, 'STAFF_USER', 'Role');
 
-      if (!deptMatch.isExactMatch) {
+      if (!deptMatch.isExactMatch && rawDept) {
         flaggedIssues.push(deptMatch.issueDescription!);
         warnings.push(deptMatch.issueDescription!);
       }
@@ -399,7 +412,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       }
 
       records.push({
-        id: `rec-${i}`,
+        id: `rec-${i}-${Date.now()}`,
         fullName: cleanFullName,
         surname,
         username,
@@ -416,7 +429,42 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     }
 
     setParsedRecords(records);
-    // Explicit: Never auto-submit on paste/file load. Upload ONLY occurs when the user clicks the Import button and confirms.
+  };
+
+  // Row update handler for interactive table edits
+  const handleUpdateRow = (id: string, field: keyof ParsedStaffRecord, val: any) => {
+    setParsedRecords((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const updated = { ...r, [field]: val };
+        if (field === 'fullName') {
+          const sname = extractSurname(val || '');
+          updated.surname = sname;
+          updated.username = sname.toLowerCase();
+          updated.defaultPassword = getDefaultPasswordForSurname(sname);
+          updated.isValid = Boolean((val || '').trim());
+        }
+        if (field === 'department') {
+          updated.flaggedIssues = updated.flaggedIssues.filter((f) => !f.toLowerCase().includes('department'));
+        }
+        if (field === 'role') {
+          updated.flaggedIssues = updated.flaggedIssues.filter((f) => !f.toLowerCase().includes('role'));
+        }
+        return updated;
+      })
+    );
+  };
+
+  // Accept all suggested fuzzy mappings
+  const handleAcceptAllMappings = () => {
+    setHasAcceptedFlaggedMappings(true);
+    setParsedRecords((prev) =>
+      prev.map((r) => ({
+        ...r,
+        flaggedIssues: [],
+        warnings: r.warnings.filter((w) => !w.startsWith('Non-matching')),
+      }))
+    );
   };
 
   // Handle file selection
@@ -839,7 +887,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
           {/* STEP 3: PARSED RECORDS PREVIEW */}
           {parsedRecords.length > 0 && (
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-900 dark:text-white text-xs">
@@ -851,6 +899,11 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                   {invalidCount > 0 && (
                     <span className="px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-[10px]">
                       {invalidCount} Issues
+                    </span>
+                  )}
+                  {parsedRecords.some((r) => r.flaggedIssues.length > 0) && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-bold text-[10px]">
+                      {parsedRecords.filter((r) => r.flaggedIssues.length > 0).length} Flagged
                     </span>
                   )}
                 </div>
@@ -865,69 +918,152 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                 </button>
               </div>
 
-              <div className="max-h-56 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-2xs">
-                <table className="w-full text-left text-[11px]">
+              {/* Flagged Values & Mappings Banner */}
+              {parsedRecords.some((r) => r.flaggedIssues.length > 0) && !hasAcceptedFlaggedMappings && (
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/80 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <span className="font-bold block">
+                        Non-matching Values Detected &amp; Pre-Mapped
+                      </span>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                        Uploaded departments or roles that did not match existing hospital categories were flagged to prevent duplicate entries. Review or change any value directly using the dropdowns in the table, or accept suggestions.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAcceptAllMappings}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs transition"
+                  >
+                    Accept Suggested Mappings
+                  </button>
+                </div>
+              )}
+
+              <div className="max-h-64 overflow-x-auto overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xs custom-scrollbar bg-white dark:bg-slate-900">
+                <table className="w-full min-w-[960px] text-left text-[11px] whitespace-nowrap">
                   <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 sticky top-0 font-bold z-10">
                     <tr>
-                      <th className="p-2.5">Status</th>
-                      <th className="p-2.5">Full Name</th>
-                      <th className="p-2.5">Username</th>
-                      <th className="p-2.5">Initial Password</th>
-                      <th className="p-2.5">Department</th>
-                      <th className="p-2.5">Role</th>
-                      <th className="p-2.5">Contact</th>
+                      <th className="p-2.5 w-16">Status</th>
+                      <th className="p-2.5 min-w-[180px]">Full Name *</th>
+                      <th className="p-2.5 min-w-[120px]">Username</th>
+                      <th className="p-2.5 min-w-[130px]">Initial Password</th>
+                      <th className="p-2.5 min-w-[220px]">Department *</th>
+                      <th className="p-2.5 min-w-[170px]">Role *</th>
+                      <th className="p-2.5 min-w-[160px]">Contact</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                    {parsedRecords.map((rec) => (
-                      <tr
-                        key={rec.id}
-                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
-                          !rec.isValid ? 'bg-rose-50/50 dark:bg-rose-950/20' : ''
-                        }`}
-                      >
-                        <td className="p-2.5">
-                          {rec.isValid ? (
-                            rec.flaggedIssues && rec.flaggedIssues.length > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help" title={rec.flaggedIssues.join('\n')}>
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                                <span>Flagged</span>
-                              </span>
+                    {parsedRecords.map((rec) => {
+                      const isDeptFlagged = rec.flaggedIssues.some((f) => f.toLowerCase().includes('department'));
+                      const isRoleFlagged = rec.flaggedIssues.some((f) => f.toLowerCase().includes('role'));
+
+                      return (
+                        <tr
+                          key={rec.id}
+                          className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
+                            !rec.isValid ? 'bg-rose-50/50 dark:bg-rose-950/20' : ''
+                          }`}
+                        >
+                          <td className="p-2.5">
+                            {rec.isValid ? (
+                              rec.flaggedIssues && rec.flaggedIssues.length > 0 ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
+                                  title={rec.flaggedIssues.join('\n')}
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Flagged</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400" title="Ready to provision">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </span>
+                              )
                             ) : (
-                              <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400" title="Ready to provision">
-                                <CheckCircle2 className="w-4 h-4" />
+                              <span className="inline-flex items-center text-rose-600 dark:text-rose-400" title={rec.warnings.join(', ')}>
+                                <AlertTriangle className="w-4 h-4" />
                               </span>
-                            )
-                          ) : (
-                            <span className="inline-flex items-center text-rose-600 dark:text-rose-400" title={rec.warnings.join(', ')}>
-                              <AlertTriangle className="w-4 h-4" />
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2.5 font-semibold text-slate-900 dark:text-white">
-                          <div>{rec.fullName || <span className="text-rose-500 italic">Missing Name</span>}</div>
-                          {rec.jobTitle && <div className="text-[10px] text-slate-400 font-normal">{rec.jobTitle}</div>}
-                        </td>
-                        <td className="p-2.5 font-mono font-bold text-sky-600 dark:text-sky-400">
-                          @{rec.username}
-                        </td>
-                        <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                          {rec.defaultPassword}
-                        </td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-300">
-                          {rec.department}
-                        </td>
-                        <td className="p-2.5">
-                          <span className="px-2 py-0.5 rounded font-mono font-semibold text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                            {rec.role}
-                          </span>
-                        </td>
-                        <td className="p-2.5 text-slate-500 dark:text-slate-400 text-[10px]">
-                          <div>{rec.phone}</div>
-                          <div className="text-slate-400">{rec.email}</div>
-                        </td>
-                      </tr>
-                    ))}
+                            )}
+                          </td>
+                          <td className="p-2.5 font-semibold text-slate-900 dark:text-white min-w-[160px]">
+                            <input
+                              type="text"
+                              value={rec.fullName}
+                              onChange={(e) => handleUpdateRow(rec.id, 'fullName', e.target.value)}
+                              placeholder="Full Name *"
+                              className={`w-full bg-transparent border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                !rec.fullName.trim() ? 'border-rose-400 bg-rose-50/50 dark:bg-rose-950/30' : 'border-slate-200 dark:border-slate-700'
+                              }`}
+                            />
+                            {rec.jobTitle && <div className="text-[10px] text-slate-400 font-normal mt-0.5">{rec.jobTitle}</div>}
+                          </td>
+                          <td className="p-2.5 font-mono font-bold text-sky-600 dark:text-sky-400">
+                            @{rec.username}
+                          </td>
+                          <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                            {rec.defaultPassword}
+                          </td>
+                          <td className="p-2.5 min-w-[180px]">
+                            <div className="flex flex-col gap-0.5">
+                              <select
+                                value={rec.department}
+                                onChange={(e) => handleUpdateRow(rec.id, 'department', e.target.value)}
+                                className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white focus:outline-none ${
+                                  isDeptFlagged
+                                    ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-semibold'
+                                    : 'border-slate-200 dark:border-slate-700'
+                                }`}
+                                title={isDeptFlagged ? rec.flaggedIssues.find((f) => f.includes('Department')) : undefined}
+                              >
+                                {validDepartments.map((dept) => (
+                                  <option key={dept} value={dept}>
+                                    {dept}
+                                  </option>
+                                ))}
+                              </select>
+                              {isDeptFlagged && (
+                                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                  Non-matching Department
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-2.5 min-w-[150px]">
+                            <div className="flex flex-col gap-0.5">
+                              <select
+                                value={rec.role}
+                                onChange={(e) => handleUpdateRow(rec.id, 'role', e.target.value as Role)}
+                                className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white font-mono focus:outline-none ${
+                                  isRoleFlagged
+                                    ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-bold'
+                                    : 'border-slate-200 dark:border-slate-700'
+                                }`}
+                                title={isRoleFlagged ? rec.flaggedIssues.find((f) => f.includes('Role')) : undefined}
+                              >
+                                {VALID_ROLES.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r}
+                                  </option>
+                                ))}
+                              </select>
+                              {isRoleFlagged && (
+                                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                  Non-matching Role
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-2.5 text-slate-500 dark:text-slate-400 text-[10px]">
+                            <div>{rec.phone}</div>
+                            <div className="text-slate-400">{rec.email}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -992,11 +1128,16 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/80 dark:bg-slate-800/40">
+        <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50/80 dark:bg-slate-800/40">
           <div className="text-[11px] text-slate-500">
             {bulkResult ? (
               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                 Staff directory updated in offline IndexedDB.
+              </span>
+            ) : parsedRecords.length > 0 && !hasAcceptedFlaggedMappings && parsedRecords.some((r) => r.flaggedIssues.length > 0) ? (
+              <span className="text-amber-700 dark:text-amber-300 font-semibold flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Please review and accept suggested mappings for flagged items to enable import.
               </span>
             ) : (
               <span>
@@ -1005,7 +1146,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 self-end sm:self-auto">
             <button
               type="button"
               onClick={onClose}
@@ -1018,8 +1159,13 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowConfirmDialog(true)}
-                disabled={isProcessing || validCount === 0}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                disabled={isProcessing || validCount === 0 || (!hasAcceptedFlaggedMappings && parsedRecords.some((r) => r.flaggedIssues.length > 0))}
+                title={
+                  !hasAcceptedFlaggedMappings && parsedRecords.some((r) => r.flaggedIssues.length > 0)
+                    ? 'Review and accept suggested mappings above to enable import'
+                    : undefined
+                }
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-40 disabled:cursor-not-allowed shadow-xs transition flex items-center gap-1.5 cursor-pointer"
               >
                 {isProcessing ? (
                   <>
@@ -1029,7 +1175,11 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Import & Confirm {validCount > 0 ? `(${validCount} Staff)` : ''}</span>
+                    <span>
+                      {!hasAcceptedFlaggedMappings && parsedRecords.some((r) => r.flaggedIssues.length > 0)
+                        ? 'Review Flags to Import'
+                        : `Import & Confirm ${validCount > 0 ? `(${validCount} Staff)` : ''}`}
+                    </span>
                   </>
                 )}
               </button>

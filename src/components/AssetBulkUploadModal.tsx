@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Upload,
@@ -16,9 +16,12 @@ import {
   ArrowRight,
   Database,
   Info,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
 import { type Asset, type AssetCondition, type AssetStatus, type User } from '../types';
 import { assetService } from '../services/assetService';
+import { departmentService, INITIAL_STANDARD_DEPARTMENTS } from '../services/departmentService';
 import { downloadTextFile } from '../utils/fileDownloader';
 import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
 
@@ -72,7 +75,7 @@ interface AssetBulkUploadModalProps {
   existingAssets: Asset[];
 }
 
-interface ParsedAssetRow {
+export interface ParsedAssetRow {
   id: string;
   assetTag?: string;
   assetType: string;
@@ -95,6 +98,12 @@ interface ParsedAssetRow {
   isValid: boolean;
   errors: string[];
   flaggedIssues: string[];
+  fieldIssues: {
+    department?: string;
+    assetType?: string;
+    condition?: string;
+    status?: string;
+  };
 }
 
 export function generateAssetCsvTemplate(existingAssets: Asset[] = []): string {
@@ -140,6 +149,8 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   const [pasteMode, setPasteMode] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [systemDepartments, setSystemDepartments] = useState<string[]>([]);
+  const [hasAcceptedFlaggedMappings, setHasAcceptedFlaggedMappings] = useState(false);
   const [importResult, setImportResult] = useState<{
     success: boolean;
     imported: Asset[];
@@ -147,6 +158,29 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load registered hospital departments
+  useEffect(() => {
+    if (isOpen) {
+      setHasAcceptedFlaggedMappings(false);
+      departmentService.getStandardDepartmentNames().then((depts) => {
+        if (depts && depts.length > 0) {
+          setSystemDepartments(depts);
+        }
+      });
+    }
+  }, [isOpen]);
+
+  // Deduplicated and sorted valid hospital departments
+  const validDepartments = useMemo(() => {
+    const set = new Set<string>();
+    INITIAL_STANDARD_DEPARTMENTS.forEach((d) => set.add(d.trim()));
+    systemDepartments.forEach((d) => set.add(d.trim()));
+    existingAssets.forEach((a) => {
+      if (a.department && a.department.trim()) set.add(a.department.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [systemDepartments, existingAssets]);
 
   if (!isOpen) return null;
 
@@ -163,28 +197,12 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
     const lines = csv.split(/\r\n|\n/).filter((l) => l.trim().length > 0);
     if (lines.length < 2) return [];
 
+    setHasAcceptedFlaggedMappings(false);
+
     // Parse header line
     const headerLine = lines[0];
     const headers = headerLine.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((h) =>
       h.trim().replace(/^"|"$/g, '').toLowerCase()
-    );
-
-    const validDepartments = Array.from(
-      new Set([
-        'Pharmacy',
-        'OPD (Outpatient)',
-        'Emergency & Triage',
-        'Maternity Ward',
-        'Surgical Theatre',
-        'Laboratory',
-        'Radiology',
-        'IT & Health Informatics',
-        'Administration',
-        'Procurement & Stores',
-        'Pediatrics Ward',
-        'Internal Medicine',
-        ...existingAssets.map((a) => a.department).filter(Boolean),
-      ])
     );
 
     const existingSerials = new Set(
@@ -238,9 +256,15 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         rowObj['dept'] ||
         rowObj['ward'] ||
         rowObj['unit'] ||
-        'OPD (Outpatient)'
+        validDepartments[0] ||
+        'OPD (Outpatient Department)'
       ).trim();
-      const deptMatch = matchOptionWithFallback(rawDepartment, validDepartments, validDepartments[0] || 'OPD (Outpatient)', 'Department');
+      const deptMatch = matchOptionWithFallback(
+        rawDepartment,
+        validDepartments,
+        validDepartments[0] || 'OPD (Outpatient Department)',
+        'Department'
+      );
 
       const location = (
         rowObj['location'] ||
@@ -261,7 +285,12 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       const condMatch = matchOptionWithFallback(rawCondition, VALID_CONDITIONS, 'Good', 'Condition');
 
       const rawStatus = rowObj['status'] || (assignedUser.trim() ? 'Assigned' : 'Available');
-      const statusMatch = matchOptionWithFallback(rawStatus, VALID_STATUSES, (assignedUser.trim() ? 'Assigned' : 'Available') as AssetStatus, 'Status');
+      const statusMatch = matchOptionWithFallback(
+        rawStatus,
+        VALID_STATUSES,
+        (assignedUser.trim() ? 'Assigned' : 'Available') as AssetStatus,
+        'Status'
+      );
 
       const operatingSystem = rowObj['operatingsystem'] || rowObj['os'] || '';
       const ipAddress = rowObj['ipaddress'] || rowObj['ip'] || '';
@@ -274,16 +303,33 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       const assetTag = rowObj['assettag'] || rowObj['tag'] || '';
 
       const flaggedIssues: string[] = [];
-      if (!typeMatch.isExactMatch) flaggedIssues.push(typeMatch.issueDescription!);
-      if (!deptMatch.isExactMatch) flaggedIssues.push(deptMatch.issueDescription!);
-      if (!condMatch.isExactMatch) flaggedIssues.push(condMatch.issueDescription!);
-      if (!statusMatch.isExactMatch) flaggedIssues.push(statusMatch.issueDescription!);
+      const fieldIssues: ParsedAssetRow['fieldIssues'] = {};
+
+      if (!typeMatch.isExactMatch && rawAssetType.trim()) {
+        flaggedIssues.push(typeMatch.issueDescription!);
+        fieldIssues.assetType = typeMatch.issueDescription!;
+      }
+      if (!deptMatch.isExactMatch && rawDepartment.trim()) {
+        flaggedIssues.push(deptMatch.issueDescription!);
+        fieldIssues.department = deptMatch.issueDescription!;
+      }
+      if (!condMatch.isExactMatch && rawCondition.trim()) {
+        flaggedIssues.push(condMatch.issueDescription!);
+        fieldIssues.condition = condMatch.issueDescription!;
+      }
+      if (!statusMatch.isExactMatch && rawStatus.trim()) {
+        flaggedIssues.push(statusMatch.issueDescription!);
+        fieldIssues.status = statusMatch.issueDescription!;
+      }
 
       // Validation
       const errors: string[] = [];
       if (serialNumber && existingSerials.has(serialNumber.toLowerCase().trim())) {
         errors.push(`Serial "${serialNumber}" already exists in registry`);
       }
+      if (!manufacturer) errors.push('Manufacturer is required');
+      if (!model) errors.push('Model is required');
+      if (!deptMatch.matchedValue) errors.push('Department is required');
 
       results.push({
         id: `row-${i}-${Date.now()}`,
@@ -308,6 +354,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         isValid: errors.length === 0,
         errors,
         flaggedIssues,
+        fieldIssues,
       });
     }
 
@@ -323,6 +370,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   const processFile = (selectedFile: File) => {
     setFile(selectedFile);
     setImportResult(null);
+    setHasAcceptedFlaggedMappings(false);
 
     const fileName = selectedFile.name.toLowerCase();
 
@@ -351,35 +399,42 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
             try {
               const parsed = JSON.parse(content);
               const array = Array.isArray(parsed) ? parsed : [parsed];
-              const validDepartments = Array.from(
-                new Set([
-                  'Pharmacy',
-                  'OPD (Outpatient)',
-                  'Emergency & Triage',
-                  'Maternity Ward',
-                  'Surgical Theatre',
-                  'Laboratory',
-                  'Radiology',
-                  'IT & Health Informatics',
-                  'Administration',
-                  'Procurement & Stores',
-                  'Pediatrics Ward',
-                  'Internal Medicine',
-                  ...existingAssets.map((a) => a.department).filter(Boolean),
-                ])
-              );
 
               const rows: ParsedAssetRow[] = array.map((item, idx) => {
                 const typeMatch = matchOptionWithFallback(item.assetType, VALID_ASSET_TYPES, 'Desktop', 'Asset Type');
-                const deptMatch = matchOptionWithFallback(item.department, validDepartments, 'OPD (Outpatient)', 'Department');
+                const deptMatch = matchOptionWithFallback(
+                  item.department,
+                  validDepartments,
+                  validDepartments[0] || 'OPD (Outpatient Department)',
+                  'Department'
+                );
                 const condMatch = matchOptionWithFallback(item.condition, VALID_CONDITIONS, 'Good', 'Condition');
-                const statusMatch = matchOptionWithFallback(item.status, VALID_STATUSES, (item.assignedUser ? 'Assigned' : 'Available') as AssetStatus, 'Status');
+                const statusMatch = matchOptionWithFallback(
+                  item.status,
+                  VALID_STATUSES,
+                  (item.assignedUser ? 'Assigned' : 'Available') as AssetStatus,
+                  'Status'
+                );
 
                 const flaggedIssues: string[] = [];
-                if (!typeMatch.isExactMatch) flaggedIssues.push(typeMatch.issueDescription!);
-                if (!deptMatch.isExactMatch) flaggedIssues.push(deptMatch.issueDescription!);
-                if (!condMatch.isExactMatch) flaggedIssues.push(condMatch.issueDescription!);
-                if (!statusMatch.isExactMatch) flaggedIssues.push(statusMatch.issueDescription!);
+                const fieldIssues: ParsedAssetRow['fieldIssues'] = {};
+
+                if (!typeMatch.isExactMatch && (item.assetType || '').trim()) {
+                  flaggedIssues.push(typeMatch.issueDescription!);
+                  fieldIssues.assetType = typeMatch.issueDescription!;
+                }
+                if (!deptMatch.isExactMatch && (item.department || '').trim()) {
+                  flaggedIssues.push(deptMatch.issueDescription!);
+                  fieldIssues.department = deptMatch.issueDescription!;
+                }
+                if (!condMatch.isExactMatch && (item.condition || '').trim()) {
+                  flaggedIssues.push(condMatch.issueDescription!);
+                  fieldIssues.condition = condMatch.issueDescription!;
+                }
+                if (!statusMatch.isExactMatch && (item.status || '').trim()) {
+                  flaggedIssues.push(statusMatch.issueDescription!);
+                  fieldIssues.status = statusMatch.issueDescription!;
+                }
 
                 return {
                   id: `json-${idx}-${Date.now()}`,
@@ -401,13 +456,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                   purchasePrice: Number(item.purchasePrice) || 0,
                   supplier: item.supplier || '',
                   purchaseDate: item.purchaseDate || '',
-                  isValid: Boolean(item.manufacturer && item.model && item.department),
+                  isValid: Boolean(item.manufacturer && item.model && deptMatch.matchedValue),
                   errors: [
                     !item.manufacturer ? 'Missing manufacturer' : '',
                     !item.model ? 'Missing model' : '',
-                    !item.department ? 'Missing department' : '',
+                    !deptMatch.matchedValue ? 'Missing department' : '',
                   ].filter(Boolean),
                   flaggedIssues,
+                  fieldIssues,
                 };
               });
               setParsedRows(rows);
@@ -460,17 +516,42 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       prev.map((row) => {
         if (row.id !== id) return row;
         const updated = { ...row, [field]: value };
-        // revalidate
+
+        // Clean field issue when user explicitly updates it
+        const updatedFieldIssues = { ...row.fieldIssues };
+        if (field === 'department') delete updatedFieldIssues.department;
+        if (field === 'assetType') delete updatedFieldIssues.assetType;
+        if (field === 'condition') delete updatedFieldIssues.condition;
+        if (field === 'status') delete updatedFieldIssues.status;
+
+        const updatedFlaggedIssues = Object.values(updatedFieldIssues).filter(Boolean) as string[];
+
+        // Revalidate errors
         const errors: string[] = [];
         if (!updated.manufacturer.trim()) errors.push('Manufacturer is required');
         if (!updated.model.trim()) errors.push('Model is required');
         if (!updated.department.trim()) errors.push('Department is required');
+
         return {
           ...updated,
+          fieldIssues: updatedFieldIssues,
+          flaggedIssues: updatedFlaggedIssues,
           isValid: errors.length === 0,
           errors,
         };
       })
+    );
+  };
+
+  // Accept all suggested fuzzy mappings
+  const handleAcceptAllMappings = () => {
+    setHasAcceptedFlaggedMappings(true);
+    setParsedRows((prev) =>
+      prev.map((r) => ({
+        ...r,
+        flaggedIssues: [],
+        fieldIssues: {},
+      }))
     );
   };
 
@@ -524,12 +605,17 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
     }
   };
 
+  const totalFlaggedCount = parsedRows.reduce((acc, r) => acc + (r.flaggedIssues?.length || 0), 0);
+  const rowsWithFlagsCount = parsedRows.filter((r) => r.flaggedIssues && r.flaggedIssues.length > 0).length;
+  const hasUnacceptedFlags = !hasAcceptedFlaggedMappings && rowsWithFlagsCount > 0;
+
   const validCount = parsedRows.filter((r) => r.isValid).length;
   const invalidCount = parsedRows.filter((r) => !r.isValid).length;
+  const isImportDisabled = validCount === 0 || isProcessing || hasUnacceptedFlags;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-4xl max-h-[92vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs text-slate-800 dark:text-slate-200">
+      <div className="w-full max-w-5xl max-h-[92vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs text-slate-800 dark:text-slate-200">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
           <div className="flex items-center gap-2.5">
@@ -544,7 +630,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Batch import hospital equipment, generate scannable QR codes, and register local custodians.
+                Batch import hospital equipment, generate scannable QR codes, and sort-map departments safely.
               </p>
             </div>
           </div>
@@ -560,7 +646,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg"
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -659,7 +745,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                         e.stopPropagation();
                         setPasteMode(true);
                       }}
-                      className="text-xs text-slate-500 dark:text-slate-400 hover:text-sky-600 font-semibold underline underline-offset-2"
+                      className="text-xs text-slate-500 dark:text-slate-400 hover:text-sky-600 font-semibold underline underline-offset-2 cursor-pointer"
                     >
                       Or paste raw CSV text directly
                     </button>
@@ -678,7 +764,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setPasteMode(false)}
-                      className="text-slate-400 hover:text-slate-600 text-xs"
+                      className="text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
                     >
                       Back to file drop
                     </button>
@@ -694,7 +780,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setPastedText(generateAssetCsvTemplate(existingAssets))}
-                      className="px-3 py-1.5 text-xs text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/50 rounded-lg font-semibold"
+                      className="px-3 py-1.5 text-xs text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/50 rounded-lg font-semibold cursor-pointer"
                     >
                       Load Sample Data
                     </button>
@@ -702,7 +788,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                       type="button"
                       onClick={handleParsePastedText}
                       disabled={!pastedText.trim()}
-                      className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs"
+                      className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs cursor-pointer"
                     >
                       Parse Rows
                     </button>
@@ -715,18 +801,24 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                 <div className="space-y-4">
                   {/* Summary Bar */}
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
                       <span className="font-bold text-slate-800 dark:text-slate-200">
                         {parsedRows.length} Assets Parsed:
                       </span>
                       <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
                         <CheckCircle2 className="w-3 h-3" />
-                        {validCount} Ready to Import
+                        {validCount} Ready
                       </span>
+                      {rowsWithFlagsCount > 0 && (
+                        <span className="flex items-center gap-1 text-amber-700 dark:text-amber-300 font-bold text-[11px] bg-amber-100 dark:bg-amber-950/80 px-2.5 py-0.5 rounded-full border border-amber-300 dark:border-amber-700">
+                          <AlertTriangle className="w-3 h-3 text-amber-600" />
+                          {rowsWithFlagsCount} Flagged Issues
+                        </span>
+                      )}
                       {invalidCount > 0 && (
-                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold text-[11px] bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                        <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold text-[11px] bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-full border border-rose-200 dark:border-rose-800">
                           <AlertCircle className="w-3 h-3" />
-                          {invalidCount} Needs Attention
+                          {invalidCount} Errors
                         </span>
                       )}
                     </div>
@@ -738,195 +830,281 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                           setParsedRows([]);
                           setFile(null);
                           setPastedText('');
+                          setHasAcceptedFlaggedMappings(false);
                         }}
-                        className="text-slate-500 hover:text-rose-600 text-xs font-semibold px-2 py-1"
+                        className="text-slate-500 hover:text-rose-600 text-xs font-semibold px-2 py-1 cursor-pointer"
                       >
                         Reset / Choose Another File
                       </button>
                     </div>
                   </div>
 
-                  {/* Editable Preview Table */}
-                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 font-semibold text-slate-600 dark:text-slate-300">
+                  {/* Flagged Values & Mappings Banner */}
+                  {hasUnacceptedFlags && (
+                    <div className="p-4 rounded-xl bg-amber-50/90 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <span className="font-black text-sm block text-amber-950 dark:text-amber-100">
+                            Non-matching Template Values Flagged ({totalFlaggedCount} Issue{totalFlaggedCount > 1 ? 's' : ''})
+                          </span>
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed max-w-2xl">
+                            Non-matching values in uploaded rows (Department, Asset Type, Condition, Status) have been intercepted to prevent duplicate entries and mapped to valid system categories.
+                            <strong> You must review and accept the suggested mappings (or adjust via dropdowns) before importing.</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAcceptAllMappings}
+                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shrink-0 cursor-pointer shadow-md transition flex items-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Accept Suggested Mappings</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Editable Preview Table with Standard Dropdowns & Horizontal Scroll */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto overflow-y-auto max-h-80 shadow-2xs custom-scrollbar bg-white dark:bg-slate-900">
+                    <table className="w-full min-w-[1320px] text-left text-xs whitespace-nowrap">
+                      <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300 z-10">
                         <tr>
-                          <th className="px-3 py-2 w-8">#</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Type</th>
-                          <th className="px-3 py-2">Manufacturer *</th>
-                          <th className="px-3 py-2">Model *</th>
-                          <th className="px-3 py-2">Serial Number</th>
-                          <th className="px-3 py-2">Department *</th>
-                          <th className="px-3 py-2">Location</th>
-                          <th className="px-3 py-2">Custodian</th>
-                          <th className="px-3 py-2">Condition</th>
-                          <th className="px-3 py-2 text-right">Action</th>
+                          <th className="px-3 py-2.5 w-10">#</th>
+                          <th className="px-3 py-2.5 min-w-[100px]">Validation</th>
+                          <th className="px-3 py-2.5 min-w-[160px]">Asset Type *</th>
+                          <th className="px-3 py-2.5 min-w-[140px]">Manufacturer *</th>
+                          <th className="px-3 py-2.5 min-w-[150px]">Model *</th>
+                          <th className="px-3 py-2.5 min-w-[140px]">Serial Number</th>
+                          <th className="px-3 py-2.5 min-w-[240px]">Hospital Department *</th>
+                          <th className="px-3 py-2.5 min-w-[140px]">Room / Location</th>
+                          <th className="px-3 py-2.5 min-w-[160px]">Staff Custodian</th>
+                          <th className="px-3 py-2.5 min-w-[130px]">Condition</th>
+                          <th className="px-3 py-2.5 min-w-[140px]">Operational Status</th>
+                          <th className="px-3 py-2.5 w-14 text-right pr-4">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                        {parsedRows.map((row, index) => (
-                          <tr
-                            key={row.id}
-                            className={
-                              !row.isValid
-                                ? 'bg-amber-50/40 dark:bg-amber-950/20'
-                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                            }
-                          >
-                            <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">
-                              {index + 1}
-                            </td>
-                            <td className="px-3 py-2">
-                              {row.isValid ? (
-                                row.flaggedIssues && row.flaggedIssues.length > 0 ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    <span
-                                      title={row.flaggedIssues.join('\n')}
-                                      className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
-                                    >
-                                      <AlertCircle className="w-3 h-3 text-amber-600" />
-                                      <span>Flagged</span>
+                        {parsedRows.map((row, index) => {
+                          const isTypeFlagged = Boolean(row.fieldIssues?.assetType);
+                          const isDeptFlagged = Boolean(row.fieldIssues?.department);
+                          const isCondFlagged = Boolean(row.fieldIssues?.condition);
+                          const isStatFlagged = Boolean(row.fieldIssues?.status);
+
+                          return (
+                            <tr
+                              key={row.id}
+                              className={
+                                !row.isValid
+                                  ? 'bg-rose-50/40 dark:bg-rose-950/20'
+                                  : row.flaggedIssues && row.flaggedIssues.length > 0
+                                  ? 'bg-amber-50/30 dark:bg-amber-950/15 hover:bg-amber-50/60'
+                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                              }
+                            >
+                              <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">
+                                {index + 1}
+                              </td>
+                              <td className="px-3 py-2">
+                                {row.isValid ? (
+                                  row.flaggedIssues && row.flaggedIssues.length > 0 ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <span
+                                        title={row.flaggedIssues.join('\n')}
+                                        className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
+                                      >
+                                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                        <span>Flagged</span>
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>Ready</span>
                                     </span>
-                                  </div>
+                                  )
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    <span>Valid</span>
+                                  <span
+                                    title={row.errors.join(', ')}
+                                    className="inline-flex items-center gap-1 text-[10px] text-rose-600 dark:text-rose-400 font-bold cursor-help"
+                                  >
+                                    <AlertCircle className="w-3.5 h-3.5" />
+                                    <span>Error</span>
                                   </span>
-                                )
-                              ) : (
-                                <span
-                                  title={row.errors.join(', ')}
-                                  className="inline-flex items-center gap-1 text-[10px] text-rose-600 dark:text-rose-400 font-bold cursor-help"
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <select
+                                    value={row.assetType}
+                                    onChange={(e) => handleUpdateRow(row.id, 'assetType', e.target.value)}
+                                    className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                      isTypeFlagged
+                                        ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-semibold'
+                                        : 'border-slate-200 dark:border-slate-700'
+                                    }`}
+                                    title={isTypeFlagged ? row.fieldIssues.assetType : undefined}
+                                  >
+                                    {VALID_ASSET_TYPES.map((type) => (
+                                      <option key={type} value={type}>
+                                        {type}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isTypeFlagged && (
+                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                      Non-matching Asset Type
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="text"
+                                  value={row.manufacturer}
+                                  onChange={(e) => handleUpdateRow(row.id, 'manufacturer', e.target.value)}
+                                  placeholder="e.g. Dell"
+                                  className={`w-full bg-transparent border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                    !row.manufacturer.trim() ? 'border-rose-400 bg-rose-50/50' : 'border-slate-200 dark:border-slate-700'
+                                  }`}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="text"
+                                  value={row.model}
+                                  onChange={(e) => handleUpdateRow(row.id, 'model', e.target.value)}
+                                  placeholder="e.g. OptiPlex 7090"
+                                  className={`w-full bg-transparent border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                    !row.model.trim() ? 'border-rose-400 bg-rose-50/50' : 'border-slate-200 dark:border-slate-700'
+                                  }`}
+                                />
+                              </td>
+                              <td className="px-3 py-2 font-mono">
+                                <input
+                                  type="text"
+                                  value={row.serialNumber}
+                                  onChange={(e) => handleUpdateRow(row.id, 'serialNumber', e.target.value)}
+                                  placeholder="Serial #"
+                                  className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white font-mono"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <select
+                                    value={row.department}
+                                    onChange={(e) => handleUpdateRow(row.id, 'department', e.target.value)}
+                                    className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                      isDeptFlagged
+                                        ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-semibold'
+                                        : 'border-slate-200 dark:border-slate-700'
+                                    }`}
+                                    title={isDeptFlagged ? row.fieldIssues.department : undefined}
+                                  >
+                                    {validDepartments.map((dept) => (
+                                      <option key={dept} value={dept}>
+                                        {dept}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isDeptFlagged && (
+                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                      Non-matching Department
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="text"
+                                  value={row.location}
+                                  onChange={(e) => handleUpdateRow(row.id, 'location', e.target.value)}
+                                  placeholder="Room / Desk"
+                                  className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="text"
+                                  value={row.assignedUser || ''}
+                                  onChange={(e) => handleUpdateRow(row.id, 'assignedUser', e.target.value)}
+                                  placeholder="Custodian Staff"
+                                  className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <select
+                                    value={row.condition}
+                                    onChange={(e) => handleUpdateRow(row.id, 'condition', e.target.value)}
+                                    className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                      isCondFlagged
+                                        ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-semibold'
+                                        : 'border-slate-200 dark:border-slate-700'
+                                    }`}
+                                    title={isCondFlagged ? row.fieldIssues.condition : undefined}
+                                  >
+                                    {VALID_CONDITIONS.map((cond) => (
+                                      <option key={cond} value={cond}>
+                                        {cond}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isCondFlagged && (
+                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                      Non-matching Condition
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <select
+                                    value={row.status}
+                                    onChange={(e) => handleUpdateRow(row.id, 'status', e.target.value)}
+                                    className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white ${
+                                      isStatFlagged
+                                        ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 font-semibold'
+                                        : 'border-slate-200 dark:border-slate-700'
+                                    }`}
+                                    title={isStatFlagged ? row.fieldIssues.status : undefined}
+                                  >
+                                    {VALID_STATUSES.map((st) => (
+                                      <option key={st} value={st}>
+                                        {st}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isStatFlagged && (
+                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                      Non-matching Status
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right pr-4">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRow(row.id)}
+                                  className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                  title="Remove row"
                                 >
-                                  <AlertCircle className="w-3.5 h-3.5" />
-                                  <span>Error</span>
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              <select
-                                value={row.assetType}
-                                onChange={(e) => handleUpdateRow(row.id, 'assetType', e.target.value)}
-                                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-900 dark:text-white"
-                              >
-                                <option value="Desktop">Desktop</option>
-                                <option value="Laptop">Laptop</option>
-                                <option value="Server">Server</option>
-                                <option value="Switch">Switch</option>
-                                <option value="Router">Router</option>
-                                <option value="Access Point">Access Point</option>
-                                <option value="Printer">Printer</option>
-                                <option value="UPS">UPS</option>
-                                <option value="Scanner">Scanner</option>
-                              </select>
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="text"
-                                value={row.manufacturer}
-                                onChange={(e) => handleUpdateRow(row.id, 'manufacturer', e.target.value)}
-                                placeholder="e.g. Dell"
-                                className={`bg-transparent border rounded px-1.5 py-0.5 text-xs w-24 text-slate-900 dark:text-white ${
-                                  !row.manufacturer.trim() ? 'border-amber-400 bg-amber-50/50' : 'border-slate-200 dark:border-slate-700'
-                                }`}
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="text"
-                                value={row.model}
-                                onChange={(e) => handleUpdateRow(row.id, 'model', e.target.value)}
-                                placeholder="e.g. OptiPlex"
-                                className={`bg-transparent border rounded px-1.5 py-0.5 text-xs w-28 text-slate-900 dark:text-white ${
-                                  !row.model.trim() ? 'border-amber-400 bg-amber-50/50' : 'border-slate-200 dark:border-slate-700'
-                                }`}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono">
-                              <input
-                                type="text"
-                                value={row.serialNumber}
-                                onChange={(e) => handleUpdateRow(row.id, 'serialNumber', e.target.value)}
-                                placeholder="Serial #"
-                                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs w-28 text-slate-900 dark:text-white"
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="text"
-                                value={row.department}
-                                onChange={(e) => handleUpdateRow(row.id, 'department', e.target.value)}
-                                placeholder="Dept"
-                                className={`bg-transparent border rounded px-1.5 py-0.5 text-xs w-24 text-slate-900 dark:text-white ${
-                                  !row.department.trim() ? 'border-amber-400 bg-amber-50/50' : 'border-slate-200 dark:border-slate-700'
-                                }`}
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="text"
-                                value={row.location}
-                                onChange={(e) => handleUpdateRow(row.id, 'location', e.target.value)}
-                                placeholder="Room"
-                                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs w-24 text-slate-900 dark:text-white"
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="text"
-                                value={row.assignedUser || ''}
-                                onChange={(e) => handleUpdateRow(row.id, 'assignedUser', e.target.value)}
-                                placeholder="Staff Custodian"
-                                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs w-28 text-slate-900 dark:text-white"
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <select
-                                value={row.condition}
-                                onChange={(e) => handleUpdateRow(row.id, 'condition', e.target.value)}
-                                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded px-1 py-0.5 text-[11px] text-slate-900 dark:text-white"
-                              >
-                                <option value="Excellent">Excellent</option>
-                                <option value="Good">Good</option>
-                                <option value="Fair">Fair</option>
-                                <option value="Poor">Poor</option>
-                              </select>
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveRow(row.id)}
-                                className="text-slate-400 hover:text-rose-600 p-1"
-                                title="Remove row"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
-                  {parsedRows.some((r) => r.flaggedIssues && r.flaggedIssues.length > 0) && (
-                    <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-[11px] space-y-1">
-                      <div className="font-bold flex items-center gap-1.5 text-xs text-sky-900 dark:text-sky-200">
-                        <AlertCircle className="w-4 h-4 text-sky-600" />
-                        <span>Pre-populated Value Safety Check Active</span>
-                      </div>
-                      <p>
-                        Non-matching values in uploaded rows were flagged and auto-selected to the closest system option (e.g. Department, Asset Type, Condition, or Status) instead of creating duplicate or invalid entries. You can review or adjust any auto-mapped value directly in the table above before importing.
-                      </p>
-                    </div>
-                  )}
-
                   {invalidCount > 0 && (
-                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-[11px]">
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-[11px]">
                       <Info className="w-4 h-4 shrink-0" />
                       <span>
-                        Rows with missing Manufacturer, Model, or Department will be skipped unless corrected above.
+                        Rows with missing Manufacturer, Model, or Department must be filled or removed before importing.
                       </span>
                     </div>
                   )}
@@ -938,32 +1116,50 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
         {/* Footer Actions */}
         {!importResult && (
-          <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+          <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50/80 dark:bg-slate-800/40">
             <div className="text-[11px] text-slate-500">
-              {parsedRows.length > 0
-                ? `${validCount} of ${parsedRows.length} rows ready for immediate registration.`
-                : 'Download template or select file to begin.'}
+              {parsedRows.length > 0 ? (
+                hasUnacceptedFlags ? (
+                  <span className="text-amber-700 dark:text-amber-300 font-semibold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Please review and accept suggested mappings for flagged items to enable import.
+                  </span>
+                ) : (
+                  <span>
+                    {validCount} of {parsedRows.length} assets ready for immediate registry import.
+                  </span>
+                )
+              ) : (
+                'Download template or select file to begin.'
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 self-end sm:self-auto">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold"
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
               >
                 Cancel
               </button>
 
               <button
                 type="button"
-                disabled={validCount === 0 || isProcessing}
+                disabled={isImportDisabled}
                 onClick={handleExecuteImport}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold shadow-md transition cursor-pointer"
+                title={
+                  hasUnacceptedFlags
+                    ? 'Review and accept suggested mappings above to enable import'
+                    : undefined
+                }
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold shadow-md transition cursor-pointer"
               >
                 <Database className="w-3.5 h-3.5" />
                 <span>
                   {isProcessing
                     ? 'Importing Assets...'
+                    : hasUnacceptedFlags
+                    ? 'Review Flags to Import'
                     : `Import ${validCount} Assets into Registry`}
                 </span>
               </button>
