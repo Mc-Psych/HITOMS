@@ -225,7 +225,7 @@ export interface AssetHistoryEntry {
 export interface Asset extends SyncMetadata {
   id: string;
   name?: string; // Optional Asset Name / Clinical Label
-  assetTag: string; // e.g. AST-HOSP-00104
+  assetTag: string; // e.g. AST-SMTCHIT-00104
   assetType: string; // Desktop, Laptop, Printer, Server, Switch, Router, AP, UPS, Scanner
   manufacturer: string;
   model: string;
@@ -829,6 +829,7 @@ export interface SystemSettings {
   customTexts?: Record<string, string>;
   customAssetTypes?: string[]; // Configurable asset types managed by Super Admin and IT
   customAssetConditions?: string[]; // Configurable conditions managed by Super Admin and IT
+  assetTagPrefix?: string; // Configurable asset tag prefix managed by Super Admin (e.g. "AST-SMTCHIT-")
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
 }

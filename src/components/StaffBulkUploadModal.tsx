@@ -580,6 +580,12 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     setErrorMessage(null);
 
     try {
+      // Ensure all unique departments present in staff upload exist in system database & Firestore
+      const uniqueDepts: string[] = Array.from(new Set(validRecords.map((r) => r.department.trim()).filter(Boolean)));
+      if (uniqueDepts.length > 0) {
+        await departmentService.ensureDepartmentsExist(uniqueDepts, currentUser);
+      }
+
       const staffList = validRecords.map((r) => ({
         fullName: r.fullName,
         department: r.department,

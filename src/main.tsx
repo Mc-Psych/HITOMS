@@ -1,4 +1,5 @@
 import '@vitejs/plugin-react/preamble';
+import './services/firebaseConfig';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';

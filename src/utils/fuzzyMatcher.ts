@@ -307,7 +307,6 @@ const ASSET_TYPE_ALIASES: Record<string, string> = {
   // Desktop
   'desk computer': 'Desktop',
   'desktop pc': 'Desktop',
-  workstation: 'Desktop',
   pc: 'Desktop',
   tower: 'Desktop',
   cpu: 'Desktop',
@@ -316,6 +315,13 @@ const ASSET_TYPE_ALIASES: Record<string, string> = {
   'computer set': 'Desktop',
   computer: 'Desktop',
   desktop: 'Desktop',
+
+  // Workstation
+  workstation: 'Workstation',
+  'work station': 'Workstation',
+  'precision workstation': 'Workstation',
+  'cad workstation': 'Workstation',
+  'tower workstation': 'Workstation',
 
   // Laptop
   laptop: 'Laptop',
@@ -350,6 +356,14 @@ const ASSET_TYPE_ALIASES: Record<string, string> = {
   'edge router': 'Router',
   'starlink router': 'Router',
   'broadband router': 'Router',
+
+  // Firewall
+  firewall: 'Firewall',
+  'hardware firewall': 'Firewall',
+  'edge firewall': 'Firewall',
+  fortigate: 'Firewall',
+  pfsense: 'Firewall',
+  sophos: 'Firewall',
 
   // Access Point
   'access point': 'Access Point',
@@ -392,8 +406,14 @@ const ASSET_TYPE_ALIASES: Record<string, string> = {
   'qr scanner': 'Barcode Scanner',
   'handheld scanner': 'Barcode Scanner',
   '2d scanner': 'Barcode Scanner',
-  scanner: 'Barcode Scanner',
   barcode: 'Barcode Scanner',
+
+  // Document & Flatbed Scanner
+  scanner: 'Scanner',
+  'document scanner': 'Scanner',
+  'flatbed scanner': 'Scanner',
+  'sheetfed scanner': 'Scanner',
+  'photo scanner': 'Scanner',
 
   // Tablet
   tablet: 'Tablet',

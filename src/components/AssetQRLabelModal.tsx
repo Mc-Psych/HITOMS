@@ -73,7 +73,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
   // Reset/populate custom edit fields when active asset or hospitalName changes
   useEffect(() => {
     if (asset) {
-      setCustomHospitalHeader(hospitalName || 'GENERAL HOSPITAL IT UNIT');
+      setCustomHospitalHeader(hospitalName || 'SMTCH ITSUPPORT UNIT');
       setCustomBadgeText('IT ASSET');
       setCustomAssetTag(asset.assetTag || '');
       setCustomModelText(`${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.name || '');
@@ -81,7 +81,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
       setCustomSerialNumber(asset.serialNumber || '');
       setCustomDeptLocation([asset.department, asset.location].filter(Boolean).join(' • '));
       setCustomCustodian(asset.assignedUser || '');
-      setCustomFooterNotice('PROPERTY OF HOSPITAL IT • DO NOT REMOVE');
+      setCustomFooterNotice('PROPERTY OF SMTCH • DO NOT REMOVE');
     }
   }, [asset, hospitalName]);
 
@@ -616,7 +616,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                       type="text"
                       value={customFooterNotice}
                       onChange={(e) => setCustomFooterNotice(e.target.value)}
-                      placeholder="PROPERTY OF HOSPITAL IT • DO NOT REMOVE"
+                      placeholder="PROPERTY OF SMTCH • DO NOT REMOVE"
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 uppercase focus:ring-1 focus:ring-sky-500"
                     />
                   </div>
@@ -753,7 +753,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                     {/* Security Notice Footer */}
                     {includeSecurityNotice && (
                       <div className="text-[8px] font-semibold text-slate-400 text-center tracking-tight border-t border-slate-200 pt-1 mt-1 truncate uppercase">
-                        {customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE'}
+                        {customFooterNotice || 'PROPERTY OF SMTCH • DO NOT REMOVE'}
                       </div>
                     )}
                   </div>

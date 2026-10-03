@@ -45,6 +45,7 @@ import {
 import { assetService } from '../services/assetService';
 import { authService } from '../services/authService';
 import { departmentService } from '../services/departmentService';
+import { settingsService } from '../services/settingsService';
 import {
   generateAssetQrMetadataPayload,
   downloadAssetQrJpeg,
@@ -139,11 +140,39 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
 
   // Dynamic asset types, conditions & statuses state
   const [assetTypesList, setAssetTypesList] = useState<string[]>(() => {
+    const defaultTypes = [
+      'Desktop',
+      'Laptop',
+      'Workstation',
+      'Server',
+      'Switch',
+      'Router',
+      'Firewall',
+      'Access Point',
+      'Printer',
+      'UPS',
+      'Barcode Scanner',
+      'Scanner',
+      'Tablet',
+      'Network Cable',
+      'Mouse',
+      'Keyboard',
+      'Wi-Fi Adapter',
+      'Bluetooth Adapter',
+    ];
     try {
       const saved = localStorage.getItem('hitoms_custom_asset_types');
-      return saved ? JSON.parse(saved) : ['Desktop', 'Laptop', 'Server', 'Switch', 'Router', 'Access Point', 'Printer', 'UPS', 'Barcode Scanner', 'Tablet', 'Network Cable', 'Mouse', 'Keyboard', 'Wi-Fi Adapter', 'Bluetooth Adapter'];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge defaults with saved so new standard types are always present
+          const merged = Array.from(new Set([...defaultTypes, ...parsed]));
+          return merged;
+        }
+      }
+      return defaultTypes;
     } catch {
-      return ['Desktop', 'Laptop', 'Server', 'Switch', 'Router', 'Access Point', 'Printer', 'UPS', 'Barcode Scanner', 'Tablet', 'Network Cable', 'Mouse', 'Keyboard', 'Wi-Fi Adapter', 'Bluetooth Adapter'];
+      return defaultTypes;
     }
   });
 
@@ -177,14 +206,47 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [editingStatusOriginal, setEditingStatusOriginal] = useState<string | null>(null);
   const [editingStatusValue, setEditingStatusValue] = useState('');
 
-  const handleSaveAssetTypes = (types: string[]) => {
+  const handleSaveAssetTypes = async (types: string[]) => {
     setAssetTypesList(types);
     try {
       localStorage.setItem('hitoms_custom_asset_types', JSON.stringify(types));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hitoms_custom_asset_types_updated', { detail: types }));
+      }
+      if (currentUser) {
+        await settingsService.updateSettings({ customAssetTypes: types }, currentUser);
+      }
     } catch (e) {
       console.warn(e);
     }
   };
+
+  useEffect(() => {
+    const handleTypesUpdated = (e: any) => {
+      const updated = e.detail;
+      if (Array.isArray(updated) && updated.length > 0) {
+        setAssetTypesList((prev) => Array.from(new Set([...prev, ...updated])));
+      }
+    };
+
+    const handleAssetsOrSettingsUpdated = () => {
+      if (onRefresh) {
+        onRefresh();
+      }
+    };
+
+    window.addEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
+    window.addEventListener('hitoms_assets_updated', handleAssetsOrSettingsUpdated);
+    window.addEventListener('hitoms_settings_updated', handleAssetsOrSettingsUpdated);
+    window.addEventListener('hitoms_data_synced', handleAssetsOrSettingsUpdated);
+
+    return () => {
+      window.removeEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
+      window.removeEventListener('hitoms_assets_updated', handleAssetsOrSettingsUpdated);
+      window.removeEventListener('hitoms_settings_updated', handleAssetsOrSettingsUpdated);
+      window.removeEventListener('hitoms_data_synced', handleAssetsOrSettingsUpdated);
+    };
+  }, [onRefresh]);
 
   const handleSaveAssetConditions = (conds: string[]) => {
     setAssetConditionsList(conds);

@@ -583,15 +583,29 @@ export async function getNextProcurementNumber(): Promise<string> {
   return candidate;
 }
 
-// Next Asset Tag (e.g. AST-HOSP-00105)
-export async function getNextAssetTag(): Promise<string> {
+// Next Asset Tag (e.g. AST-SMTCHIT-00105 or configured prefix)
+export async function getNextAssetTag(configuredPrefix?: string): Promise<string> {
+  let prefix = configuredPrefix?.trim();
+  if (!prefix) {
+    try {
+      const storedSettings = await getFromStore<SystemSettings>('settings', 'main');
+      prefix = storedSettings?.assetTagPrefix?.trim() || 'AST-SMTCHIT-';
+    } catch {
+      prefix = 'AST-SMTCHIT-';
+    }
+  }
+
+  if (prefix && !prefix.endsWith('-') && !prefix.endsWith('_')) {
+    prefix = `${prefix}-`;
+  }
+
   const assets = await getAllFromStore<Asset>('assets');
   const existingTags = new Set(assets.map((a) => a.assetTag).filter(Boolean));
   let count = 100 + assets.length + 1;
-  let candidate = `AST-HOSP-00${count}`;
+  let candidate = `${prefix}${String(count).padStart(5, '0')}`;
   while (existingTags.has(candidate)) {
     count++;
-    candidate = `AST-HOSP-00${count}`;
+    candidate = `${prefix}${String(count).padStart(5, '0')}`;
   }
   return candidate;
 }

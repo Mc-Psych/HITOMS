@@ -291,6 +291,13 @@ export const DepartmentBulkUploadModal: React.FC<DepartmentBulkUploadModalProps>
         currentUser
       );
 
+      try {
+        const { syncService } = await import('../services/syncService');
+        await syncService.runAutomaticSync();
+      } catch (syncErr) {
+        console.warn('[DepartmentBulkUploadModal] Error triggering Firestore sync:', syncErr);
+      }
+
       onSuccess(created);
       onClose();
     } catch (err: any) {

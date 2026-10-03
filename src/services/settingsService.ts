@@ -23,6 +23,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   letterheadAddressLine: 'DODI PAPASE, KADJEBI DISTRICT - OTI REGION',
   letterheadFooterText: 'ST. MARY THERESA CATHOLIC HOSPITAL — DEPARTMENT OF INFORMATION TECHNOLOGY',
   letterheadMode: 'DYNAMIC_HEADER',
+  assetTagPrefix: 'AST-SMTCHIT-',
   hospitalLanUrl: 'http://hitoms.local',
   contactEmail: 'send2smthit@gmail.com',
   contactPhone: '055 272 2289',

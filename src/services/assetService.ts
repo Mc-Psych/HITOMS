@@ -222,10 +222,22 @@ class AssetService {
     let nextCount = 100 + existingAssets.length;
     const now = new Date().toISOString();
 
+    let prefix = 'AST-SMTCHIT-';
+    try {
+      const { settingsService } = await import('./settingsService');
+      const currentSettings = await settingsService.getSettings();
+      if (currentSettings?.assetTagPrefix?.trim()) {
+        prefix = currentSettings.assetTagPrefix.trim();
+        if (!prefix.endsWith('-') && !prefix.endsWith('_')) {
+          prefix = `${prefix}-`;
+        }
+      }
+    } catch {}
+
     for (const item of items) {
       nextCount++;
       const id = generateUUID();
-      const assetTag = item.customAssetTag?.trim() || `AST-HOSP-${String(nextCount).padStart(5, '0')}`;
+      const assetTag = item.customAssetTag?.trim() || `${prefix}${String(nextCount).padStart(5, '0')}`;
       const { customAssetTag, ...rest } = item;
 
       const partialAsset: Partial<Asset> = {
@@ -344,6 +356,104 @@ class AssetService {
       deletedBy: user.fullName,
       reason: deleteReason || 'Manual deletion from IT asset register',
     });
+  }
+
+  public async migrateAllAssetTagsToNewPrefix(
+    newPrefix: string,
+    user: User
+  ): Promise<{ updatedAssets: Asset[]; count: number; sampleTags: string[] }> {
+    let cleanPrefix = (newPrefix || '').trim().toUpperCase();
+    if (!cleanPrefix) {
+      cleanPrefix = 'AST-SMTCHIT-';
+    }
+    if (!cleanPrefix.endsWith('-') && !cleanPrefix.endsWith('_')) {
+      cleanPrefix = `${cleanPrefix}-`;
+    }
+
+    const assets = await this.getAssets();
+    const updatedAssets: Asset[] = [];
+    const usedTags = new Set<string>();
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[i];
+      const oldTag = (asset.assetTag || '').trim();
+
+      // Extract numeric suffix or sequence part from old tag (e.g. AST-HOSP-00105 -> 00105)
+      let sequenceNum = 101 + i;
+      const numMatch = oldTag.match(/\d+$/);
+      if (numMatch && numMatch[0]) {
+        const parsed = parseInt(numMatch[0], 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          sequenceNum = parsed;
+        }
+      }
+
+      let cleanSuffix = String(sequenceNum).padStart(5, '0');
+      let newTag = `${cleanPrefix}${cleanSuffix}`;
+
+      // Prevent duplicate tags within the same migration pass
+      while (usedTags.has(newTag)) {
+        sequenceNum++;
+        cleanSuffix = String(sequenceNum).padStart(5, '0');
+        newTag = `${cleanPrefix}${cleanSuffix}`;
+      }
+      usedTags.add(newTag);
+
+      const partialAsset: Partial<Asset> = {
+        ...asset,
+        assetTag: newTag,
+      };
+
+      const updated: Asset = {
+        ...asset,
+        assetTag: newTag,
+        qrCodeData: generateRichAssetQrPayload(partialAsset),
+        updatedAt: now,
+        _syncStatus: 'PENDING_SYNC',
+        _syncVersion: (asset._syncVersion || 1) + 1,
+      };
+
+      await putToStore('assets', updated);
+
+      if (oldTag !== newTag) {
+        const historyEntry: AssetHistoryEntry = {
+          id: generateUUID(),
+          assetId: asset.id,
+          action: 'StatusChanged',
+          details: `Asset Tag prefix migrated from ${oldTag} to ${newTag} by ${user.fullName}`,
+          performedBy: user.fullName,
+          timestamp: now,
+        };
+        await putToStore('assetHistory', historyEntry);
+      }
+
+      try {
+        await syncService.enqueueOperation('assets', updated.id, 'UPDATE', updated);
+      } catch (e) {
+        console.warn('Sync enqueue warning on tag migration:', e);
+      }
+
+      updatedAssets.push(updated);
+    }
+
+    await auditService.logAction('MIGRATE_ASSET_TAG_PREFIX', 'Assets', 'ALL_ASSETS', null, {
+      newPrefix: cleanPrefix,
+      totalMigrated: updatedAssets.length,
+      performedBy: user.fullName,
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('hitoms_assets_updated', { detail: { count: updatedAssets.length, assets: updatedAssets } })
+      );
+      window.dispatchEvent(
+        new CustomEvent('hitoms_data_synced', { detail: { storeName: 'assets', count: updatedAssets.length } })
+      );
+    }
+
+    const sampleTags = updatedAssets.slice(0, 3).map((a) => a.assetTag);
+    return { updatedAssets, count: updatedAssets.length, sampleTags };
   }
 }
 

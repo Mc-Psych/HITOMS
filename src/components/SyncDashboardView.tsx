@@ -76,10 +76,8 @@ export const SyncDashboardView: React.FC<SyncDashboardViewProps> = ({
   };
 
   const handleClearFailed = async () => {
-    if (window.confirm('Clear all failed mutations from the queue?')) {
-      await syncService.clearFailedQueue();
-      onRefresh();
-    }
+    await syncService.clearFailedQueue();
+    onRefresh();
   };
 
   const failedItems = syncQueue.filter((q) => q.status === 'FAILED');

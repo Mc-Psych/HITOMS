@@ -84,17 +84,19 @@ class SyncService {
 
   private isQuotaError(err: any): boolean {
     if (!err) return false;
-    const msg = String(err.message || err.code || err).toLowerCase();
+    const msg = String(err.message || err.code || err || '').toLowerCase();
     return (
       err.code === 'resource-exhausted' ||
       msg.includes('resource-exhausted') ||
       msg.includes('quota limit exceeded') ||
       msg.includes('quota exceeded') ||
-      msg.includes('free daily write units')
+      msg.includes('free daily write units') ||
+      msg.includes('quota checks') ||
+      msg.includes('maximum backoff delay')
     );
   }
 
-  private async handleQuotaExceeded(err: any) {
+  private async handleQuotaExceeded(err?: any) {
     if (!this.quotaExceeded) {
       console.warn('[SyncService] Firestore daily quota limit reached. Disabling Firestore network to operate seamlessly in offline-first IndexedDB mode.');
     }
@@ -124,15 +126,25 @@ class SyncService {
   };
 
   constructor() {
+    try {
+      const quotaTimestamp = typeof localStorage !== 'undefined' ? localStorage.getItem('hitoms_firestore_quota_exceeded') : null;
+      if (quotaTimestamp && Date.now() - Number(quotaTimestamp) < 24 * 60 * 60 * 1000) {
+        this.quotaExceeded = true;
+        this.lastQuotaExceededTime = Number(quotaTimestamp);
+      }
+    } catch {}
+
     // Check initial network state
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.handleNetworkChange(true));
       window.addEventListener('offline', () => this.handleNetworkChange(false));
-      // Periodic automatic sync every 30 seconds
+      // Periodic automatic sync every 30 seconds if not in quota cooldown
       this.syncTimer = setInterval(() => {
-        this.runAutomaticSync().catch((err) =>
-          console.warn('[SyncService] Periodic sync error:', err?.message)
-        );
+        if (!this.quotaExceeded && isFirebaseConfigured()) {
+          this.runAutomaticSync().catch((err) =>
+            console.warn('[SyncService] Periodic sync note:', err?.message)
+          );
+        }
       }, 30000);
     }
   }
@@ -372,7 +384,17 @@ class SyncService {
       if (this.isQuotaError(e)) {
         this.handleQuotaExceeded(e);
       } else {
-        console.warn(`[SyncService] Note on syncing collection ${collectionName}: (${e?.message || 'timeout'})`);
+        const isUnavailable =
+          e?.code === 'unavailable' ||
+          String(e?.message || '').toLowerCase().includes('unavailable') ||
+          String(e?.message || '').toLowerCase().includes('could not reach cloud firestore backend') ||
+          String(e?.message || '').toLowerCase().includes('offline');
+        if (isUnavailable) {
+          this.stats.connectionState = 'OFFLINE';
+          this.notify();
+        } else {
+          console.warn(`[SyncService] Note on syncing collection ${collectionName}: (${e?.message || 'timeout'})`);
+        }
       }
     }
   }
@@ -410,9 +432,27 @@ class SyncService {
         await ensureFirebaseAuth().catch(() => {});
       }
 
-      // Check if quota cooldown period of 10 minutes has passed
-      if (this.quotaExceeded && Date.now() - this.lastQuotaExceededTime > 10 * 60 * 1000) {
-        this.quotaExceeded = false;
+      // Check if quota cooldown period of 24 hours (daily free tier reset) has passed
+      if (this.quotaExceeded) {
+        if (Date.now() - this.lastQuotaExceededTime > 24 * 60 * 60 * 1000) {
+          this.quotaExceeded = false;
+          try {
+            localStorage.removeItem('hitoms_firestore_quota_exceeded');
+          } catch {}
+        } else {
+          this.stats.lastSuccessfulSync = new Date().toISOString();
+          this.stats.lastError = null;
+          await this.refreshCounts();
+          return;
+        }
+      }
+
+      // If quota is exceeded or Firestore is offline, operate purely locally
+      if (this.quotaExceeded || !isFirebaseConfigured() || !firebaseClients.firestore) {
+        this.stats.lastSuccessfulSync = new Date().toISOString();
+        this.stats.lastError = null;
+        await this.refreshCounts();
+        return;
       }
 
       const queue = await getAllFromStore<SyncQueueItem>('syncQueue');

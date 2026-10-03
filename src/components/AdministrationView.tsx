@@ -20,6 +20,8 @@ import {
   Trash2,
   Gauge,
   Radio,
+  Tag,
+  RefreshCw,
 } from 'lucide-react';
 import {
   type User as UserType,
@@ -32,6 +34,7 @@ import {
 import {
   authService,
 } from '../services/authService';
+import { assetService } from '../services/assetService';
 import { settingsService, DEFAULT_SYSTEM_SETTINGS } from '../services/settingsService';
 import {
   officerSpecialtyService,
@@ -61,6 +64,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [activeTab, setActiveTab] = useState<'ACCOUNT_MANAGEMENT' | 'FACILITY' | 'DEPARTMENTS' | 'SECURITY_POLICIES' | 'OFFICER_SPECIALTIES'>('ACCOUNT_MANAGEMENT');
   
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const canManageFacility = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'IT_ADMIN';
 
   // IT unit must not see nor edit super admin account under their administration module but super admin can see and edit all users
   const visibleUsers = useMemo(() => {
@@ -83,12 +87,28 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [simulationResult, setSimulationResult] = useState<string>('');
   const [selectedOfficerForAdd, setSelectedOfficerForAdd] = useState<string>('');
 
-  // System Notification Ring states
+  // System Notification Ring & Tag Migration states
   const [ringTestSuccess, setRingTestSuccess] = useState(false);
   const [notificationSaveSuccess, setNotificationSaveSuccess] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(systemNotificationRingService.isMuted());
+  const [isMigratingTags, setIsMigratingTags] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState<string | null>(null);
+  const [lastMigrationResult, setLastMigrationResult] = useState<{
+    count: number;
+    prefix: string;
+    timestamp: string;
+    sampleTags: string[];
+  } | null>(() => {
+    try {
+      const saved = localStorage.getItem('hitoms_last_asset_tag_migration');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialPrefixRef = useRef<string>('');
 
   // Letterhead modal state
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
@@ -97,6 +117,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     const loadSettings = async () => {
       const data = await settingsService.getSettings();
       setSettings(data);
+      initialPrefixRef.current = data.assetTagPrefix || 'AST-SMTCHIT-';
       if (data.hospitalLogo) {
         setLogoPreview(data.hospitalLogo);
       }
@@ -287,6 +308,43 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     }
   };
 
+  const handleMigrateAssetTags = async () => {
+    if (!currentUser || !canManageFacility) return;
+    const prefix = settings.assetTagPrefix || 'AST-SMTCHIT-';
+
+    setIsMigratingTags(true);
+    setErrorMessage(null);
+    setMigrationMessage(null);
+
+    try {
+      await settingsService.updateSettings(settings, currentUser);
+      const res = await assetService.migrateAllAssetTagsToNewPrefix(prefix, currentUser);
+      initialPrefixRef.current = prefix;
+
+      const migrationInfo = {
+        count: res.count,
+        prefix,
+        timestamp: new Date().toISOString(),
+        sampleTags: res.sampleTags,
+      };
+
+      setLastMigrationResult(migrationInfo);
+      try {
+        localStorage.setItem('hitoms_last_asset_tag_migration', JSON.stringify(migrationInfo));
+      } catch (e) {
+        console.warn('Failed to store migration in localStorage:', e);
+      }
+
+      setSaveFacilitySuccess(true);
+      setMigrationMessage(`Successfully updated tags and regenerated scannable QR codes for ${res.count} hardware assets with prefix "${prefix}".`);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to update asset tag prefixes.');
+    } finally {
+      setIsMigratingTags(false);
+    }
+  };
+
   const handleSaveFacility = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -294,8 +352,32 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
     try {
       await settingsService.updateSettings(settings, currentUser);
+
+      // Auto-migrate option if prefix was updated
+      const prefix = settings.assetTagPrefix || 'AST-SMTCHIT-';
+      if (initialPrefixRef.current && initialPrefixRef.current !== prefix) {
+        setIsMigratingTags(true);
+        try {
+          const res = await assetService.migrateAllAssetTagsToNewPrefix(prefix, currentUser);
+          const migrationInfo = {
+            count: res.count,
+            prefix,
+            timestamp: new Date().toISOString(),
+            sampleTags: res.sampleTags,
+          };
+          setLastMigrationResult(migrationInfo);
+          try {
+            localStorage.setItem('hitoms_last_asset_tag_migration', JSON.stringify(migrationInfo));
+          } catch {}
+          setMigrationMessage(`Updated tags and QR codes for ${res.count} existing assets with prefix "${prefix}".`);
+          initialPrefixRef.current = prefix;
+        } finally {
+          setIsMigratingTags(false);
+        }
+      }
+
       setSaveFacilitySuccess(true);
-      setTimeout(() => setSaveFacilitySuccess(false), 3000);
+      setTimeout(() => setSaveFacilitySuccess(false), 4000);
       onRefresh();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to save facility settings.');
@@ -418,6 +500,13 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
               </div>
             )}
 
+            {migrationMessage && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{migrationMessage}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSaveFacility} className="space-y-5">
               {/* Global System Software Name & Brand Override (Super Admin Controlled) */}
               <div className="p-5 rounded-2xl border-2 border-sky-200 dark:border-sky-800 bg-sky-50/60 dark:bg-sky-950/30 space-y-4">
@@ -478,13 +567,93 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     </label>
                     <input
                       type="text"
-                      disabled={!isSuperAdmin}
+                      disabled={!canManageFacility}
                       value={settings.systemFullName || ''}
                       onChange={(e) => setSettings({ ...settings, systemFullName: e.target.value })}
                       placeholder="Healthcare Information Technology & Operations Management System"
                       className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
                     />
                     <p className="mt-1 text-[10px] text-slate-400">Formal subtitle rendered on report footers, splash screens, and audit headers</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-200 font-bold mb-1 flex items-center justify-between">
+                      <span>Default Asset Tag Prefix *</span>
+                      <Tag className="w-3.5 h-3.5 text-sky-600" />
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!canManageFacility}
+                      value={settings.assetTagPrefix || 'AST-SMTCHIT-'}
+                      onChange={(e) => setSettings({ ...settings, assetTagPrefix: e.target.value.toUpperCase() })}
+                      placeholder="e.g. AST-SMTCHIT-, AST-HOSP-, HIT-AST-"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-sky-400 dark:border-sky-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono font-black text-sky-700 dark:text-sky-300 text-sm tracking-wider shadow-inner"
+                    />
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                      <span className="font-semibold">Quick Presets:</span>
+                      {['AST-SMTCHIT-', 'AST-HOSP-', 'HIT-AST-', 'AST-'].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          disabled={!canManageFacility}
+                          onClick={() => setSettings({ ...settings, assetTagPrefix: preset })}
+                          className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold transition cursor-pointer ${
+                            (settings.assetTagPrefix || 'AST-SMTCHIT-') === preset
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-sky-500 hover:text-white'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className={`w-3.5 h-3.5 text-sky-600 shrink-0 ${isMigratingTags ? 'animate-spin' : ''}`} />
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          Migrate existing assets to <strong className="font-mono text-sky-700 dark:text-sky-300">{settings.assetTagPrefix || 'AST-SMTCHIT-'}</strong>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!canManageFacility || isMigratingTags}
+                        onClick={handleMigrateAssetTags}
+                        className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs transition cursor-pointer shadow-2xs whitespace-nowrap"
+                      >
+                        {isMigratingTags ? 'Migrating Tags...' : 'Update Existing Tags'}
+                      </button>
+                    </div>
+
+                    {/* Migration Update State Banner */}
+                    {migrationMessage && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 flex items-start gap-2.5 text-emerald-900 dark:text-emerald-200 shadow-sm animate-fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <div className="text-xs space-y-1">
+                          <p className="font-bold">{migrationMessage}</p>
+                          {lastMigrationResult && lastMigrationResult.sampleTags && lastMigrationResult.sampleTags.length > 0 && (
+                            <p className="text-[11px] opacity-90 font-medium">
+                              Sample updated asset tags: <span className="font-mono font-bold bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded text-emerald-800 dark:text-emerald-200">{lastMigrationResult.sampleTags.join(', ')}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {lastMigrationResult && !migrationMessage && (
+                      <div className="mt-2.5 p-2.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>
+                            Last Tag Prefix Update: <strong className="font-mono text-sky-600 dark:text-sky-400 font-bold">{lastMigrationResult.prefix}</strong> ({lastMigrationResult.count} hardware assets updated)
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {new Date(lastMigrationResult.timestamp).toLocaleDateString()} {new Date(lastMigrationResult.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -720,7 +889,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </label>
                   <input
                     type="text"
-                    disabled={!isSuperAdmin}
+                    disabled={!canManageFacility}
                     value={settings.contactPhone || ''}
                     onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })}
                     placeholder="e.g. 055 272 2289"
@@ -735,7 +904,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </label>
                   <input
                     type="email"
-                    disabled={!isSuperAdmin}
+                    disabled={!canManageFacility}
                     value={settings.contactEmail || ''}
                     onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })}
                     placeholder="e.g. send2smthit@gmail.com"
@@ -750,7 +919,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </label>
                   <input
                     type="text"
-                    disabled={!isSuperAdmin}
+                    disabled={!canManageFacility}
                     value={settings.emergencyExtension || ''}
                     onChange={(e) => setSettings({ ...settings, emergencyExtension: e.target.value })}
                     placeholder="e.g. Ext. 9911"
@@ -761,7 +930,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
               </div>
 
               {/* Form Actions */}
-              {isSuperAdmin && (
+              {canManageFacility && (
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   {saveFacilitySuccess ? (
                     <span className="text-emerald-600 font-bold flex items-center gap-1.5 text-xs">

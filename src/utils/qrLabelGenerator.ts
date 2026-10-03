@@ -28,14 +28,14 @@ export interface QrLabelRenderOptions {
  */
 export function generateAssetQrMetadataPayload(
   asset: Partial<Asset>,
-  hospitalNameOrOptions: string | QrLabelRenderOptions = 'REGIONAL HOSPITAL IT UNIT'
+  hospitalNameOrOptions: string | QrLabelRenderOptions = 'SMTCH ITSUPPORT UNIT'
 ): string {
   const options: QrLabelRenderOptions =
     typeof hospitalNameOrOptions === 'string'
       ? { hospitalName: hospitalNameOrOptions }
       : hospitalNameOrOptions || {};
 
-  const hospital = options.customHospitalHeader || options.hospitalName || 'REGIONAL HOSPITAL IT UNIT';
+  const hospital = options.customHospitalHeader || options.hospitalName || 'SMTCH ITSUPPORT UNIT';
   const tag = options.customAssetTag || asset.assetTag || 'N/A';
   const assetName =
     options.customModelText ||
@@ -48,7 +48,7 @@ export function generateAssetQrMetadataPayload(
     `${asset.department || 'IT Unit'}${asset.location ? ` - ${asset.location}` : ''}`;
   const custodian = options.customCustodian || asset.assignedUser || '';
   const typeText = options.customAssetType || asset.assetType || '';
-  const footer = options.customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE';
+  const footer = options.customFooterNotice || 'PROPERTY OF SMTCH • DO NOT REMOVE';
 
   const lines: string[] = [
     `🏥 ${hospital}`,
@@ -145,7 +145,7 @@ export async function renderAssetLabelCanvas(
     customFooterNotice,
   } = options;
 
-  const activeHospitalName = customHospitalHeader || hospitalName || 'REGIONAL HOSPITAL IT UNIT';
+  const activeHospitalName = customHospitalHeader || hospitalName || 'SMTCH ITSUPPORT UNIT';
   const activeBadgeText = customBadgeText || 'IT ASSET';
   const activeTag = customAssetTag || asset.assetTag || 'TAG-0000';
   const activeModel =
@@ -161,7 +161,7 @@ export async function renderAssetLabelCanvas(
   const activeCustodian =
     customCustodian !== undefined ? customCustodian : asset.assignedUser;
   const activeFooter =
-    customFooterNotice || 'PROPERTY OF HOSPITAL IT • DO NOT REMOVE';
+    customFooterNotice || 'PROPERTY OF SMTCH • DO NOT REMOVE';
 
   // Set card dimensions matching the exact print preview aspect ratios
   // Standard: 320 x 176 (approx 3" x 2" label)

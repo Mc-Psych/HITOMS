@@ -184,7 +184,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const handleDeleteMemo = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this memorandum?')) return;
     try {
       await memoService.deleteMemo(id, currentUser);
       setMemos((prev) => prev.filter((m) => m.id !== id));

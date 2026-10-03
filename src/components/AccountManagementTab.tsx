@@ -270,7 +270,6 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
 
   const handleResetRolePermissions = async () => {
     if (!currentUser || !isSuperAdmin) return;
-    if (!window.confirm('Reset all role permissions to system defaults?')) return;
     await authService.resetPermissionsToDefault(currentUser);
     setRolePermissions(authService.getRolePermissions(selectedRoleForMatrix));
     setMatrixSaveSuccess(true);

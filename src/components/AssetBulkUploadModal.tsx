@@ -22,19 +22,23 @@ import {
 import { type Asset, type AssetCondition, type AssetStatus, type User } from '../types';
 import { assetService } from '../services/assetService';
 import { departmentService, INITIAL_STANDARD_DEPARTMENTS } from '../services/departmentService';
+import { settingsService } from '../services/settingsService';
 import { downloadTextFile } from '../utils/fileDownloader';
 import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
 
-const VALID_ASSET_TYPES = [
+const DEFAULT_VALID_ASSET_TYPES = [
   'Desktop',
   'Laptop',
+  'Workstation',
   'Server',
   'Switch',
   'Router',
+  'Firewall',
   'Access Point',
   'Printer',
   'UPS',
   'Barcode Scanner',
+  'Scanner',
   'Tablet',
   'Network Cable',
   'Mouse',
@@ -95,6 +99,14 @@ export interface ParsedAssetRow {
   macAddress?: string;
   specifications?: string;
   notes?: string;
+  upsCapacity?: string;
+  printerOutputType?: string;
+  accessPointEnvironment?: string;
+  cableEnvironment?: string;
+  mouseConnectivity?: string;
+  keyboardConnectivity?: string;
+  wifiAdapterType?: string;
+  bluetoothAdapterType?: string;
   isValid: boolean;
   errors: string[];
   flaggedIssues: string[];
@@ -150,6 +162,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   const [pastedText, setPastedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [systemDepartments, setSystemDepartments] = useState<string[]>([]);
+  const [customAssetTypes, setCustomAssetTypes] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('hitoms_custom_asset_types');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [hasAcceptedFlaggedMappings, setHasAcceptedFlaggedMappings] = useState(false);
   const [importResult, setImportResult] = useState<{
     success: boolean;
@@ -159,7 +179,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load registered hospital departments
+  // Load registered hospital departments and custom asset types
   useEffect(() => {
     if (isOpen) {
       setHasAcceptedFlaggedMappings(false);
@@ -168,8 +188,35 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
           setSystemDepartments(depts);
         }
       });
+      try {
+        const saved = localStorage.getItem('hitoms_custom_asset_types');
+        if (saved) setCustomAssetTypes(JSON.parse(saved));
+      } catch (e) {
+        console.warn(e);
+      }
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleTypesUpdated = (e: any) => {
+      const updated = e.detail;
+      if (Array.isArray(updated) && updated.length > 0) {
+        setCustomAssetTypes(updated);
+      }
+    };
+    window.addEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
+    return () => {
+      window.removeEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
+    };
+  }, []);
+
+  // Dynamic deduplicated valid asset types
+  const validAssetTypes = useMemo(() => {
+    const set = new Set<string>();
+    DEFAULT_VALID_ASSET_TYPES.forEach((t) => set.add(t.trim()));
+    customAssetTypes.forEach((t) => set.add(t.trim()));
+    return Array.from(set);
+  }, [customAssetTypes]);
 
   // Deduplicated and sorted valid hospital departments
   const validDepartments = useMemo(() => {
@@ -231,7 +278,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         rowObj['equipmenttype'] ||
         rowObj['category'] ||
         'Desktop';
-      const typeMatch = matchOptionWithFallback(rawAssetType, VALID_ASSET_TYPES, 'Desktop', 'Asset Type');
+      const typeMatch = matchOptionWithFallback(rawAssetType, validAssetTypes, 'Desktop', 'Asset Type');
 
       const manufacturer = (
         rowObj['manufacturer'] ||
@@ -302,6 +349,16 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       const purchaseDate = rowObj['purchasedate'] || rowObj['date'] || '';
       const assetTag = rowObj['assettag'] || rowObj['tag'] || '';
 
+      // Type-specific specification fields from CSV / template headers
+      const upsCapacity = (rowObj['upscapacity'] || rowObj['capacity'] || rowObj['va'] || '').trim();
+      const printerOutputType = (rowObj['printeroutputtype'] || rowObj['outputmode'] || rowObj['printmode'] || rowObj['colormode'] || '').trim();
+      const accessPointEnvironment = (rowObj['accesspointenvironment'] || rowObj['environment'] || rowObj['deployment'] || '').trim();
+      const cableEnvironment = (rowObj['cableenvironment'] || rowObj['environment'] || '').trim();
+      const mouseConnectivity = (rowObj['mouseconnectivity'] || rowObj['connectivity'] || '').trim();
+      const keyboardConnectivity = (rowObj['keyboardconnectivity'] || rowObj['connectivity'] || '').trim();
+      const wifiAdapterType = (rowObj['wifiadaptertype'] || rowObj['adaptertype'] || '').trim();
+      const bluetoothAdapterType = (rowObj['bluetoothadaptertype'] || rowObj['adaptertype'] || '').trim();
+
       const flaggedIssues: string[] = [];
       const fieldIssues: ParsedAssetRow['fieldIssues'] = {};
 
@@ -351,6 +408,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         purchasePrice,
         supplier,
         purchaseDate,
+        upsCapacity,
+        printerOutputType,
+        accessPointEnvironment,
+        cableEnvironment,
+        mouseConnectivity,
+        keyboardConnectivity,
+        wifiAdapterType,
+        bluetoothAdapterType,
         isValid: errors.length === 0,
         errors,
         flaggedIssues,
@@ -401,7 +466,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
               const array = Array.isArray(parsed) ? parsed : [parsed];
 
               const rows: ParsedAssetRow[] = array.map((item, idx) => {
-                const typeMatch = matchOptionWithFallback(item.assetType, VALID_ASSET_TYPES, 'Desktop', 'Asset Type');
+                const typeMatch = matchOptionWithFallback(item.assetType, validAssetTypes, 'Desktop', 'Asset Type');
                 const deptMatch = matchOptionWithFallback(
                   item.department,
                   validDepartments,
@@ -561,6 +626,28 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
     setIsProcessing(true);
     try {
+      // 1. Ensure all departments present in preview/valid rows exist in system database & Firestore
+      const uniqueDepts: string[] = Array.from(new Set(validRows.map((r) => r.department.trim()).filter(Boolean)));
+      if (uniqueDepts.length > 0) {
+        await departmentService.ensureDepartmentsExist(uniqueDepts, currentUser);
+      }
+
+      // 2. Register/update new asset types in system custom asset types list & Firestore settings
+      const uniqueTypes: string[] = Array.from(new Set(validRows.map((r) => r.assetType.trim()).filter(Boolean)));
+      if (uniqueTypes.length > 0) {
+        const mergedTypes = Array.from(new Set([...validAssetTypes, ...uniqueTypes]));
+        try {
+          localStorage.setItem('hitoms_custom_asset_types', JSON.stringify(mergedTypes));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('hitoms_custom_asset_types_updated', { detail: mergedTypes }));
+          }
+          await settingsService.updateSettings({ customAssetTypes: mergedTypes }, currentUser);
+        } catch (settingsErr) {
+          console.warn('[AssetBulkUploadModal] Failed to sync custom asset types to settings:', settingsErr);
+        }
+      }
+
+      // 3. Prepare asset creation items
       const itemsToCreate = validRows.map((r) => ({
         customAssetTag: r.assetTag?.trim() || undefined,
         assetType: r.assetType,
@@ -580,16 +667,33 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         operatingSystem: r.operatingSystem?.trim() || '',
         ipAddress: r.ipAddress?.trim() || '',
         macAddress: r.macAddress?.trim() || '',
+        upsCapacity: r.upsCapacity || (r.assetType.toUpperCase().includes('UPS') ? '1000VA (1 kVA)' : undefined),
+        printerOutputType: r.printerOutputType || (r.assetType.toUpperCase().includes('PRINTER') ? 'Monochrome (Black & White)' : undefined),
+        accessPointEnvironment: r.accessPointEnvironment || ((r.assetType.toUpperCase().includes('ACCESS POINT') || r.assetType.toUpperCase().includes('AP')) ? 'Indoor' : undefined),
+        cableEnvironment: r.cableEnvironment || ((r.assetType.toUpperCase().includes('CABLE') || r.assetType.toUpperCase().includes('PATCH')) ? 'Indoor' : undefined),
+        mouseConnectivity: r.mouseConnectivity || (r.assetType.toUpperCase().includes('MOUSE') ? 'Wired' : undefined),
+        keyboardConnectivity: r.keyboardConnectivity || (r.assetType.toUpperCase().includes('KEYBOARD') ? 'Wired' : undefined),
+        wifiAdapterType: r.wifiAdapterType || ((r.assetType.toUpperCase().includes('WI-FI') || r.assetType.toUpperCase().includes('WIFI')) ? 'Dongle (USB)' : undefined),
+        bluetoothAdapterType: r.bluetoothAdapterType || (r.assetType.toUpperCase().includes('BLUETOOTH') ? 'Dongle (USB)' : undefined),
         specifications: r.specifications?.trim() || `${r.manufacturer} ${r.model}`,
         notes: r.notes?.trim() || 'Bulk uploaded asset',
       }));
 
+      // 4. Save assets to local database and queue for cloud sync
       const result = await assetService.bulkCreateAssets(itemsToCreate, currentUser);
+
+      // 5. Trigger cloud sync to update Firestore database instantly
+      try {
+        const { syncService } = await import('../services/syncService');
+        await syncService.runAutomaticSync();
+      } catch (syncErr) {
+        console.warn('[AssetBulkUploadModal] Firestore automatic sync notification:', syncErr);
+      }
 
       setImportResult({
         success: true,
         imported: result.created,
-        message: `Successfully imported ${result.count} hardware assets into the offline registry.`,
+        message: `Successfully imported ${result.count} hardware assets into system registry & Firestore database.`,
       });
 
       onSuccess(result.created);
@@ -946,7 +1050,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     }`}
                                     title={isTypeFlagged ? row.fieldIssues.assetType : undefined}
                                   >
-                                    {VALID_ASSET_TYPES.map((type) => (
+                                    {validAssetTypes.map((type) => (
                                       <option key={type} value={type}>
                                         {type}
                                       </option>

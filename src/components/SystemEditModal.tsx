@@ -297,9 +297,6 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
 
   const handleDelete = async () => {
     if (!systemToEdit) return;
-    if (!window.confirm(`Are you sure you want to remove "${systemToEdit.systemName}" from hospital systems telemetry?`)) {
-      return;
-    }
 
     setIsSaving(true);
     try {
