@@ -474,10 +474,62 @@ Output ONLY the refined body text without meta-commentary, introductory notes, o
     }
   });
 
+  // Endpoint to purge all departments from Cloud Firestore and defaultSeedData.json
+  app.post("/api/purge-all-departments", async (req, res) => {
+    try {
+      // 1. Clear departments in defaultSeedData.json
+      const seedFilePath = path.join(process.cwd(), "src", "data", "defaultSeedData.json");
+      if (fs.existsSync(seedFilePath)) {
+        try {
+          const raw = fs.readFileSync(seedFilePath, "utf8");
+          const seedData = JSON.parse(raw);
+          if (seedData && seedData.data) {
+            seedData.data.departments = [];
+            fs.writeFileSync(seedFilePath, JSON.stringify(seedData, null, 2), "utf8");
+          }
+        } catch (e) {
+          console.warn("[HITOMS Server] Error updating defaultSeedData.json:", e);
+        }
+      }
+
+      // 2. Clear all department documents from Cloud Firestore
+      try {
+        const { initializeApp } = await import("firebase/app");
+        const { getFirestore, collection, getDocs, writeBatch, doc } = await import("firebase/firestore");
+        const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          const fbApp = initializeApp(config, "purge-client-" + Date.now());
+          const db = getFirestore(fbApp, config.firestoreDatabaseId);
+          const colRef = collection(db, "departments");
+          const snap = await getDocs(colRef);
+          if (!snap.empty) {
+            const batch = writeBatch(db);
+            snap.docs.forEach((d) => {
+              batch.delete(doc(db, "departments", d.id));
+            });
+            await batch.commit();
+            console.log(`[HITOMS Server] Purged ${snap.docs.length} departments from Cloud Firestore.`);
+          }
+        }
+      } catch (err: any) {
+        console.warn("[HITOMS Server] Cloud Firestore purge notice:", err?.message || err);
+      }
+
+      return res.json({ success: true, message: "All departments purged from local and cloud databases." });
+    } catch (err: any) {
+      console.error("[HITOMS Server] Error in /api/purge-all-departments:", err);
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
   // Endpoint to persist live app preview data as default seed snapshot for GitHub commits
   app.post("/api/save-seed-data", (req, res) => {
     try {
       const payload = req.body;
+      if (payload && payload.data) {
+        payload.data.departments = [];
+      }
       const seedFilePath = path.join(process.cwd(), "src", "data", "defaultSeedData.json");
       const dirPath = path.dirname(seedFilePath);
       if (!fs.existsSync(dirPath)) {
@@ -496,6 +548,9 @@ Output ONLY the refined body text without meta-commentary, introductory notes, o
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        watch: {
+          ignored: ['**/src/data/defaultSeedData.json', '**/dist/**'],
+        },
         hmr: {
           server,
           clientPort: 443,

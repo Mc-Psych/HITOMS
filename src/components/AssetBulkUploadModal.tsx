@@ -25,26 +25,46 @@ import { departmentService, INITIAL_STANDARD_DEPARTMENTS } from '../services/dep
 import { settingsService } from '../services/settingsService';
 import { downloadTextFile } from '../utils/fileDownloader';
 import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
+import {
+  downloadAssetTemplateExcel,
+  getActiveHospitalName,
+} from '../utils/templateGenerator';
 
 const DEFAULT_VALID_ASSET_TYPES = [
   'Desktop',
+  'System Unit',
+  'Monitor',
+  'Monitor / Display',
   'Laptop',
   'Workstation',
+  'All-in-One (AIO)',
   'Server',
   'Switch',
+  'Network Switch',
   'Router',
+  'Network Router',
   'Firewall',
   'Access Point',
+  'Wi-Fi Access Point',
   'Printer',
+  'Thermal Printer',
+  'Receipt Printer',
   'UPS',
   'Barcode Scanner',
   'Scanner',
+  'Document Scanner',
   'Tablet',
+  'Projector',
+  'Webcam',
+  'IP Phone',
+  'CCTV Camera',
   'Network Cable',
   'Mouse',
   'Keyboard',
   'Wi-Fi Adapter',
   'Bluetooth Adapter',
+  'Biometric Scanner',
+  'Photocopier',
 ];
 
 const VALID_CONDITIONS: AssetCondition[] = [
@@ -83,14 +103,18 @@ export interface ParsedAssetRow {
   id: string;
   assetTag?: string;
   assetType: string;
+  rawAssetType?: string;
   manufacturer: string;
   model: string;
   serialNumber: string;
   department: string;
+  rawDepartment?: string;
   location: string;
   assignedUser?: string;
   condition: AssetCondition;
+  rawCondition?: string;
   status: AssetStatus;
+  rawStatus?: string;
   purchaseDate?: string;
   purchasePrice?: number;
   supplier?: string;
@@ -214,14 +238,22 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   const validAssetTypes = useMemo(() => {
     const set = new Set<string>();
     DEFAULT_VALID_ASSET_TYPES.forEach((t) => set.add(t.trim()));
+    try {
+      const syncSettings = settingsService.getSettingsSync();
+      if (syncSettings?.customAssetTypes && Array.isArray(syncSettings.customAssetTypes)) {
+        syncSettings.customAssetTypes.forEach((t) => set.add(t.trim()));
+      }
+    } catch (e) {}
     customAssetTypes.forEach((t) => set.add(t.trim()));
+    existingAssets.forEach((a) => {
+      if (a.assetType && a.assetType.trim()) set.add(a.assetType.trim());
+    });
     return Array.from(set);
-  }, [customAssetTypes]);
+  }, [customAssetTypes, existingAssets]);
 
   // Deduplicated and sorted valid hospital departments
   const validDepartments = useMemo(() => {
     const set = new Set<string>();
-    INITIAL_STANDARD_DEPARTMENTS.forEach((d) => set.add(d.trim()));
     systemDepartments.forEach((d) => set.add(d.trim()));
     existingAssets.forEach((a) => {
       if (a.department && a.department.trim()) set.add(a.department.trim());
@@ -230,6 +262,18 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   }, [systemDepartments, existingAssets]);
 
   if (!isOpen) return null;
+
+  const hospitalName = getActiveHospitalName();
+
+  // Download Sample Excel Template
+  const handleDownloadExcelTemplate = () => {
+    downloadAssetTemplateExcel(
+      hospitalName,
+      validAssetTypes,
+      validDepartments,
+      existingAssets
+    );
+  };
 
   // Download Sample CSV
   const handleDownloadSample = () => {
@@ -242,14 +286,30 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
   // Helper to parse CSV string into objects
   const parseCSVString = (csv: string): ParsedAssetRow[] => {
     const lines = csv.split(/\r\n|\n/).filter((l) => l.trim().length > 0);
-    if (lines.length < 2) return [];
+    if (lines.length === 0) return [];
 
     setHasAcceptedFlaggedMappings(false);
 
-    // Parse header line
-    const headerLine = lines[0];
+    // Dynamic Header Detection: Search up to 12 rows for row containing standard asset column headers
+    let headerRowIndex = -1;
+    for (let r = 0; r < Math.min(lines.length, 12); r++) {
+      const tokens = lines[r]
+        .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+        .map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''));
+      if (
+        tokens.some((t) =>
+          ['assettype', 'type', 'manufacturer', 'model', 'serialnumber', 'assettag', 'equipmenttype'].includes(t)
+        )
+      ) {
+        headerRowIndex = r;
+        break;
+      }
+    }
+
+    const effectiveHeaderIndex = headerRowIndex >= 0 ? headerRowIndex : 0;
+    const headerLine = lines[effectiveHeaderIndex];
     const headers = headerLine.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((h) =>
-      h.trim().replace(/^"|"$/g, '').toLowerCase()
+      h.trim().replace(/^"|"$/g, '').toLowerCase().replace(/[\s_-]+/g, '')
     );
 
     const existingSerials = new Set(
@@ -258,7 +318,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
     const results: ParsedAssetRow[] = [];
 
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = effectiveHeaderIndex + 1; i < lines.length; i++) {
       const line = lines[i];
       if (!line.trim()) continue;
 
@@ -272,12 +332,13 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       });
 
       // Flexible column mappings & pre-populated value fuzzy validation
-      const rawAssetType =
+      const rawAssetType = (
         rowObj['assettype'] ||
         rowObj['type'] ||
         rowObj['equipmenttype'] ||
         rowObj['category'] ||
-        'Desktop';
+        'Desktop'
+      ).trim();
       const typeMatch = matchOptionWithFallback(rawAssetType, validAssetTypes, 'Desktop', 'Asset Type');
 
       const manufacturer = (
@@ -321,17 +382,18 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         'Main Facility'
       ).trim();
 
-      const assignedUser =
+      const assignedUser = (
         rowObj['assigneduser'] ||
         rowObj['custodian'] ||
         rowObj['user'] ||
         rowObj['staff'] ||
-        '';
+        ''
+      ).trim();
 
-      const rawCondition = rowObj['condition'] || 'Good';
+      const rawCondition = (rowObj['condition'] || 'Good').trim();
       const condMatch = matchOptionWithFallback(rawCondition, VALID_CONDITIONS, 'Good', 'Condition');
 
-      const rawStatus = rowObj['status'] || (assignedUser.trim() ? 'Assigned' : 'Available');
+      const rawStatus = (rowObj['status'] || (assignedUser.trim() ? 'Assigned' : 'Available')).trim();
       const statusMatch = matchOptionWithFallback(
         rawStatus,
         VALID_STATUSES,
@@ -362,19 +424,19 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
       const flaggedIssues: string[] = [];
       const fieldIssues: ParsedAssetRow['fieldIssues'] = {};
 
-      if (!typeMatch.isExactMatch && rawAssetType.trim()) {
+      if (!typeMatch.isExactMatch && rawAssetType) {
         flaggedIssues.push(typeMatch.issueDescription!);
         fieldIssues.assetType = typeMatch.issueDescription!;
       }
-      if (!deptMatch.isExactMatch && rawDepartment.trim()) {
+      if (!deptMatch.isExactMatch && rawDepartment) {
         flaggedIssues.push(deptMatch.issueDescription!);
         fieldIssues.department = deptMatch.issueDescription!;
       }
-      if (!condMatch.isExactMatch && rawCondition.trim()) {
+      if (!condMatch.isExactMatch && rawCondition) {
         flaggedIssues.push(condMatch.issueDescription!);
         fieldIssues.condition = condMatch.issueDescription!;
       }
-      if (!statusMatch.isExactMatch && rawStatus.trim()) {
+      if (!statusMatch.isExactMatch && rawStatus) {
         flaggedIssues.push(statusMatch.issueDescription!);
         fieldIssues.status = statusMatch.issueDescription!;
       }
@@ -392,22 +454,26 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
         id: `row-${i}-${Date.now()}`,
         assetTag,
         assetType: typeMatch.matchedValue,
+        rawAssetType,
         manufacturer,
         model,
         serialNumber,
         department: deptMatch.matchedValue,
+        rawDepartment,
         location,
         assignedUser,
         condition: condMatch.matchedValue as AssetCondition,
+        rawCondition,
         status: statusMatch.matchedValue as AssetStatus,
+        rawStatus,
+        purchaseDate,
+        purchasePrice,
+        supplier,
         operatingSystem,
         ipAddress,
         macAddress,
         specifications,
         notes,
-        purchasePrice,
-        supplier,
-        purchaseDate,
         upsCapacity,
         printerOutputType,
         accessPointEnvironment,
@@ -576,6 +642,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
     setParsedRows((prev) => prev.filter((r) => r.id !== id));
   };
 
+  const handleDeleteFlaggedRows = () => {
+    setParsedRows((prev) =>
+      prev.filter(
+        (r) => r.isValid && (!r.flaggedIssues || r.flaggedIssues.length === 0)
+      )
+    );
+  };
+
   const handleUpdateRow = (id: string, field: keyof ParsedAssetRow, value: any) => {
     setParsedRows((prev) =>
       prev.map((row) => {
@@ -626,13 +700,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
 
     setIsProcessing(true);
     try {
-      // 1. Ensure all departments present in preview/valid rows exist in system database & Firestore
-      const uniqueDepts: string[] = Array.from(new Set(validRows.map((r) => r.department.trim()).filter(Boolean)));
-      if (uniqueDepts.length > 0) {
-        await departmentService.ensureDepartmentsExist(uniqueDepts, currentUser);
-      }
-
-      // 2. Register/update new asset types in system custom asset types list & Firestore settings
+      // 1. Register/update new asset types in system custom asset types list & Firestore settings
       const uniqueTypes: string[] = Array.from(new Set(validRows.map((r) => r.assetType.trim()).filter(Boolean)));
       if (uniqueTypes.length > 0) {
         const mergedTypes = Array.from(new Set([...validAssetTypes, ...uniqueTypes]));
@@ -739,14 +807,22 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleDownloadExcelTemplate}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold border border-emerald-500 shadow-xs transition cursor-pointer"
+              title="Download styled Excel (.xlsx) template with Hospital header and dropdown reference guides"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Excel (.xlsx)</span>
+            </button>
             <button
               onClick={handleDownloadSample}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold border border-slate-300 dark:border-slate-700 transition cursor-pointer"
               title="Download pre-formatted CSV template"
             >
-              <Download className="w-3.5 h-3.5 text-sky-600" />
-              <span>Download CSV Template</span>
+              <FileText className="w-3.5 h-3.5 text-sky-600" />
+              <span>CSV Template</span>
             </button>
             <button
               onClick={onClose}
@@ -928,6 +1004,17 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {(rowsWithFlagsCount > 0 || invalidCount > 0) && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteFlaggedRows}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold transition cursor-pointer shadow-3xs"
+                          title="Remove all invalid or flagged rows from this import"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Flagged / Errors ({rowsWithFlagsCount + invalidCount})</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -938,7 +1025,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                         }}
                         className="text-slate-500 hover:text-rose-600 text-xs font-semibold px-2 py-1 cursor-pointer"
                       >
-                        Reset / Choose Another File
+                        Reset
                       </button>
                     </div>
                   </div>
@@ -1013,14 +1100,20 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                               <td className="px-3 py-2">
                                 {row.isValid ? (
                                   row.flaggedIssues && row.flaggedIssues.length > 0 ? (
-                                    <div className="flex flex-col gap-0.5">
+                                    <div className="flex flex-col gap-1 max-w-[220px]">
                                       <span
-                                        title={row.flaggedIssues.join('\n')}
-                                        className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
+                                        className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded w-fit"
                                       >
                                         <AlertTriangle className="w-3 h-3 text-amber-600" />
-                                        <span>Flagged</span>
+                                        <span>Flagged ({row.flaggedIssues.length})</span>
                                       </span>
+                                      <div className="space-y-0.5">
+                                        {row.flaggedIssues.map((issue, idx) => (
+                                          <div key={idx} className="text-[10px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                            {issue}
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                   ) : (
                                     <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
@@ -1029,17 +1122,25 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     </span>
                                   )
                                 ) : (
-                                  <span
-                                    title={row.errors.join(', ')}
-                                    className="inline-flex items-center gap-1 text-[10px] text-rose-600 dark:text-rose-400 font-bold cursor-help"
-                                  >
-                                    <AlertCircle className="w-3.5 h-3.5" />
-                                    <span>Error</span>
-                                  </span>
+                                  <div className="flex flex-col gap-1 max-w-[220px]">
+                                    <span
+                                      className="inline-flex items-center gap-1 text-[10px] text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded w-fit border border-rose-200 dark:border-rose-800/60"
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5" />
+                                      <span>Error ({row.errors.length})</span>
+                                    </span>
+                                    <div className="space-y-0.5">
+                                      {row.errors.map((err, idx) => (
+                                        <div key={idx} className="text-[10px] text-rose-700 dark:text-rose-300 font-medium leading-tight bg-rose-50/80 dark:bg-rose-950/40 p-1 rounded border border-rose-200 dark:border-rose-800/60 whitespace-normal">
+                                          {err}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
                                 )}
                               </td>
                               <td className="px-3 py-2">
-                                <div className="flex flex-col gap-0.5">
+                                <div className="flex flex-col gap-1 max-w-[180px]">
                                   <select
                                     value={row.assetType}
                                     onChange={(e) => handleUpdateRow(row.id, 'assetType', e.target.value)}
@@ -1057,9 +1158,9 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     ))}
                                   </select>
                                   {isTypeFlagged && (
-                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                      Non-matching Asset Type
-                                    </span>
+                                    <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                      {row.fieldIssues.assetType}
+                                    </div>
                                   )}
                                 </div>
                               </td>
@@ -1095,7 +1196,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                 />
                               </td>
                               <td className="px-3 py-2">
-                                <div className="flex flex-col gap-0.5">
+                                <div className="flex flex-col gap-1 max-w-[240px]">
                                   <select
                                     value={row.department}
                                     onChange={(e) => handleUpdateRow(row.id, 'department', e.target.value)}
@@ -1113,9 +1214,9 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     ))}
                                   </select>
                                   {isDeptFlagged && (
-                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                      Non-matching Department
-                                    </span>
+                                    <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                      {row.fieldIssues.department}
+                                    </div>
                                   )}
                                 </div>
                               </td>
@@ -1138,7 +1239,7 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                 />
                               </td>
                               <td className="px-3 py-2">
-                                <div className="flex flex-col gap-0.5">
+                                <div className="flex flex-col gap-1 max-w-[140px]">
                                   <select
                                     value={row.condition}
                                     onChange={(e) => handleUpdateRow(row.id, 'condition', e.target.value)}
@@ -1156,14 +1257,14 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     ))}
                                   </select>
                                   {isCondFlagged && (
-                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                      Non-matching Condition
-                                    </span>
+                                    <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                      {row.fieldIssues.condition}
+                                    </div>
                                   )}
                                 </div>
                               </td>
                               <td className="px-3 py-2">
-                                <div className="flex flex-col gap-0.5">
+                                <div className="flex flex-col gap-1 max-w-[140px]">
                                   <select
                                     value={row.status}
                                     onChange={(e) => handleUpdateRow(row.id, 'status', e.target.value)}
@@ -1181,9 +1282,9 @@ export const AssetBulkUploadModal: React.FC<AssetBulkUploadModalProps> = ({
                                     ))}
                                   </select>
                                   {isStatFlagged && (
-                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                      Non-matching Status
-                                    </span>
+                                    <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                      {row.fieldIssues.status}
+                                    </div>
                                   )}
                                 </div>
                               </td>

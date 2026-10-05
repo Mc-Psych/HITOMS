@@ -830,6 +830,8 @@ export interface SystemSettings {
   customAssetTypes?: string[]; // Configurable asset types managed by Super Admin and IT
   customAssetConditions?: string[]; // Configurable conditions managed by Super Admin and IT
   assetTagPrefix?: string; // Configurable asset tag prefix managed by Super Admin (e.g. "AST-SMTCHIT-")
+  assetLabelHeader?: string; // Configurable physical QR asset label header (default: "SMTCH ITSUPPORT UNIT")
+  assetLabelFooter?: string; // Configurable physical QR asset label footer warning (default: "PROPERTY OF SMTCH • DO NOT REMOVE")
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
 }

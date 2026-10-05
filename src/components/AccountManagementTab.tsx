@@ -1208,8 +1208,8 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                       {/* Department & Title */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium text-slate-800 dark:text-slate-200">
-                            {user.department || 'General Staff'}
+                          <span className={`font-medium ${user.department ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500 italic'}`}>
+                            {user.department || 'Unassigned'}
                           </span>
                           {user.departments && user.departments.length > 1 && (
                             <span
@@ -1557,6 +1557,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
         isOpen={isBulkUploadModalOpen}
         onClose={() => setIsBulkUploadModalOpen(false)}
         currentUser={currentUser}
+        existingUsers={allUsers}
         onUploadComplete={() => {
           setIsBulkUploadModalOpen(false);
           onRefresh();

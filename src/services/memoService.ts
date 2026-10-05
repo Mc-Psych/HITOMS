@@ -13,8 +13,11 @@ import {
   deleteFromStore,
   clearStore,
   generateUUID,
+  recordTombstone,
+  isTombstoned,
 } from './localDatabaseService';
 import { auditService } from './auditService';
+import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
 
 class MemoService {
   /**
@@ -23,12 +26,23 @@ class MemoService {
   async getMemos(): Promise<HospitalMemo[]> {
     try {
       let items = await getAllFromStore<HospitalMemo>('memos');
+      const settings = await getAllFromStore<any>('settings');
+      const purgedSettingIds = new Set(
+        settings.filter((s) => s.id && typeof s.id === 'string' && s.id.startsWith('memo_purged_')).map((s) => s.id.replace('memo_purged_', ''))
+      );
       
-      // Actively remove all sample/seeded memos from previous setups
+      // Actively remove all sample/seeded memos from previous setups or tombstoned memos
       let cleaned = false;
       const remainingItems = [];
       for (const item of items) {
-        if (item.id.startsWith('memo-00') || item.memoNumber.startsWith('MEMO-2026-00')) {
+        const isPurged =
+          isTombstoned('memos', item.id) ||
+          purgedSettingIds.has(item.id) ||
+          (typeof localStorage !== 'undefined' && localStorage.getItem(`HITOMS_MEMO_PURGED_${item.id}`) === 'true') ||
+          item.id.startsWith('memo-00') ||
+          item.memoNumber.startsWith('MEMO-2026-00');
+
+        if (isPurged) {
           await deleteFromStore('memos', item.id);
           cleaned = true;
         } else {
@@ -39,12 +53,15 @@ class MemoService {
         items = remainingItems;
       }
 
-      const settings = await getAllFromStore<any>('settings');
-      const isSeeded = settings.some((s) => s.id === 'memos_initialized') || localStorage.getItem('HITOMS_MEMOS_INITIALIZED') === 'true';
+      const isSeeded =
+        settings.some((s) => s.id === 'memos_initialized') ||
+        (typeof localStorage !== 'undefined' && localStorage.getItem('HITOMS_MEMOS_INITIALIZED') === 'true');
 
       if ((!items || items.length === 0) && !isSeeded) {
         await putToStore('settings', { id: 'memos_initialized', isInitialized: true });
-        localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+        }
         return await this.seedInitialMemos();
       }
       return (items || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -105,7 +122,22 @@ class MemoService {
    */
   async deleteMemo(id: string, currentUser?: User | null): Promise<void> {
     const existing = await this.getMemoById(id);
+    recordTombstone('memos', id);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`HITOMS_MEMO_PURGED_${id}`, 'true');
+      localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+    }
+    await putToStore('settings', { id: `memo_purged_${id}`, memoId: id, purgedAt: new Date().toISOString() });
+    await putToStore('settings', { id: 'memos_initialized', isInitialized: true, lastDeletedAt: new Date().toISOString() });
     await deleteFromStore('memos', id);
+
+    // Direct Firestore removal
+    try {
+      if (isFirebaseConfigured() && firebaseClients.firestore) {
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        await deleteDoc(doc(firebaseClients.firestore, 'memos', id)).catch(() => {});
+      }
+    } catch (e) {}
 
     try {
       const { syncService } = await import('./syncService');
@@ -134,11 +166,23 @@ class MemoService {
     }
     const items = await getAllFromStore<HospitalMemo>('memos');
     for (const item of items) {
+      recordTombstone('memos', item.id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`HITOMS_MEMO_PURGED_${item.id}`, 'true');
+      }
       await deleteFromStore('memos', item.id);
+      try {
+        if (isFirebaseConfigured() && firebaseClients.firestore) {
+          const { doc, deleteDoc } = await import('firebase/firestore');
+          await deleteDoc(doc(firebaseClients.firestore, 'memos', item.id)).catch(() => {});
+        }
+      } catch (e) {}
     }
     await clearStore('memos');
     await putToStore('settings', { id: 'memos_initialized', isInitialized: true, clearedAt: new Date().toISOString() });
-    localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('HITOMS_MEMOS_INITIALIZED', 'true');
+    }
 
     if (currentUser) {
       await auditService.logAction(

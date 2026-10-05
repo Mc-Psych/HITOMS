@@ -26,6 +26,7 @@ import { type EmergencyBroadcastAlert, type User, type Asset, type SystemSetting
 import { emergencyService, type QuickTriggerPreset, DEFAULT_QUICK_TRIGGERS } from '../services/emergencyService';
 import { authService } from '../services/authService';
 import { settingsService } from '../services/settingsService';
+import { departmentService } from '../services/departmentService';
 import { EditQuickTriggerModal } from './EditQuickTriggerModal';
 
 interface EmergencyProtocolCenterModalProps {
@@ -59,6 +60,7 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
     systemSettings?.emergencyBroadcastSpeedSeconds || 22
   );
   const [speedSavedSuccess, setSpeedSavedSuccess] = useState(false);
+  const [departmentsList, setDepartmentsList] = useState<string[]>([]);
 
   const isSuperAdminOrIT = authService.isSuperAdminOrIT(currentUser);
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
@@ -71,6 +73,9 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
   useEffect(() => {
     if (isOpen) {
       loadQuickTriggers();
+      departmentService.getStandardDepartmentNames().then((names) => {
+        setDepartmentsList(names || []);
+      }).catch(() => {});
       if (systemSettings?.emergencyBroadcastSpeedSeconds) {
         setBroadcastSpeed(systemSettings.emergencyBroadcastSpeedSeconds);
       }
@@ -560,14 +565,17 @@ export const EmergencyProtocolCenterModal: React.FC<EmergencyProtocolCenterModal
                     <select
                       value={targetUnit}
                       onChange={(e) => setTargetUnit(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:border-amber-500"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:border-amber-500 cursor-pointer"
                     >
                       <option value="ALL">All Hospital Wards & Units</option>
-                      <option value="ICU">Intensive Care Unit (ICU)</option>
-                      <option value="ER">Emergency Room (ER)</option>
-                      <option value="Radiology">Radiology & Imaging</option>
-                      <option value="Operating Theater">Operating Theaters (OT)</option>
-                      <option value="Pharmacy">Hospital Pharmacy</option>
+                      {departmentsList.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                      {targetUnit && targetUnit !== 'ALL' && !departmentsList.includes(targetUnit) && (
+                        <option value={targetUnit}>{targetUnit}</option>
+                      )}
                     </select>
                   </div>
                 </div>

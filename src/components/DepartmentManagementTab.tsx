@@ -474,16 +474,25 @@ export const DepartmentManagementTab: React.FC<DepartmentManagementTabProps> = (
           <div className="p-12 text-center space-y-2">
             <Building2 className="w-10 h-10 text-slate-300 dark:text-slate-700 mx-auto" />
             <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-              No hospital departments found matching your criteria.
+              No hospital departments added yet. You can upload your departments via CSV/Excel or create them manually.
             </p>
-            {isSuperAdmin && (
-              <button
-                type="button"
-                onClick={openAddModal}
-                className="mt-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition cursor-pointer"
-              >
-                + Add First Department
-              </button>
+            {canManageDepartments && (
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkUploadModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-2xs"
+                >
+                  Bulk Upload Departments
+                </button>
+                <button
+                  type="button"
+                  onClick={openAddModal}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-2xs"
+                >
+                  + Add Department
+                </button>
+              </div>
             )}
           </div>
         ) : (

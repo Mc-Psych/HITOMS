@@ -704,14 +704,6 @@ class AuthService {
     let skippedCount = 0;
     const generatedAccounts: Array<{ fullName: string; username: string; defaultPassword: string; role: Role; department: string }> = [];
 
-    // Ensure all departments in bulk staff list exist in departmentService
-    const distinctDepts = Array.from(new Set(staffList.map((s) => (s.department ? String(s.department).trim() : '')).filter(Boolean)));
-    try {
-      await departmentService.ensureDepartmentsExist(distinctDepts as string[], actor);
-    } catch (e) {
-      console.warn('[authService] Error auto-registering departments during bulk upload:', e);
-    }
-
     for (const item of staffList) {
       if (!item.fullName || !String(item.fullName).trim()) {
         skippedCount++;
@@ -743,7 +735,7 @@ class AuthService {
         email = `${username}@hospital.local`;
       }
 
-      const dept = (item.department ? String(item.department).trim() : '') || 'OPD (Outpatient Department)';
+      const dept = (item.department ? String(item.department).trim() : '');
 
       const newUser: User = {
         id: 'usr-' + generateUUID().substring(0, 8),
@@ -752,7 +744,7 @@ class AuthService {
         email,
         phone: (item.phone ? String(item.phone).trim() : '') || '+233 24 000 0000',
         department: dept,
-        departments: [dept],
+        departments: dept ? [dept] : [],
         jobTitle: (item.jobTitle ? String(item.jobTitle).trim() : '') || 'Hospital Staff',
         role: item.role || 'STAFF_USER',
         status: 'Active',
@@ -880,16 +872,9 @@ class AuthService {
     // Process departments (tied by checkboxes)
     const rawDepts = userData.departments && userData.departments.length > 0
       ? userData.departments
-      : (userData.department ? [userData.department] : ['OPD (Outpatient Department)']);
+      : (userData.department ? [userData.department] : []);
     const cleanDepts = Array.from(new Set(rawDepts.map((d) => (d || '').trim()).filter(Boolean)));
-    const primaryDept = (userData.department || '').trim() || cleanDepts[0] || 'OPD (Outpatient Department)';
-
-    // Ensure all tied departments exist as STANDARD_DEPARTMENTS
-    try {
-      await departmentService.ensureDepartmentsExist(cleanDepts, actor);
-    } catch (e) {
-      console.warn('[authService] Error auto-registering departments during user creation:', e);
-    }
+    const primaryDept = (userData.department || '').trim() || cleanDepts[0] || '';
 
     const newUser: User = {
       id: userData.id || 'usr-' + generateUUID().substring(0, 8),
@@ -958,13 +943,7 @@ class AuthService {
     const oldSnapshot = `${user.fullName} (${user.role}, ${user.department}, ${user.status})`;
     const now = new Date().toISOString();
 
-    // Auto-register any new department in updates
     if (updates.departments && updates.departments.length > 0) {
-      try {
-        await departmentService.ensureDepartmentsExist(updates.departments, actor);
-      } catch (e) {
-        console.warn('[authService] Error auto-registering departments during user update:', e);
-      }
       user.departments = Array.from(new Set(updates.departments.map((d) => (d || '').trim()).filter(Boolean)));
       if (updates.department === undefined) {
         user.department = user.departments[0] || user.department;
@@ -981,13 +960,6 @@ class AuthService {
       user.department = cleanDept;
       if (cleanDept && (!user.departments || !user.departments.includes(cleanDept))) {
         user.departments = Array.from(new Set([...(user.departments || []), cleanDept]));
-      }
-      if (cleanDept) {
-        try {
-          await departmentService.ensureDepartmentExists(cleanDept, actor);
-        } catch (e) {
-          console.warn('[authService] Error ensuring department exists during user update:', e);
-        }
       }
     }
     if (updates.jobTitle !== undefined) user.jobTitle = (updates.jobTitle || '').trim();

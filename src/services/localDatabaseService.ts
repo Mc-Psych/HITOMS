@@ -127,6 +127,8 @@ export function isTombstone(storeName: string, id: string, remoteUpdatedAt?: str
   }
 }
 
+export const isTombstoned = isTombstone;
+
 export function clearTombstone(storeName: string, id: string): void {
   try {
     const raw = localStorage.getItem('hitoms_tombstones');
@@ -350,9 +352,6 @@ export async function putToStore<T extends { id?: string; operationId?: string; 
             value
           ).catch((e) => console.warn('[localDatabaseService] Async sync failed:', e));
         });
-        import('./seedSnapshotService').then(({ seedSnapshotService }) => {
-          seedSnapshotService.triggerAutoSnapshot();
-        });
       }
       resolve(value);
     };
@@ -397,9 +396,6 @@ export async function putBatchToStore<T extends { id?: string; operationId?: str
               ).catch((e) => console.warn('[localDatabaseService] Batch async sync failed:', e));
             }
           }
-        });
-        import('./seedSnapshotService').then(({ seedSnapshotService }) => {
-          seedSnapshotService.triggerAutoSnapshot();
         });
       }
       resolve();
@@ -446,9 +442,6 @@ export async function deleteFromStore(storeName: StoreName, key: string): Promis
             'DELETE',
             { id: key }
           ).catch((e) => console.warn('[localDatabaseService] Sync delete failed:', e));
-        });
-        import('./seedSnapshotService').then(({ seedSnapshotService }) => {
-          seedSnapshotService.triggerAutoSnapshot();
         });
       }
       resolve();

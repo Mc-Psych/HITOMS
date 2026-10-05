@@ -164,10 +164,14 @@ class SyncService {
     return () => this.listeners.delete(listener);
   }
 
+  private lastNotifiedKey: string = '';
   private notify() {
+    const key = `${this.stats.connectionState}_${this.stats.pendingCount}_${this.stats.failedCount}_${this.stats.conflictsCount}_${this.stats.simulatedOffline}_${this.stats.lastError || ''}`;
+    if (key === this.lastNotifiedKey) return;
+    this.lastNotifiedKey = key;
     for (const l of this.listeners) {
       try {
-        l(this.stats);
+        l({ ...this.stats });
       } catch (err) {
         console.warn('[SyncService] Error notifying listener:', err);
       }
@@ -203,6 +207,8 @@ class SyncService {
       this.stats.connectionState = 'OFFLINE';
     } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.stats.connectionState = 'OFFLINE';
+    } else if (this.quotaExceeded || !isFirebaseConfigured()) {
+      this.stats.connectionState = 'OFFLINE';
     } else if (this.isSyncRunning) {
       this.stats.connectionState = 'SYNCING';
     } else if (this.stats.failedCount > 0) {
@@ -229,7 +235,7 @@ class SyncService {
 
       if (this.isSyncRunning) {
         this.stats.connectionState = 'SYNCING';
-      } else if (this.simulatedOffline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      } else if (this.simulatedOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || this.quotaExceeded || !isFirebaseConfigured()) {
         this.stats.connectionState = 'OFFLINE';
       } else if (failed > 0) {
         this.stats.connectionState = 'SYNC_ERROR';
@@ -295,6 +301,17 @@ class SyncService {
         const id = document.id;
         remoteDocIds.add(id);
 
+        const isDeptPurged =
+          storeName === 'departments' &&
+          typeof localStorage !== 'undefined' &&
+          localStorage.getItem('hitoms_departments_purged_requested_v4') === 'true';
+
+        if (isDeptPurged) {
+          // Department purge active: delete remote document from Firestore and skip local saving
+          deleteDoc(doc(firebaseClients.firestore, collectionName, id)).catch(() => {});
+          continue;
+        }
+
         // Check if item has a pending local DELETE mutation or tombstone
         const hasPendingDelete = queue.some(
           (q) => q.entityType === storeName && q.entityId === id && q.operation === 'DELETE'
@@ -356,10 +373,17 @@ class SyncService {
 
       // If local store has items that Firestore doesn't have, upload them to Firestore so both are in sync!
       if (!this.quotaExceeded && firebaseClients.firestore) {
+        const isDeptPurged =
+          storeName === 'departments' &&
+          typeof localStorage !== 'undefined' &&
+          localStorage.getItem('hitoms_departments_purged_requested_v4') === 'true';
+
         const localItems = await getAllFromStore<any>(storeName);
-        const missingOnRemote = localItems.filter(
-          (item) => item && item.id && !remoteDocIds.has(item.id) && !isTombstone(storeName, item.id)
-        );
+        const missingOnRemote = isDeptPurged
+          ? []
+          : localItems.filter(
+              (item) => item && item.id && !remoteDocIds.has(item.id) && !isTombstone(storeName, item.id)
+            );
 
         if (missingOnRemote.length > 0) {
           for (let i = 0; i < missingOnRemote.length; i += 200) {

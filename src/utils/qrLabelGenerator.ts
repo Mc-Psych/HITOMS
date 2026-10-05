@@ -1,5 +1,6 @@
 import QRCode from 'qrcode';
 import { type Asset } from '../types';
+import { settingsService } from '../services/settingsService';
 
 export interface QrLabelRenderOptions {
   hospitalName?: string;
@@ -28,14 +29,20 @@ export interface QrLabelRenderOptions {
  */
 export function generateAssetQrMetadataPayload(
   asset: Partial<Asset>,
-  hospitalNameOrOptions: string | QrLabelRenderOptions = 'SMTCH ITSUPPORT UNIT'
+  hospitalNameOrOptions?: string | QrLabelRenderOptions
 ): string {
   const options: QrLabelRenderOptions =
     typeof hospitalNameOrOptions === 'string'
       ? { hospitalName: hospitalNameOrOptions }
       : hospitalNameOrOptions || {};
 
-  const hospital = options.customHospitalHeader || options.hospitalName || 'SMTCH ITSUPPORT UNIT';
+  const sysSettings = settingsService.getSettingsSync();
+  const defaultHeader =
+    sysSettings?.assetLabelHeader || sysSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
+  const defaultFooter =
+    sysSettings?.assetLabelFooter || 'PROPERTY OF SMTCH • DO NOT REMOVE';
+
+  const hospital = options.customHospitalHeader || options.hospitalName || defaultHeader;
   const tag = options.customAssetTag || asset.assetTag || 'N/A';
   const assetName =
     options.customModelText ||
@@ -48,7 +55,7 @@ export function generateAssetQrMetadataPayload(
     `${asset.department || 'IT Unit'}${asset.location ? ` - ${asset.location}` : ''}`;
   const custodian = options.customCustodian || asset.assignedUser || '';
   const typeText = options.customAssetType || asset.assetType || '';
-  const footer = options.customFooterNotice || 'PROPERTY OF SMTCH • DO NOT REMOVE';
+  const footer = options.customFooterNotice || defaultFooter;
 
   const lines: string[] = [
     `🏥 ${hospital}`,
@@ -125,8 +132,14 @@ export async function renderAssetLabelCanvas(
   asset: Asset,
   options: QrLabelRenderOptions = {}
 ): Promise<HTMLCanvasElement> {
+  const sysSettings = settingsService.getSettingsSync();
+  const defaultHeader =
+    sysSettings?.assetLabelHeader || sysSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
+  const defaultFooter =
+    sysSettings?.assetLabelFooter || 'PROPERTY OF SMTCH • DO NOT REMOVE';
+
   const {
-    hospitalName = 'REGIONAL HOSPITAL IT UNIT',
+    hospitalName = defaultHeader,
     labelSize = 'standard',
     includeHospitalHeader = true,
     includeSerial = true,
@@ -145,7 +158,7 @@ export async function renderAssetLabelCanvas(
     customFooterNotice,
   } = options;
 
-  const activeHospitalName = customHospitalHeader || hospitalName || 'SMTCH ITSUPPORT UNIT';
+  const activeHospitalName = customHospitalHeader || hospitalName || defaultHeader;
   const activeBadgeText = customBadgeText || 'IT ASSET';
   const activeTag = customAssetTag || asset.assetTag || 'TAG-0000';
   const activeModel =
@@ -161,7 +174,7 @@ export async function renderAssetLabelCanvas(
   const activeCustodian =
     customCustodian !== undefined ? customCustodian : asset.assignedUser;
   const activeFooter =
-    customFooterNotice || 'PROPERTY OF SMTCH • DO NOT REMOVE';
+    customFooterNotice || defaultFooter;
 
   // Set card dimensions matching the exact print preview aspect ratios
   // Standard: 320 x 176 (approx 3" x 2" label)
@@ -412,10 +425,13 @@ export async function downloadAssetQrJpeg(
   asset: Asset,
   optionsOrHospitalName?: string | QrLabelRenderOptions
 ): Promise<void> {
+  const sysSettings = settingsService.getSettingsSync();
+  const defaultHeader =
+    sysSettings?.assetLabelHeader || sysSettings?.hospitalName || 'St. Mary Theresa Catholic Hospital';
   const options: QrLabelRenderOptions =
     typeof optionsOrHospitalName === 'string'
       ? { hospitalName: optionsOrHospitalName }
-      : optionsOrHospitalName || {};
+      : optionsOrHospitalName || { hospitalName: defaultHeader };
 
   const dataUrl = await renderAssetQrJpegDataUrl(asset, options);
   const tag = options.customAssetTag || asset.assetTag || 'ASSET';

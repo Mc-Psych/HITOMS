@@ -927,6 +927,36 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   />
                   <p className="mt-1 text-[10px] text-slate-400">Emergency 24/7 hotline extension</p>
                 </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">
+                    QR Asset Label Header (Top Banner) *
+                  </label>
+                  <input
+                    type="text"
+                    disabled={!canManageFacility}
+                    value={settings.assetLabelHeader ?? ''}
+                    onChange={(e) => setSettings({ ...settings, assetLabelHeader: e.target.value })}
+                    placeholder="e.g. St. Mary Theresa Catholic Hospital"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 font-bold uppercase"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">Printed on the top banner of all hardware QR code physical labels</p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1">
+                    QR Asset Label Footer Security Warning *
+                  </label>
+                  <input
+                    type="text"
+                    disabled={!canManageFacility}
+                    value={settings.assetLabelFooter ?? ''}
+                    onChange={(e) => setSettings({ ...settings, assetLabelFooter: e.target.value })}
+                    placeholder="e.g. PROPERTY OF SMTCH • DO NOT REMOVE"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-sky-500 font-semibold uppercase"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">Printed at the bottom of all hardware QR code physical labels</p>
+                </div>
               </div>
 
               {/* Form Actions */}

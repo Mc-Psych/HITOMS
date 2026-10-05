@@ -81,15 +81,26 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   // Loaded departments
   const [departmentsList, setDepartmentsList] = useState<Department[]>([]);
 
-  useEffect(() => {
+  const fetchLatestDepartments = () => {
     departmentService
       .getDepartments()
       .then((depts) => {
-        if (depts && depts.length > 0) {
-          setDepartmentsList(depts);
-        }
+        setDepartmentsList(depts || []);
       })
       .catch(console.error);
+  };
+
+  useEffect(() => {
+    fetchLatestDepartments();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hitoms_departments_updated', fetchLatestDepartments);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('hitoms_departments_updated', fetchLatestDepartments);
+      }
+    };
   }, []);
 
   const allDepartmentNames = useMemo(() => {
@@ -97,19 +108,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     const fromAssets = assets.map((a) => a.department).filter(Boolean);
     const combined = Array.from(new Set([...fromDepts, ...fromAssets]));
     if (combined.length === 0) {
-      return [
-        'Accident & Emergency (A&E)',
-        'Pharmacy',
-        'Laboratory & Pathology',
-        'Radiology & Imaging',
-        'Intensive Care Unit (ICU)',
-        'Outpatient Department (OPD)',
-        'Maternity & Neonatal Ward',
-        'Main Surgical Theatre',
-        'IT & Telecommunications',
-        'Hospital Administration & HR',
-        'Accounts & Billing',
-      ];
+      return [];
     }
     return combined.sort();
   }, [departmentsList, assets]);
@@ -142,6 +141,9 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
   const [assetTypesList, setAssetTypesList] = useState<string[]>(() => {
     const defaultTypes = [
       'Desktop',
+      'System Unit',
+      'Monitor',
+      'Monitor / Display',
       'Laptop',
       'Workstation',
       'Server',
@@ -154,6 +156,10 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
       'Barcode Scanner',
       'Scanner',
       'Tablet',
+      'Projector',
+      'Webcam',
+      'IP Phone',
+      'CCTV Camera',
       'Network Cable',
       'Mouse',
       'Keyboard',
@@ -238,13 +244,11 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
     window.addEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
     window.addEventListener('hitoms_assets_updated', handleAssetsOrSettingsUpdated);
     window.addEventListener('hitoms_settings_updated', handleAssetsOrSettingsUpdated);
-    window.addEventListener('hitoms_data_synced', handleAssetsOrSettingsUpdated);
 
     return () => {
       window.removeEventListener('hitoms_custom_asset_types_updated', handleTypesUpdated);
       window.removeEventListener('hitoms_assets_updated', handleAssetsOrSettingsUpdated);
       window.removeEventListener('hitoms_settings_updated', handleAssetsOrSettingsUpdated);
-      window.removeEventListener('hitoms_data_synced', handleAssetsOrSettingsUpdated);
     };
   }, [onRefresh]);
 
@@ -1427,7 +1431,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                             title="Download scannable QR Code as JPEG image with Name, Serial Number, and Department details rendered below"
                             onClick={async (e) => {
                               e.stopPropagation();
-                              await downloadAssetQrJpeg(asset);
+                              await downloadAssetQrJpeg(asset, systemSettings?.assetLabelHeader || systemSettings?.hospitalName);
                             }}
                             className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold transition cursor-pointer"
                           >
@@ -1518,7 +1522,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
                   <button
                     type="button"
                     onClick={async () => {
-                      if (selectedAsset) await downloadAssetQrJpeg(selectedAsset);
+                      if (selectedAsset) await downloadAssetQrJpeg(selectedAsset, systemSettings?.assetLabelHeader || systemSettings?.hospitalName);
                     }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer shadow-sm transition"
                     title="Download QR code as JPEG image with Name, Serial Number, and Assigned Department rendered below the QR code image"
@@ -2554,7 +2558,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
           isOpen={true}
           onClose={() => setQrLabelAsset(null)}
           asset={qrLabelAsset}
-          hospitalName={systemSettings?.hospitalName || 'GENERAL HOSPITAL IT UNIT'}
+          hospitalName={systemSettings?.assetLabelHeader || systemSettings?.hospitalName}
         />
       )}
 
@@ -2569,7 +2573,7 @@ export const AssetsView: React.FC<AssetsViewProps> = ({
               ? assets.filter((a) => selectedAssetIds.has(a.id))
               : filteredAssets
           }
-          hospitalName={systemSettings?.hospitalName || 'GENERAL HOSPITAL IT UNIT'}
+          hospitalName={systemSettings?.assetLabelHeader || systemSettings?.hospitalName}
         />
       )}
 

@@ -26,6 +26,10 @@ import {
 import { departmentService } from '../services/departmentService';
 import { downloadTextFile } from '../utils/fileDownloader';
 import { matchOptionWithFallback } from '../utils/fuzzyMatcher';
+import {
+  downloadStaffTemplateExcel,
+  getActiveHospitalName,
+} from '../utils/templateGenerator';
 
 const VALID_ROLES: Role[] = [
   'SUPER_ADMIN',
@@ -54,7 +58,9 @@ export interface ParsedStaffRecord {
   username: string;
   defaultPassword: string;
   department: string;
+  rawDepartment?: string;
   role: Role;
+  rawRole?: string;
   jobTitle?: string;
   phone?: string;
   email?: string;
@@ -235,6 +241,13 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
   if (!isOpen) return null;
 
+  const hospitalName = getActiveHospitalName();
+
+  // Download Sample Template Excel (.xlsx)
+  const handleDownloadExcelTemplate = () => {
+    downloadStaffTemplateExcel(hospitalName, validDepartments, activeUserList);
+  };
+
   // Download Sample Template CSV
   const handleDownloadTemplate = (withSamples: boolean = true) => {
     downloadStaffTemplate(withSamples, activeUserList);
@@ -259,8 +272,8 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     });
   };
 
-  // Parse raw text into structured staff records
-  const parseRawText = (rawText: string, autoSubmit: boolean = false) => {
+  // Parse raw text into structured staff records (Never auto-submits)
+  const parseRawText = (rawText: string) => {
     setErrorMessage(null);
     setHasAcceptedFlaggedMappings(false);
     const lines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -278,28 +291,28 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
       phone: number;
       email: number;
     } | null = null;
+    let headerRowIndex = -1;
 
-    const firstLineLower = lines[0].toLowerCase();
-    const hasHeader =
-      firstLineLower.includes('fullname') ||
-      firstLineLower.includes('full name') ||
-      firstLineLower.includes('name,') ||
-      firstLineLower.includes('department');
-
-    let startIndex = 0;
-
-    if (hasHeader) {
-      startIndex = 1;
-      const headerCols = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/[\s_-]+/g, ''));
-      headerIndices = {
-        fullName: headerCols.findIndex((h) => h.includes('name')),
-        department: headerCols.findIndex((h) => h.includes('dept') || h.includes('department') || h.includes('unit')),
-        role: headerCols.findIndex((h) => h.includes('role') || h.includes('access')),
-        jobTitle: headerCols.findIndex((h) => h.includes('title') || h.includes('designation') || h.includes('position')),
-        phone: headerCols.findIndex((h) => h.includes('phone') || h.includes('contact') || h.includes('mobile') || h.includes('tel')),
-        email: headerCols.findIndex((h) => h.includes('email') || h.includes('mail')),
-      };
+    // Dynamic Header Detection: Scan up to 12 rows for row containing standard staff column headers
+    for (let r = 0; r < Math.min(lines.length, 12); r++) {
+      const headerCols = parseCsvLine(lines[r]).map((h) => h.toLowerCase().replace(/[\s_-]+/g, ''));
+      const hasName = headerCols.some((h) => h.includes('fullname') || h.includes('name') || h === 'staff');
+      const hasDeptOrRole = headerCols.some((h) => h.includes('dept') || h.includes('department') || h.includes('role'));
+      if (hasName || hasDeptOrRole) {
+        headerRowIndex = r;
+        headerIndices = {
+          fullName: headerCols.findIndex((h) => h.includes('name') || h === 'staff'),
+          department: headerCols.findIndex((h) => h.includes('dept') || h.includes('department') || h.includes('unit')),
+          role: headerCols.findIndex((h) => h.includes('role') || h.includes('access') || h.includes('privilege')),
+          jobTitle: headerCols.findIndex((h) => h.includes('title') || h.includes('designation') || h.includes('position')),
+          phone: headerCols.findIndex((h) => h.includes('phone') || h.includes('contact') || h.includes('mobile') || h.includes('tel')),
+          email: headerCols.findIndex((h) => h.includes('email') || h.includes('mail')),
+        };
+        break;
+      }
     }
+
+    const startIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
 
     const records: ParsedStaffRecord[] = [];
     const existingNameSet = new Set(
@@ -362,19 +375,20 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
 
       const cleanFullName = (fullName || '').trim();
       const rawDept = (department || validDepartments[0] || 'OPD (Outpatient Department)').trim();
+      const rawRole = (roleRaw || '').trim();
       const cleanJobTitle = (jobTitle || '').trim();
       const cleanPhone = (phone || '').trim();
       let cleanEmail = (email || '').trim();
 
       // Pre-populated Fuzzy Value Matching for Department and Role
       const deptMatch = matchOptionWithFallback(rawDept, validDepartments, validDepartments[0] || 'OPD (Outpatient Department)', 'Department');
-      const roleMatch = matchOptionWithFallback(roleRaw, VALID_ROLES, 'STAFF_USER', 'Role');
+      const roleMatch = matchOptionWithFallback(rawRole, VALID_ROLES, 'STAFF_USER', 'Role');
 
       if (!deptMatch.isExactMatch && rawDept) {
         flaggedIssues.push(deptMatch.issueDescription!);
         warnings.push(deptMatch.issueDescription!);
       }
-      if (!roleMatch.isExactMatch && roleRaw.trim()) {
+      if (!roleMatch.isExactMatch && rawRole) {
         flaggedIssues.push(roleMatch.issueDescription!);
         warnings.push(roleMatch.issueDescription!);
       }
@@ -418,7 +432,9 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         username,
         defaultPassword,
         department: deptMatch.matchedValue,
+        rawDepartment: rawDept,
         role,
+        rawRole,
         jobTitle: cleanJobTitle || 'Hospital Staff',
         phone: cleanPhone || '+233 24 000 0000',
         email: cleanEmail,
@@ -500,7 +516,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
           const worksheet = workbook.Sheets[firstSheetName];
           const csvText = XLSX.utils.sheet_to_csv(worksheet);
           setManualInputText(csvText);
-          parseRawText(csvText, true);
+          parseRawText(csvText);
         } catch (err) {
           setErrorMessage('Failed to read Excel workbook. Please ensure it is a valid .xlsx or .xls file.');
         }
@@ -512,7 +528,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
         const text = event.target?.result as string;
         if (text) {
           setManualInputText(text);
-          parseRawText(text, true);
+          parseRawText(text);
         }
       };
       reader.onerror = () => {
@@ -550,6 +566,20 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     parseRawText(sampleText);
   };
 
+  // Remove a single row
+  const handleRemoveRow = (id: string) => {
+    setParsedRecords((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  // Delete all flagged or invalid rows
+  const handleDeleteFlaggedRows = () => {
+    setParsedRecords((prev) =>
+      prev.filter(
+        (r) => r.isValid && (!r.flaggedIssues || r.flaggedIssues.length === 0)
+      )
+    );
+  };
+
   // Clear loaded data
   const handleClear = () => {
     setManualInputText('');
@@ -580,12 +610,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
     setErrorMessage(null);
 
     try {
-      // Ensure all unique departments present in staff upload exist in system database & Firestore
-      const uniqueDepts: string[] = Array.from(new Set(validRecords.map((r) => r.department.trim()).filter(Boolean)));
-      if (uniqueDepts.length > 0) {
-        await departmentService.ensureDepartmentsExist(uniqueDepts, currentUser);
-      }
-
+      // Unassigned/uploaded department handling without auto-creating department records
       const staffList = validRecords.map((r) => ({
         fullName: r.fullName,
         department: r.department,
@@ -686,22 +711,22 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => handleDownloadTemplate(true)}
+                  onClick={handleDownloadExcelTemplate}
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                  title="Download template pre-populated with realistic hospital staff rows"
+                  title="Download styled Excel (.xlsx) template with Hospital header and roles reference guide"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download Sample Template (.csv)</span>
+                  <span>Download Excel (.xlsx)</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadTemplate(false)}
+                  onClick={() => handleDownloadTemplate(true)}
                   className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 text-slate-700 dark:text-slate-200 font-semibold text-xs shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                  title="Download clean headers-only template ready for data entry"
+                  title="Download CSV template pre-populated with realistic hospital staff rows"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Blank Template (.csv)</span>
+                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>CSV Template</span>
                 </button>
 
                 <button
@@ -914,14 +939,27 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="text-slate-400 hover:text-rose-600 text-[11px] font-medium flex items-center gap-1 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Clear All</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {(invalidCount > 0 || parsedRecords.some((r) => r.flaggedIssues.length > 0)) && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteFlaggedRows}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold transition cursor-pointer shadow-3xs"
+                      title="Remove all flagged or invalid rows before provisioning"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Flagged / Errors ({invalidCount + parsedRecords.filter((r) => r.flaggedIssues.length > 0).length})</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="text-slate-400 hover:text-rose-600 text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All</span>
+                  </button>
+                </div>
               </div>
 
               {/* Flagged Values & Mappings Banner */}
@@ -960,6 +998,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                       <th className="p-2.5 min-w-[220px]">Department *</th>
                       <th className="p-2.5 min-w-[170px]">Role *</th>
                       <th className="p-2.5 min-w-[160px]">Contact</th>
+                      <th className="p-2.5 w-14 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
@@ -977,22 +1016,39 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                           <td className="p-2.5">
                             {rec.isValid ? (
                               rec.flaggedIssues && rec.flaggedIssues.length > 0 ? (
-                                <span
-                                  className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded cursor-help"
-                                  title={rec.flaggedIssues.join('\n')}
-                                >
-                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                                  <span>Flagged</span>
-                                </span>
+                                <div className="flex flex-col gap-1 max-w-[200px]">
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded w-fit"
+                                  >
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Flagged ({rec.flaggedIssues.length})</span>
+                                  </span>
+                                  <div className="space-y-0.5">
+                                    {rec.flaggedIssues.map((issue, idx) => (
+                                      <div key={idx} className="text-[10px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                        {issue}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
                               ) : (
-                                <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400" title="Ready to provision">
-                                  <CheckCircle2 className="w-4 h-4" />
+                                <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400 font-bold text-[10px]" title="Ready to provision">
+                                  <CheckCircle2 className="w-4 h-4 mr-1 inline" /> Ready
                                 </span>
                               )
                             ) : (
-                              <span className="inline-flex items-center text-rose-600 dark:text-rose-400" title={rec.warnings.join(', ')}>
-                                <AlertTriangle className="w-4 h-4" />
-                              </span>
+                              <div className="flex flex-col gap-1 max-w-[200px]">
+                                <span className="inline-flex items-center text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded w-fit border border-rose-200 dark:border-rose-800/60 text-[10px]">
+                                  <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Error
+                                </span>
+                                <div className="space-y-0.5">
+                                  {rec.warnings.map((w, idx) => (
+                                    <div key={idx} className="text-[10px] text-rose-700 dark:text-rose-300 font-medium leading-tight bg-rose-50/80 dark:bg-rose-950/40 p-1 rounded border border-rose-200 dark:border-rose-800/60 whitespace-normal">
+                                      {w}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
                             )}
                           </td>
                           <td className="p-2.5 font-semibold text-slate-900 dark:text-white min-w-[160px]">
@@ -1014,7 +1070,7 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                             {rec.defaultPassword}
                           </td>
                           <td className="p-2.5 min-w-[180px]">
-                            <div className="flex flex-col gap-0.5">
+                            <div className="flex flex-col gap-1 max-w-[220px]">
                               <select
                                 value={rec.department}
                                 onChange={(e) => handleUpdateRow(rec.id, 'department', e.target.value)}
@@ -1032,14 +1088,14 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                                 ))}
                               </select>
                               {isDeptFlagged && (
-                                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                  Non-matching Department
-                                </span>
+                                <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                  {rec.rawDepartment ? `Non-matching: "${rec.rawDepartment}" (Mapped to closest)` : (rec.flaggedIssues.find((f) => f.toLowerCase().includes('department')) || 'Non-matching Department')}
+                                </div>
                               )}
                             </div>
                           </td>
                           <td className="p-2.5 min-w-[150px]">
-                            <div className="flex flex-col gap-0.5">
+                            <div className="flex flex-col gap-1 max-w-[180px]">
                               <select
                                 value={rec.role}
                                 onChange={(e) => handleUpdateRow(rec.id, 'role', e.target.value as Role)}
@@ -1057,15 +1113,25 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                                 ))}
                               </select>
                               {isRoleFlagged && (
-                                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                                  Non-matching Role
-                                </span>
+                                <div className="text-[9px] text-amber-700 dark:text-amber-300 font-medium leading-tight bg-amber-50/80 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800/60 whitespace-normal">
+                                  {rec.rawRole ? `Non-matching: "${rec.rawRole}" (Mapped to closest)` : (rec.flaggedIssues.find((f) => f.toLowerCase().includes('role')) || 'Non-matching Role')}
+                                </div>
                               )}
                             </div>
                           </td>
                           <td className="p-2.5 text-slate-500 dark:text-slate-400 text-[10px]">
                             <div>{rec.phone}</div>
                             <div className="text-slate-400">{rec.email}</div>
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRow(rec.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition cursor-pointer rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                              title="Delete this row from provision list"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );

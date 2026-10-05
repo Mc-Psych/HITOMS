@@ -26,11 +26,14 @@ import { auditService } from '../services/auditService';
 import { syncService } from '../services/syncService';
 import { emergencyService } from '../services/emergencyService';
 
+import { departmentService } from '../services/departmentService';
+
 interface SystemEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   systemToEdit?: HospitalSystem | null;
   currentUser: User | null;
+  allUsers?: User[];
   systemSettings?: SystemSettings | null;
   onSaved: () => void;
 }
@@ -90,6 +93,7 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
   onClose,
   systemToEdit,
   currentUser,
+  allUsers = [],
   systemSettings,
   onSaved,
 }) => {
@@ -97,19 +101,10 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
 
   const [systemName, setSystemName] = useState('');
   const [description, setDescription] = useState('');
-  const [department, setDepartment] = useState('IT Infrastructure');
-  const [owner, setOwner] = useState('IT Operations');
-  const [availableDepartments, setAvailableDepartments] = useState<string[]>([
-    'IT Infrastructure',
-    'Clinical Systems',
-    'Health Information & Records',
-    'Pharmacy',
-    'Finance & Accounts',
-    'Laboratory',
-    'Accident & Emergency',
-    'Administration',
-    'Radiology & PACS',
-  ]);
+  const [department, setDepartment] = useState('');
+  const [owner, setOwner] = useState('');
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
+  const [usersList, setUsersList] = useState<User[]>(allUsers || []);
   const [vendor, setVendor] = useState('');
   const [status, setStatus] = useState<SystemOperationalStatus>('Operational');
   const [criticality, setCriticality] = useState<HospitalSystem['criticality']>('High');
@@ -129,21 +124,50 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load dynamic hospital departments from IndexedDB
-    getAllFromStore<Department>('departments').then((depts) => {
-      if (depts && depts.length > 0) {
-        const names = Array.from(new Set(depts.map((d) => d.name).filter(Boolean)));
-        setAvailableDepartments(names);
+    const loadData = async () => {
+      try {
+        const names = await departmentService.getStandardDepartmentNames();
+        setAvailableDepartments(names || []);
+      } catch {}
+
+      try {
+        if (allUsers && allUsers.length > 0) {
+          setUsersList(allUsers);
+        } else {
+          const users = await getAllFromStore<User>('users');
+          setUsersList(users || []);
+        }
+      } catch {}
+    };
+
+    if (isOpen) {
+      loadData();
+    }
+
+    const handleDeptsUpdated = () => loadData();
+    const handleUsersUpdated = () => loadData();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hitoms_departments_updated', handleDeptsUpdated);
+      window.addEventListener('hitoms_users_synced', handleUsersUpdated);
+      window.addEventListener('hitoms_users_updated', handleUsersUpdated);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('hitoms_departments_updated', handleDeptsUpdated);
+        window.removeEventListener('hitoms_users_synced', handleUsersUpdated);
+        window.removeEventListener('hitoms_users_updated', handleUsersUpdated);
       }
-    }).catch(() => {});
-  }, []);
+    };
+  }, [allUsers, isOpen]);
 
   useEffect(() => {
     if (systemToEdit) {
       setSystemName(systemToEdit.systemName || '');
       setDescription(systemToEdit.description || '');
-      setDepartment(systemToEdit.department || systemToEdit.owner || 'IT Infrastructure');
-      setOwner(systemToEdit.owner || 'IT Operations');
+      setDepartment(systemToEdit.department || systemToEdit.owner || '');
+      setOwner(systemToEdit.owner || '');
       setVendor(systemToEdit.vendor || '');
       setStatus(systemToEdit.status || 'Operational');
       setCriticality(systemToEdit.criticality || 'High');
@@ -162,8 +186,8 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
     } else {
       setSystemName('');
       setDescription('');
-      setDepartment('IT Infrastructure');
-      setOwner('IT Operations');
+      setDepartment('');
+      setOwner('');
       setVendor('');
       setStatus('Operational');
       setCriticality('High');
@@ -436,7 +460,7 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
                 <span>Responsible Department</span>
-                <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">Super Admin / IT</span>
+                <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">Hospital Unit / Directorate</span>
               </label>
               <div className="relative">
                 <select
@@ -444,12 +468,15 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
                   onChange={(e) => setDepartment(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer"
                 >
+                  <option value="">
+                    {availableDepartments.length === 0 ? '-- No Departments Uploaded Yet --' : '-- Select Responsible Department --'}
+                  </option>
                   {availableDepartments.map((d) => (
                     <option key={d} value={d}>
                       {d}
                     </option>
                   ))}
-                  {!availableDepartments.includes(department) && (
+                  {department && !availableDepartments.includes(department) && (
                     <option value={department}>{department}</option>
                   )}
                 </select>
@@ -530,13 +557,21 @@ export const SystemEditModal: React.FC<SystemEditModalProps> = ({
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Managing IT Lead / In-Charge
               </label>
-              <input
-                type="text"
+              <select
                 value={leadAdmin}
                 onChange={(e) => setLeadAdmin(e.target.value)}
-                placeholder="e.g. Emmanuel Boateng (Lead Systems Admin)"
-                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none"
-              />
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer"
+              >
+                <option value="">-- Select Managing IT Lead / In-Charge --</option>
+                {usersList.map((u) => (
+                  <option key={u.id} value={u.fullName}>
+                    {u.fullName} ({u.role ? u.role.replace('_', ' ') : 'Staff'}{u.jobTitle ? ` - ${u.jobTitle}` : ''})
+                  </option>
+                ))}
+                {leadAdmin && !usersList.some((u) => u.fullName === leadAdmin) && (
+                  <option value={leadAdmin}>{leadAdmin}</option>
+                )}
+              </select>
             </div>
 
             <div>

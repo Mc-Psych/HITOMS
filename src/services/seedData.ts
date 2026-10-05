@@ -20,9 +20,11 @@ import {
   putBatchToStore,
   putToStore,
   deleteFromStore,
+  clearStore,
   getDeviceId,
   generateUUID,
   setSkipSyncEnqueue,
+  recordTombstone,
 } from './localDatabaseService';
 import { memoService } from './memoService';
 import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
@@ -256,25 +258,114 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
 
   setSkipSyncEnqueue(true);
   try {
-    if (d) {
-      // 1. Departments: Ensure all departments exist
-      if (d.departments?.length) {
+    // Requested total purge of all departments and user department unassignment
+    const purgeFlag = 'hitoms_departments_purged_requested_v5';
+    if (typeof localStorage !== 'undefined' && !localStorage.getItem(purgeFlag)) {
+      console.log('[SeedData] Executing requested total purge of all departments and unassigning user departments...');
+      try {
         const existingDepts = await getAllFromStore<Department>('departments');
-        const existingDeptIds = new Set(existingDepts.map((item) => item.id));
-        const missingDepts = d.departments.filter((item: any) => !existingDeptIds.has(item.id));
-        if (missingDepts.length > 0) {
-          console.log(`[SeedData] Hydrating ${missingDepts.length} missing departments...`);
-          await putBatchToStore('departments', missingDepts);
+        for (const d of existingDepts) {
+          if (d.id) {
+            recordTombstone('departments', d.id);
+          }
         }
+      } catch (e) {}
+
+      await clearStore('departments');
+
+      // Unassign departments for all existing local users
+      try {
+        const existingUsers = await getAllFromStore<User>('users');
+        if (existingUsers.length > 0) {
+          const unassignedUsers = existingUsers.map((u) => ({
+            ...u,
+            department: '',
+            departments: [],
+          }));
+          await putBatchToStore('users', unassignedUsers);
+        }
+      } catch (e) {}
+
+      try {
+        const queue = await getAllFromStore<any>('syncQueue');
+        const filteredQueue = (queue || []).filter((q) => q.entityType !== 'departments');
+        await clearStore('syncQueue');
+        if (filteredQueue.length > 0) {
+          await putBatchToStore('syncQueue', filteredQueue);
+        }
+      } catch (e) {}
+
+      try {
+        fetch('/api/purge-all-departments', { method: 'POST' }).catch(() => {});
+      } catch (e) {}
+
+      if (isFirebaseConfigured() && firebaseClients.firestore) {
+        try {
+          const { collection, getDocs, writeBatch, doc } = await import('firebase/firestore');
+          const colRef = collection(firebaseClients.firestore, 'departments');
+          const snap = await getDocs(colRef);
+          if (!snap.empty) {
+            const batch = writeBatch(firebaseClients.firestore);
+            snap.docs.forEach((d) => {
+              batch.delete(doc(firebaseClients.firestore!, 'departments', d.id));
+            });
+            await batch.commit();
+          }
+        } catch (e) {}
       }
 
-      // 2. Users: Ensure all staff accounts exist
+      localStorage.setItem(purgeFlag, 'true');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('hitoms_departments_updated', { detail: { purgeAll: true } })
+        );
+        window.dispatchEvent(
+          new CustomEvent('hitoms_users_synced', { detail: { unassigned: true } })
+        );
+      }
+    }
+
+    // Purge old legacy mock assets if requested
+    const assetPurgeFlag = 'hitoms_old_mock_assets_purged_v2';
+    if (typeof localStorage !== 'undefined' && !localStorage.getItem(assetPurgeFlag)) {
+      try {
+        const oldMockTags = new Set([
+          'HIT-AST-00105',
+          'HIT-AST-00106',
+          'HIT-AST-00107',
+          'HIT-AST-00108',
+          'HIT-AST-70145',
+          'HIT-AST-23446',
+          'HIT-AST-44354',
+          'HIT-AST-50198',
+        ]);
+        const existingAssets = await getAllFromStore<Asset>('assets');
+        for (const a of existingAssets) {
+          if (oldMockTags.has(a.assetTag)) {
+            await deleteFromStore('assets', a.id);
+          }
+        }
+      } catch (e) {}
+      localStorage.setItem(assetPurgeFlag, 'true');
+    }
+
+    if (d) {
+      // 1. Departments auto-hydration is permanently removed so user-deleted departments stay deleted
+
+      // 2. Users: Ensure all staff accounts exist without assigned departments
       if (d.users?.length) {
         const existingUsers = await getAllFromStore<User>('users');
         const existingUserIds = new Set(existingUsers.map((item) => item.id));
-        const missingUsers = d.users.filter((item: any) => !existingUserIds.has(item.id));
+        const missingUsers = d.users
+          .filter((item: any) => !existingUserIds.has(item.id))
+          .map((item: any) => ({
+            ...item,
+            department: '',
+            departments: [],
+          }));
+
         if (missingUsers.length > 0) {
-          console.log(`[SeedData] Hydrating ${missingUsers.length} missing staff accounts...`);
+          console.log(`[SeedData] Hydrating ${missingUsers.length} missing staff accounts (unassigned)...`);
           await putBatchToStore('users', missingUsers);
         }
       }
@@ -340,7 +431,12 @@ export async function initializeSeedDataIfNeeded(): Promise<void> {
       if (kbCount === 0 && d.knowledgeBase?.length) {
         await putBatchToStore('knowledgeBase', d.knowledgeBase);
       }
-      if (memosCount === 0 && d.memos?.length) {
+      const currentSettings = await getAllFromStore<any>('settings');
+      const isMemosInited =
+        (typeof localStorage !== 'undefined' && localStorage.getItem('HITOMS_MEMOS_INITIALIZED') === 'true') ||
+        currentSettings.some((s) => s.id === 'memos_initialized');
+
+      if (memosCount === 0 && d.memos?.length && !isMemosInited) {
         await putBatchToStore('memos', d.memos);
       }
       if (settingsCount === 0 && d.settings?.length) {

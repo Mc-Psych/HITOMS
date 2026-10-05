@@ -304,6 +304,30 @@ const ROLE_ALIASES: Record<string, string> = {
 };
 
 const ASSET_TYPE_ALIASES: Record<string, string> = {
+  // System Unit
+  'system unit': 'System Unit',
+  systemunit: 'System Unit',
+  'system box': 'System Unit',
+  'sys unit': 'System Unit',
+  'cpu unit': 'System Unit',
+  'base unit': 'System Unit',
+  'pc unit': 'System Unit',
+
+  // Monitor / Display
+  monitor: 'Monitor',
+  display: 'Monitor',
+  screen: 'Monitor',
+  'computer monitor': 'Monitor',
+  'desktop monitor': 'Monitor',
+  'lcd monitor': 'Monitor',
+  'led monitor': 'Monitor',
+  tft: 'Monitor',
+  'computer screen': 'Monitor',
+  'pc screen': 'Monitor',
+  'flat panel': 'Monitor',
+  'monitor / display': 'Monitor',
+  'monitor/display': 'Monitor',
+
   // Desktop
   'desk computer': 'Desktop',
   'desktop pc': 'Desktop',
@@ -455,6 +479,30 @@ const ASSET_TYPE_ALIASES: Record<string, string> = {
   'bluetooth adapter': 'Bluetooth Adapter',
   'bt dongle': 'Bluetooth Adapter',
   'bluetooth usb': 'Bluetooth Adapter',
+
+  // Projector
+  projector: 'Projector',
+  'digital projector': 'Projector',
+  'video projector': 'Projector',
+
+  // IP Phone / VoIP Phone
+  'ip phone': 'IP Phone',
+  'voip phone': 'IP Phone',
+  voip: 'IP Phone',
+  'desk phone': 'IP Phone',
+  'office phone': 'IP Phone',
+
+  // Webcam
+  webcam: 'Webcam',
+  'web camera': 'Webcam',
+  'usb webcam': 'Webcam',
+
+  // CCTV Camera
+  cctv: 'CCTV Camera',
+  'cctv camera': 'CCTV Camera',
+  'security camera': 'CCTV Camera',
+  'surveillance camera': 'CCTV Camera',
+  'ip camera': 'CCTV Camera',
 };
 
 const CONDITION_ALIASES: Record<string, string> = {
@@ -653,23 +701,14 @@ export function matchOptionWithFallback<T extends string>(
   const normalizedLower = cleanRaw.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
   const normalizedKey = cleanRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  // 1. Direct Exact Match (case-insensitive, exact string)
+  // 1. Direct Exact Match (case-insensitive or whitespace/hyphen normalized)
   const exact = validOptions.find(
-    (opt) => opt.toLowerCase().trim() === cleanRaw.toLowerCase()
+    (opt) =>
+      opt.toLowerCase().trim() === cleanRaw.toLowerCase() ||
+      opt.toLowerCase().trim().replace(/[\s_-]+/g, ' ') === normalizedLower ||
+      opt.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedKey
   );
-  if (exact && exact === cleanRaw) {
-    return {
-      rawValue: cleanRaw,
-      matchedValue: exact,
-      isExactMatch: true,
-      issueType: null,
-      issueLabel: null,
-      issueDescription: null,
-      suggestedOptions: validOptions,
-    };
-  }
   if (exact) {
-    // If exact match case-insensitively, check if capitalization was identical
     return {
       rawValue: cleanRaw,
       matchedValue: exact,

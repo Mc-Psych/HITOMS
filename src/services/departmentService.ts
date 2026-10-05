@@ -3,37 +3,18 @@ import {
   getAllFromStore,
   getFromStore,
   putToStore,
+  putBatchToStore,
   deleteFromStore,
+  clearStore,
   generateUUID,
   getDeviceId,
+  recordTombstone,
 } from './localDatabaseService';
 import { auditService } from './auditService';
 import { syncService } from './syncService';
+import { firebaseClients, isFirebaseConfigured } from './firebaseConfig';
 
-export const INITIAL_STANDARD_DEPARTMENTS: string[] = [
-  'IT & Systems Administration',
-  'Accident & Emergency (A&E)',
-  'OPD (Outpatient Department)',
-  'Intensive Care Unit (ICU)',
-  'Main Surgical Theatre',
-  'Maternity & Neonatal',
-  "Children's Ward (Pediatrics)",
-  'Male Medical Ward',
-  'Female Medical Ward',
-  'Biomedical Engineering',
-  'Central Pharmacy',
-  'Diagnostic Laboratory',
-  'Radiology & Imaging',
-  'Hospital Administration & HR',
-  'Finance & Accounts',
-  'Procurement & Stores',
-  'Quality Assurance & Audit',
-  'Health Information Management (LHIMS / Records)',
-  'Morgue & Pathology',
-  'Dental Clinic',
-  'Eye Clinic (Ophthalmology)',
-  'Physiotherapy & Rehabilitation',
-];
+export const INITIAL_STANDARD_DEPARTMENTS: string[] = [];
 
 export function generateDepartmentCode(name: string): string {
   if (!name || typeof name !== 'string' || !name.trim()) return '';
@@ -112,10 +93,6 @@ class DepartmentService {
     depts.forEach((d) => {
       if (d.name && d.name.trim()) names.add(d.name.trim());
     });
-    // If empty or initial, include initial standards
-    if (names.size === 0) {
-      INITIAL_STANDARD_DEPARTMENTS.forEach((d) => names.add(d));
-    }
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }
 
@@ -238,6 +215,10 @@ class DepartmentService {
 
     await syncService.enqueueOperation('departments', newDept.id, 'CREATE', newDept);
 
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('hitoms_departments_purged_requested_v4');
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('hitoms_departments_updated', { detail: { department: newDept } })
@@ -263,6 +244,7 @@ class DepartmentService {
     const created: Department[] = [];
     const existing = await this.getDepartments();
     const existingCodes = new Set(existing.map((d) => (d.code || '').toUpperCase()));
+    const existingNames = new Set(existing.map((d) => (d.name || '').trim().toLowerCase()));
     const now = new Date().toISOString();
 
     for (const item of items) {
@@ -270,7 +252,8 @@ class DepartmentService {
       const codeClean = (item.code || '').trim().toUpperCase();
       const nameClean = (item.name || '').trim();
       if (!codeClean || !nameClean) continue;
-      if (existingCodes.has(codeClean)) continue;
+      const nameKey = nameClean.toLowerCase();
+      if (existingCodes.has(codeClean) || existingNames.has(nameKey)) continue;
 
       const locDesc = (item.locationDescription || '').trim();
       const bldg = (item.building || (locDesc ? locDesc : 'Main Hospital Complex')).trim();
@@ -297,6 +280,7 @@ class DepartmentService {
       await putToStore('departments', newDept);
       await syncService.enqueueOperation('departments', newDept.id, 'CREATE', newDept);
       existingCodes.add(codeClean);
+      existingNames.add(nameKey);
       created.push(newDept);
     }
 
@@ -307,6 +291,9 @@ class DepartmentService {
     });
 
     if (created.length > 0 && typeof window !== 'undefined') {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('hitoms_departments_purged_requested_v4');
+      }
       window.dispatchEvent(
         new CustomEvent('hitoms_departments_updated', { detail: { count: created.length } })
       );
@@ -354,7 +341,15 @@ class DepartmentService {
     const existing = await this.getDepartmentById(id);
     if (!existing) return;
 
+    recordTombstone('departments', id);
     await deleteFromStore('departments', id);
+
+    // Direct proactive Firestore deletion if online
+    if (isFirebaseConfigured() && firebaseClients.firestore) {
+      import('firebase/firestore').then(({ doc, deleteDoc }) => {
+        deleteDoc(doc(firebaseClients.firestore!, 'departments', id)).catch(() => {});
+      }).catch(() => {});
+    }
 
     await auditService.logAction('DELETE_DEPARTMENT', 'Departments', id, existing, {
       code: existing.code,
@@ -375,10 +370,51 @@ class DepartmentService {
     const existing = await this.getDepartments();
     const count = existing.length;
 
-    for (const dept of existing) {
-      await deleteFromStore('departments', dept.id);
-      await syncService.enqueueOperation('departments', dept.id, 'DELETE', { id: dept.id, name: dept.name });
+    // 1. Record tombstones for all existing departments so background sync never resurrects them
+    for (const d of existing) {
+      if (d.id) {
+        recordTombstone('departments', d.id);
+      }
     }
+
+    // 2. Clear local IndexedDB store
+    await clearStore('departments');
+
+    // 3. Clear any queued department operations
+    try {
+      const queue = await getAllFromStore<any>('syncQueue');
+      const filteredQueue = (queue || []).filter((q) => q.entityType !== 'departments');
+      await clearStore('syncQueue');
+      if (filteredQueue.length > 0) {
+        await putBatchToStore('syncQueue', filteredQueue);
+      }
+    } catch (e) {}
+
+    // 4. Proactively delete all department documents from Cloud Firestore
+    try {
+      if (isFirebaseConfigured() && firebaseClients.firestore) {
+        const { collection, getDocs, writeBatch, doc } = await import('firebase/firestore');
+        const colRef = collection(firebaseClients.firestore, 'departments');
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          const batch = writeBatch(firebaseClients.firestore);
+          snap.docs.forEach((d) => {
+            batch.delete(doc(firebaseClients.firestore!, 'departments', d.id));
+          });
+          await batch.commit();
+        }
+      }
+    } catch (e: any) {
+      console.warn('[DepartmentService] Firestore purge notice:', e?.message || e);
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('hitoms_departments_purged_requested_v4', 'true');
+    }
+
+    try {
+      fetch('/api/purge-all-departments', { method: 'POST' }).catch(() => {});
+    } catch (e) {}
 
     await auditService.logAction('DELETE_ALL_DEPARTMENTS', 'Departments', 'PURGE_ALL', null, {
       totalDeleted: count,

@@ -34,6 +34,7 @@ import {
 } from '../types';
 import { assetService } from '../services/assetService';
 import { authService } from '../services/authService';
+import { departmentService } from '../services/departmentService';
 
 interface SoftwareSubscriptionsTabProps {
   currentUser: UserType | null;
@@ -85,9 +86,10 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
   const [billingCycle, setBillingCycle] = useState<SubscriptionBillingCycle>('Annual');
   const [status, setStatus] = useState<SubscriptionStatus>('Active');
   const [autoRenew, setAutoRenew] = useState(true);
-  const [assignedDepartment, setAssignedDepartment] = useState('Hospital-Wide IT & Clinical');
+  const [assignedDepartment, setAssignedDepartment] = useState('');
   const [primaryAdminContact, setPrimaryAdminContact] = useState('');
   const [notes, setNotes] = useState('');
+  const [departmentsList, setDepartmentsList] = useState<string[]>([]);
 
   // Delete Confirmation state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -99,8 +101,12 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
   const loadSubscriptions = async () => {
     try {
       setLoading(true);
-      const data = await assetService.getSubscriptions();
+      const [data, depts] = await Promise.all([
+        assetService.getSubscriptions(),
+        departmentService.getStandardDepartmentNames().catch(() => []),
+      ]);
       setSubscriptions(data);
+      setDepartmentsList(depts || []);
     } catch (err) {
       console.error('Failed to load software subscriptions:', err);
     } finally {
@@ -939,13 +945,24 @@ export const SoftwareSubscriptionsTab: React.FC<SoftwareSubscriptionsTabProps> =
 
                 <div>
                   <label className="block text-slate-500 font-semibold mb-1">Assigned Department / Scope</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Pharmacy, Radiology, Hospital-Wide"
+                  <select
                     value={assignedDepartment}
                     onChange={(e) => setAssignedDepartment(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white"
-                  />
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">
+                      {departmentsList.length === 0 ? '-- No Departments Uploaded Yet --' : '-- Select Department / Scope --'}
+                    </option>
+                    <option value="Hospital-Wide IT & Clinical">Hospital-Wide IT & Clinical</option>
+                    {departmentsList.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                    {assignedDepartment && assignedDepartment !== 'Hospital-Wide IT & Clinical' && !departmentsList.includes(assignedDepartment) && (
+                      <option value={assignedDepartment}>{assignedDepartment}</option>
+                    )}
+                  </select>
                 </div>
               </div>
 

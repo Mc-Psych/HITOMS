@@ -24,6 +24,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   letterheadFooterText: 'ST. MARY THERESA CATHOLIC HOSPITAL — DEPARTMENT OF INFORMATION TECHNOLOGY',
   letterheadMode: 'DYNAMIC_HEADER',
   assetTagPrefix: 'AST-SMTCHIT-',
+  assetLabelHeader: 'St. Mary Theresa Catholic Hospital',
+  assetLabelFooter: 'PROPERTY OF SMTCH • DO NOT REMOVE',
   hospitalLanUrl: 'http://hitoms.local',
   contactEmail: 'send2smthit@gmail.com',
   contactPhone: '055 272 2289',

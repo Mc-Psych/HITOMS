@@ -175,8 +175,10 @@ export default function App() {
         );
         setQuickDept(defaultDept ? defaultDept.name : uniqueDepartments[0].name);
       }
+    } else {
+      setQuickDept('');
     }
-  }, [uniqueDepartments, quickDept, quickTicketOpen]);
+  }, [uniqueDepartments]);
 
   // Emergency state
   const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyBroadcastAlert[]>([]);
@@ -260,8 +262,6 @@ export default function App() {
           setCurrentUser(user);
           await refreshAllData();
           setInitialized(true);
-          // Snapshot current preview data to src/data/defaultSeedData.json for repository Git default
-          seedSnapshotService.triggerAutoSnapshot(2500);
         }
         // Bi-directional sync with Firestore so fresh users, assets or updates from other users are fetched
         syncService.runAutomaticSync().catch((e) => console.warn('[App] Boot sync error:', e?.message));
@@ -282,9 +282,21 @@ export default function App() {
     );
 
     const unsubSync = syncService.subscribe((stats) => {
-      setSyncStats(stats);
-      // Auto-refresh queue count when sync runs
-      syncService.getPendingQueue().then(setSyncQueue);
+      setSyncStats((prev) => {
+        if (
+          prev.connectionState === stats.connectionState &&
+          prev.pendingCount === stats.pendingCount &&
+          prev.failedCount === stats.failedCount &&
+          prev.conflictsCount === stats.conflictsCount &&
+          prev.simulatedOffline === stats.simulatedOffline
+        ) {
+          return prev;
+        }
+        return stats;
+      });
+      syncService.getPendingQueue().then((q) => {
+        setSyncQueue((prev) => (prev.length === q.length ? prev : q));
+      });
     });
 
     // Sync initial favicon update on startup from cached localStorage settings
@@ -308,13 +320,21 @@ export default function App() {
     };
     window.addEventListener('hitoms_settings_updated', handleSettingsUpdated);
 
+    let refreshDebounce: any = null;
+    const triggerDebouncedRefresh = () => {
+      if (refreshDebounce) clearTimeout(refreshDebounce);
+      refreshDebounce = setTimeout(() => {
+        refreshAllData();
+      }, 300);
+    };
+
     const handleUsersSynced = () => {
-      refreshAllData();
+      triggerDebouncedRefresh();
     };
     window.addEventListener('hitoms_users_synced', handleUsersSynced);
 
     const handleDataSynced = () => {
-      refreshAllData();
+      triggerDebouncedRefresh();
     };
     window.addEventListener('hitoms_data_synced', handleDataSynced);
 
@@ -324,13 +344,22 @@ export default function App() {
           setHospitalSystems(sys);
         }
       });
-      refreshAllData();
+      triggerDebouncedRefresh();
     };
     window.addEventListener('hitoms_systems_updated', handleSystemsUpdated);
 
+    const handleDepartmentsUpdated = () => {
+      departmentService.getDepartments().then((depts) => {
+        setDepartments(depts || []);
+      });
+    };
+    window.addEventListener('hitoms_departments_updated', handleDepartmentsUpdated);
+
     // Fast multi-tab & cross-user emergency broadcast listener
     const handleEmergencyUpdated = () => {
-      emergencyService.getActiveBroadcasts().then(setEmergencyAlerts);
+      emergencyService.getActiveBroadcasts().then((active) => {
+        setEmergencyAlerts(active || []);
+      });
     };
     window.addEventListener('hitoms_emergency_updated', handleEmergencyUpdated);
 
@@ -339,20 +368,30 @@ export default function App() {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         bc = new BroadcastChannel('hitoms_emergency_bus');
         bc.onmessage = () => {
-          emergencyService.getActiveBroadcasts().then(setEmergencyAlerts);
+          emergencyService.getActiveBroadcasts().then((active) => {
+            setEmergencyAlerts(active || []);
+          });
         };
       }
     } catch (e) {}
 
-    // 4-second background polling for hospital-wide emergency broadcasts across devices
+    // Background polling for hospital-wide emergency broadcasts across devices (stabilized)
     const emergencyInterval = setInterval(() => {
       emergencyService.getActiveBroadcasts().then((active) => {
-        setEmergencyAlerts(active || []);
+        setEmergencyAlerts((prev) => {
+          const prevAlerts = prev || [];
+          const nextAlerts = active || [];
+          if (prevAlerts.length !== nextAlerts.length) return nextAlerts;
+          const prevKey = prevAlerts.map((a) => `${a.id}_${a.isActive}`).join(',');
+          const nextKey = nextAlerts.map((a) => `${a.id}_${a.isActive}`).join(',');
+          return prevKey === nextKey ? prev : nextAlerts;
+        });
       }).catch(() => {});
-    }, 4000);
+    }, 6000);
 
     return () => {
       isMounted = false;
+      if (refreshDebounce) clearTimeout(refreshDebounce);
       clearInterval(emergencyInterval);
       if (bc) bc.close();
       ticketSoundService.stopRecurringBellMonitor();
@@ -361,6 +400,7 @@ export default function App() {
       window.removeEventListener('hitoms_users_synced', handleUsersSynced);
       window.removeEventListener('hitoms_data_synced', handleDataSynced);
       window.removeEventListener('hitoms_systems_updated', handleSystemsUpdated);
+      window.removeEventListener('hitoms_departments_updated', handleDepartmentsUpdated);
       window.removeEventListener('hitoms_emergency_updated', handleEmergencyUpdated);
     };
   }, [refreshAllData]);
@@ -846,6 +886,7 @@ export default function App() {
             {currentView === 'systems' && (
               <HospitalSystemsView
                 systems={hospitalSystems}
+                allUsers={allUsers}
                 currentUser={currentUser}
                 systemSettings={systemSettings}
                 onRefresh={refreshAllData}

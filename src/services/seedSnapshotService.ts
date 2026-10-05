@@ -121,17 +121,14 @@ class SeedSnapshotService {
   }
 
   /**
-   * Triggers a debounced snapshot to continuously keep defaultSeedData.json synchronized
+   * Automatic background seed snapshot writing is disabled to eliminate Vite hot-reload and app flickering
    */
-  public triggerAutoSnapshot(delayMs: number = 2000) {
+  public triggerAutoSnapshot(_delayMs: number = 2000) {
     if (this.autoSaveTimer) {
       clearTimeout(this.autoSaveTimer);
+      this.autoSaveTimer = null;
     }
-    this.autoSaveTimer = setTimeout(() => {
-      this.snapshotCurrentStateAsDefaultSeed().catch((e) =>
-        console.warn('[SeedSnapshotService] Auto snapshot error:', e)
-      );
-    }, delayMs);
+    // No-op: Only manual seed snapshots requested by Super Admin are executed
   }
 
   /**

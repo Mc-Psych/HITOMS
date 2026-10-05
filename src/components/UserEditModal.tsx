@@ -86,9 +86,9 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [phone, setPhone] = useState('');
 
   // Department State with Checkboxes
-  const [standardDepartments, setStandardDepartments] = useState<string[]>(INITIAL_STANDARD_DEPARTMENTS);
+  const [standardDepartments, setStandardDepartments] = useState<string[]>([]);
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
-  const [primaryDepartment, setPrimaryDepartment] = useState<string>('OPD (Outpatient Department)');
+  const [primaryDepartment, setPrimaryDepartment] = useState<string>('');
   const [deptSearchQuery, setDeptSearchQuery] = useState('');
   const [newCustomDeptInput, setNewCustomDeptInput] = useState('');
   const [isAddingDept, setIsAddingDept] = useState(false);
@@ -122,9 +122,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const loadStandardDepartments = async () => {
     try {
       const names = await departmentService.getStandardDepartmentNames();
-      if (names && names.length > 0) {
-        setStandardDepartments(names);
-      }
+      setStandardDepartments(names || []);
     } catch (e) {
       console.warn('[UserEditModal] Error loading departments:', e);
     }
@@ -241,7 +239,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
         : (targetUser.department ? [targetUser.department] : []);
       
       setSelectedDepartments(userDepts);
-      setPrimaryDepartment(targetUser.department || userDepts[0] || 'OPD (Outpatient Department)');
+      setPrimaryDepartment(targetUser.department || userDepts[0] || '');
 
       setJobTitle(targetUser.jobTitle || '');
       setRole(targetUser.role || 'STAFF_USER');
@@ -263,8 +261,8 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
       setUsername('');
       setEmail('');
       setPhone('+233 24 ');
-      setSelectedDepartments(['OPD (Outpatient Department)']);
-      setPrimaryDepartment('OPD (Outpatient Department)');
+      setSelectedDepartments([]);
+      setPrimaryDepartment('');
       setJobTitle('');
       setRole('STAFF_USER');
       setSpecialties([]);
@@ -332,7 +330,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     setPrimaryDepartment('');
   };
 
-  // Add a new department directly (which becomes a STANDARD_DEPARTMENT)
+  // Add a new department directly to the selected list for this user
   const handleAddNewDepartment = async () => {
     const clean = newCustomDeptInput.trim();
     if (!clean) return;
@@ -340,8 +338,6 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     try {
       setIsAddingDept(true);
       setError(null);
-      // Ensure the department is saved to the store and dispatched as a standard department
-      await departmentService.ensureDepartmentExists(clean, currentUser);
 
       // Update standard departments in state
       setStandardDepartments((prev) => {

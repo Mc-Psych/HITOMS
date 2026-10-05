@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { type Asset } from '../types';
+import { settingsService } from '../services/settingsService';
 import {
   generateAssetQrMetadataPayload,
   renderAssetQrJpegDataUrl,
@@ -39,7 +40,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
   onClose,
   asset,
   selectedAssets,
-  hospitalName = 'GENERAL HOSPITAL IT UNIT',
+  hospitalName,
 }) => {
   const [labelSize, setLabelSize] = useState<LabelSizePreset>('standard');
   const [includeHospitalHeader, setIncludeHospitalHeader] = useState(true);
@@ -72,18 +73,25 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
 
   // Reset/populate custom edit fields when active asset or hospitalName changes
   useEffect(() => {
+    const sysSettings = settingsService.getSettingsSync();
+    const defaultHeader =
+      sysSettings?.assetLabelHeader || sysSettings?.hospitalName || hospitalName || 'St. Mary Theresa Catholic Hospital';
+    const defaultFooter =
+      sysSettings?.assetLabelFooter || 'PROPERTY OF SMTCH • DO NOT REMOVE';
+
+    setCustomHospitalHeader(defaultHeader);
+    setCustomFooterNotice(defaultFooter);
+    setCustomBadgeText('IT ASSET');
+
     if (asset) {
-      setCustomHospitalHeader(hospitalName || 'SMTCH ITSUPPORT UNIT');
-      setCustomBadgeText('IT ASSET');
       setCustomAssetTag(asset.assetTag || '');
       setCustomModelText(`${asset.manufacturer || ''} ${asset.model || ''}`.trim() || asset.name || '');
       setCustomAssetType(asset.assetType || '');
       setCustomSerialNumber(asset.serialNumber || '');
       setCustomDeptLocation([asset.department, asset.location].filter(Boolean).join(' • '));
       setCustomCustodian(asset.assignedUser || '');
-      setCustomFooterNotice('PROPERTY OF SMTCH • DO NOT REMOVE');
     }
-  }, [asset, hospitalName]);
+  }, [asset, hospitalName, isOpen]);
 
   const getRenderOptions = () => ({
     hospitalName,
@@ -222,7 +230,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
   // Single label download as PNG
   const handleDownloadPNG = async (targetAsset: Asset) => {
     try {
-      const payload = generateAssetQrMetadataPayload(targetAsset, hospitalName);
+      const payload = generateAssetQrMetadataPayload(targetAsset, getRenderOptions());
       const dataUrl = await QRCode.toDataURL(payload, {
         width: 600,
         margin: 2,
@@ -508,7 +516,7 @@ export const AssetQRLabelModal: React.FC<AssetQRLabelModalProps> = ({
                       type="text"
                       value={customHospitalHeader}
                       onChange={(e) => setCustomHospitalHeader(e.target.value)}
-                      placeholder="e.g. REGIONAL HOSPITAL IT UNIT"
+                      placeholder="e.g. SMTCH ITSUPPORT UNIT"
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-sky-500"
                     />
                   </div>
