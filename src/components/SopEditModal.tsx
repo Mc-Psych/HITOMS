@@ -140,10 +140,10 @@ export const SopEditModal: React.FC<SopEditModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                {isEditing ? `Edit SOP: ${article?.articleId || ''}` : 'Add New Hospital IT SOP'}
+                {isEditing ? `Edit Guide: ${article?.articleId || ''}` : 'Add Basic & Troubleshooting Article'}
               </h2>
               <p className="text-xs text-slate-500">
-                Modify standard operating protocols for clinical staff and IT engineers.
+                Modify basic troubleshooting protocols for clinical staff and IT engineers.
               </p>
             </div>
           </div>

@@ -322,10 +322,10 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({ currentUse
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-sky-600" />
-            <span>Hospital IT Standard Operating Procedures (SOP)</span>
+            <span>Basic & Troubleshooting Procedures</span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Offline knowledge base and troubleshooting guidelines for clinical staff and technicians.
+            Offline knowledge base and basic troubleshooting procedures for clinical staff and technicians.
           </p>
         </div>
 
@@ -335,7 +335,7 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({ currentUse
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search SOPs... (Press /)"
+              placeholder="Search Basic & Troubleshooting... (Press /)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-sky-500 text-slate-900 dark:text-white"
@@ -363,7 +363,7 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({ currentUse
               className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-xs shrink-0"
             >
               <Plus className="w-4 h-4" />
-              <span>Add SOP</span>
+              <span>Add Troubleshooting Guide</span>
             </button>
           )}
         </div>

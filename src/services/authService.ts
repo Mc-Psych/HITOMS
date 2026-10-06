@@ -213,7 +213,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, { title: string; description: strin
   },
   HOSPITAL_MANAGEMENT: {
     title: 'Hospital Management / Medical Director',
-    description: 'Executive clinical oversight. Reviews system availability, monitors SLA performance, accesses executive summaries, and inspects incident root cause reports (read-only telemetry).',
+    description: 'Executive clinical oversight. Views hospital system availability and performance status as a read-only viewer (just like frontline staff), monitors SLA performance, accesses executive summaries, and inspects incident root cause reports. Cannot modify system configurations or operational status.',
     badgeColor: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-300',
   },
   DEPARTMENT_HEAD: {
@@ -223,7 +223,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, { title: string; description: strin
   },
   STAFF_USER: {
     title: 'Clinical & General Staff (Nurses, Doctors, Clerks)',
-    description: 'End-user clinical personnel. Submits issue tickets, views troubleshooting SOP guides, and adds progress comments on own tickets. Cannot alter ticket status or resolve issues.',
+    description: 'End-user clinical personnel. Views hospital system availability, submits issue tickets, views basic & troubleshooting guides, and adds progress comments on own tickets. Cannot alter ticket status or modify system configurations.',
     badgeColor: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300',
   },
   PROCUREMENT_OFFICER: {
@@ -503,11 +503,20 @@ class AuthService {
   public isSuperAdminOrIT(user?: User | null): boolean {
     const target = user || this.currentUser;
     if (!target) return false;
+    // Hospital management, clinical staff, auditors, dept heads, and procurement are NOT IT system administrators
+    if (
+      target.role === 'HOSPITAL_MANAGEMENT' ||
+      target.role === 'STAFF_USER' ||
+      target.role === 'AUDITOR' ||
+      target.role === 'DEPARTMENT_HEAD' ||
+      target.role === 'PROCUREMENT_OFFICER'
+    ) {
+      return false;
+    }
     return (
       target.role === 'SUPER_ADMIN' ||
       target.role === 'IT_ADMIN' ||
-      target.role === 'IT_OFFICER' ||
-      (target.department ? target.department.toLowerCase().includes('it') || target.department.toLowerCase().includes('information technology') : false)
+      target.role === 'IT_OFFICER'
     );
   }
 

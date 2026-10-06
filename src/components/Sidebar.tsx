@@ -137,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'knowledge',
-      label: 'Standard Operating Procedures',
+      label: 'Basic Troubleshooting Tips',
       icon: BookOpen,
     },
     {
