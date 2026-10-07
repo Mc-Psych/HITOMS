@@ -1106,9 +1106,9 @@ export const StaffBulkUploadModal: React.FC<StaffBulkUploadModalProps> = ({
                                 }`}
                                 title={isRoleFlagged ? rec.flaggedIssues.find((f) => f.includes('Role')) : undefined}
                               >
-                                {VALID_ROLES.map((r) => (
+                                {authService.getSelectableRoles(currentUser, null, rec.role).map((r) => (
                                   <option key={r} value={r}>
-                                    {r}
+                                    {authService.getRoleTitle(r)} ({r})
                                   </option>
                                 ))}
                               </select>

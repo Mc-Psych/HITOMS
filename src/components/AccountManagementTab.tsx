@@ -46,8 +46,10 @@ import {
 } from '../services/authService';
 import { syncService } from '../services/syncService';
 import { seedSnapshotService } from '../services/seedSnapshotService';
+import { settingsService } from '../services/settingsService';
 import { StaffBulkUploadModal, downloadStaffTemplate } from './StaffBulkUploadModal';
 import { UserEditModal } from './UserEditModal';
+import { RoleCustomizationModal } from './RoleCustomizationModal';
 
 interface AccountManagementTabProps {
   currentUser: User | null;
@@ -172,6 +174,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
 
   // Sub-tab: Staff Directory vs Role Permission Matrix
   const [accountSubTab, setAccountSubTab] = useState<'DIRECTORY' | 'PERMISSION_MATRIX'>('DIRECTORY');
+  const [isRoleCustomizationModalOpen, setIsRoleCustomizationModalOpen] = useState(false);
 
   // Role Permission Matrix State
   const [matrixViewMode, setMatrixViewMode] = useState<'GRID' | 'INSPECTOR'>('GRID');
@@ -541,6 +544,16 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                 <Database className="w-3.5 h-3.5" />
                 <span>Reset Cache</span>
               </button>
+
+              <button
+                onClick={() => setIsRoleCustomizationModalOpen(true)}
+                disabled={isLoading}
+                className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-indigo-200 dark:border-indigo-900 disabled:opacity-50"
+                title="Rename role display titles (front-end) and freeze roles for IT Admins"
+              >
+                <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Manage & Freeze Roles</span>
+              </button>
             </>
           )}
 
@@ -711,8 +724,8 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                         return (
                           <th key={role} className="p-2.5 font-bold text-center min-w-[110px] max-w-[130px] border-l border-slate-200 dark:border-slate-800">
                             <div className="space-y-1">
-                              <div className="truncate font-black text-[11px] text-slate-900 dark:text-white" title={ROLE_DESCRIPTIONS[role].title}>
-                                {role}
+                              <div className="truncate font-black text-[11px] text-slate-900 dark:text-white" title={authService.getRoleTitle(role)}>
+                                {authService.getRoleTitle(role)}
                               </div>
                               <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 font-medium">
                                 {count} / {PERMISSION_DEFINITIONS.length} ({pct}%)
@@ -804,7 +817,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-black text-sm text-slate-900 dark:text-white">
-                      {ROLE_DESCRIPTIONS[selectedRoleForMatrix].title}
+                      {authService.getRoleTitle(selectedRoleForMatrix)}
                     </span>
                     <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
                       {rolePermissions.length} / {PERMISSION_DEFINITIONS.length} Active ({Math.round((rolePermissions.length / PERMISSION_DEFINITIONS.length) * 100)}%)
@@ -823,7 +836,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                   >
                     {availableRoles.map((r) => (
                       <option key={r} value={r}>
-                        Inspect Role: {ROLE_DESCRIPTIONS[r].title} ({r})
+                        Inspect Role: {authService.getRoleTitle(r)} ({r})
                       </option>
                     ))}
                   </select>
@@ -842,7 +855,7 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
                         .filter((r) => r !== selectedRoleForMatrix)
                         .map((r) => (
                           <option key={r} value={r}>
-                            Copy from {ROLE_DESCRIPTIONS[r].title}
+                            Copy from {authService.getRoleTitle(r)}
                           </option>
                         ))}
                     </select>
@@ -1586,6 +1599,18 @@ export const AccountManagementTab: React.FC<AccountManagementTabProps> = ({
           setEditingUser(null);
           onRefresh();
           showNotification('success', 'Staff profile updated successfully.');
+        }}
+      />
+
+      {/* MODAL: Super Admin Role Management & Customization */}
+      <RoleCustomizationModal
+        isOpen={isRoleCustomizationModalOpen}
+        onClose={() => setIsRoleCustomizationModalOpen(false)}
+        currentUser={currentUser}
+        systemSettings={settingsService.getSettingsSync()}
+        onSaved={() => {
+          onRefresh();
+          showNotification('success', 'Role display titles and frozen roles list updated successfully.');
         }}
       />
     </div>

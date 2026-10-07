@@ -72,7 +72,9 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
 }) => {
   const targetUser = userToEdit !== undefined ? userToEdit : (user ?? null);
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const isITAdmin = currentUser?.role === 'IT_ADMIN';
   const isEditing = Boolean(targetUser);
+  const canEditRole = isSuperAdmin || (isITAdmin && targetUser?.role !== 'SUPER_ADMIN');
 
   // Safe callback helper
   const notifyUserSaved = () => {
@@ -878,16 +880,19 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                   Assigned System Role *
                 </label>
                 <select
-                  disabled={!isSuperAdmin}
+                  disabled={!canEditRole}
                   value={role}
                   onChange={(e) => setRole(e.target.value as Role)}
                   className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:opacity-75"
                 >
-                  {(isSuperAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== 'SUPER_ADMIN')).map((r) => (
-                    <option key={r} value={r}>
-                      {ROLE_DESCRIPTIONS[r].title} ({r})
-                    </option>
-                  ))}
+                  {authService.getSelectableRoles(currentUser, null, userToEdit?.role).map((r) => {
+                    const isFrozen = authService.isRoleFrozen(r);
+                    return (
+                      <option key={r} value={r}>
+                        {authService.getRoleTitle(r)} ({r}){isFrozen ? ' [FROZEN]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
                 <p className="text-[11px] text-slate-500 mt-1 leading-tight">
                   {ROLE_DESCRIPTIONS[role]?.description}

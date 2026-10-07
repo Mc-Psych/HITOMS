@@ -16,6 +16,7 @@ import {
 import { auditService } from './auditService';
 import { syncLatestStaffAccounts } from './seedData';
 import { departmentService } from './departmentService';
+import { settingsService } from './settingsService';
 
 // Extract surname from full name (e.g. "Dr. Sarah Mensah" -> "Mensah")
 export function extractSurname(fullName: string): string {
@@ -498,6 +499,58 @@ class AuthService {
 
     const effective = this.getEffectivePermissions(target);
     return effective.includes(permission);
+  }
+
+  public getRoleTitle(role: Role, settings?: SystemSettings | null): string {
+    const currentSettings = settings || settingsService.getSettingsSync();
+    const custom = currentSettings?.customRoleTitles?.[role];
+    if (custom && custom.trim()) {
+      return custom.trim();
+    }
+    return ROLE_DESCRIPTIONS[role]?.title || role;
+  }
+
+  public isRoleFrozen(role: Role, settings?: SystemSettings | null): boolean {
+    const currentSettings = settings || settingsService.getSettingsSync();
+    const frozenList = currentSettings?.frozenRoles || [];
+    return frozenList.includes(role);
+  }
+
+  public getSelectableRoles(
+    actor?: User | null,
+    settings?: SystemSettings | null,
+    includeRoleIfSelected?: Role
+  ): Role[] {
+    const targetActor = actor || this.currentUser;
+    const isSuperAdmin = targetActor?.role === 'SUPER_ADMIN';
+    const currentSettings = settings || settingsService.getSettingsSync();
+
+    const allRolesList: Role[] = [
+      'SUPER_ADMIN',
+      'IT_ADMIN',
+      'IT_OFFICER',
+      'HOSPITAL_MANAGEMENT',
+      'DEPARTMENT_HEAD',
+      'STAFF_USER',
+      'PROCUREMENT_OFFICER',
+      'AUDITOR',
+    ];
+
+    return allRolesList.filter((r) => {
+      // Non-Super Admins cannot grant SUPER_ADMIN role
+      if (!isSuperAdmin && r === 'SUPER_ADMIN') return false;
+
+      // Check if role is frozen by Super Admin
+      const frozen = this.isRoleFrozen(r, currentSettings);
+      if (frozen) {
+        // If editing a user who ALREADY has this role, keep it in the dropdown
+        if (includeRoleIfSelected === r) return true;
+        // Non-Super Admins (e.g. IT Admins adding users) will NOT see frozen roles
+        if (!isSuperAdmin) return false;
+      }
+
+      return true;
+    });
   }
 
   public isSuperAdminOrIT(user?: User | null): boolean {

@@ -393,10 +393,10 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({ currentUse
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300/50'
               }`}
-              title="Filter only Hospital IT Standard Operating Procedures"
+              title="Filter only Basic & Troubleshooting Guides"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>📋 SOP Protocols ({sopCount})</span>
+              <span>📋 Basic & Troubleshooting ({sopCount})</span>
             </button>
             {categories.map((c) => (
               <button

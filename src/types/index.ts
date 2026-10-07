@@ -834,6 +834,8 @@ export interface SystemSettings {
   assetLabelFooter?: string; // Configurable physical QR asset label footer warning (default: "PROPERTY OF SMTCH • DO NOT REMOVE")
   rolePermissionsOverrides?: Record<string, string[]>;
   userPermissionsOverrides?: Record<string, { granted?: string[]; revoked?: string[] }>;
+  customRoleTitles?: Partial<Record<Role, string>>; // Frontend role display title customization by Super Admin (e.g., "PROCUREMENT OFFICER")
+  frozenRoles?: Role[]; // Roles frozen/disabled by Super Admin that will not appear in the role selector when IT Admins add users
 }
 
 export interface AiTriageResult {
